@@ -1,0 +1,62 @@
+# Writes through a path, which take an element out of its slot.
+
+task loud(name: text, value: int) -> int
+    print name
+    return value
+
+task quiet_list(value: int) -> list[int]
+    print "list"
+    return [value]
+
+# The value may read the slot that the write takes.
+var g = [[1, 2], [3]]
+g[0].push(g[0][0])
+g[0][0] += g[0][1]
+g[0][g[0][1] - 2] = g[1][0]
+print "{g[0][0]} {g[0][1]} {g[0][2]} {g[0].len()}"
+g[0].swap(g[1][0] - 3, 1)
+print g[0][0]
+
+# A shared element or container stays as it was.
+var row = g[1]
+g[1].push(4)
+print "{row.len()} {g[1].len()}"
+var before = g
+g[1].push(5)
+g[0][0] = 100
+print "{before[1].len()} {g[1].len()} {before[0][0]} {g[0][0]}"
+
+# Three levels, with text, through a map.
+var deep = {"a": [["x"]]}
+deep["a"][0].push(deep["a"][0][0])
+deep["a"][0][0] = "y"
+print "{deep["a"][0][0]} {deep["a"][0][1]} {deep["a"][0].len()}"
+var groups: map[text, list[int]] = {"odd": [], "even": []}
+for i in 0..20000
+    let group = if i % 2 == 0 then "even" else "odd"
+    groups[group].push(i)
+print groups["odd"].len()
+
+# Sets inside lists.
+var sets = [set([1])]
+sets[0].add(2)
+sets[0].remove(1)
+print sets[0].len()
+
+# Each path index runs once, in page order.
+var pair = [[0, 0], [0, 0]]
+pair[loud("first", 1)][loud("second", 0)] = loud("third", 7)
+pair[loud("again", 1)][loud("more", 0)] += loud("last", 1)
+print pair[1][0]
+
+# `in` runs in page order.
+print loud("left", 1) in quiet_list(1)
+var tags = set([1])
+print loud("key", 1) in tags
+
+# A loop lets go of its list, and of its value at `break`.
+var xs = [1, 2, 3]
+for x in xs
+    break
+xs[0] = 9
+print xs[0]

@@ -43,6 +43,17 @@ Add new entries at the end of the list. To reverse a decision, add a new entry t
 | 35 | 2026-11-05 | A text has no single index and no character type. Iteration gives one-character `text`, and `x[i..i + 1]` reads one character | One way to do it. `int` indexing on text would look O(1) and be O(n). Adding a character type or `x[i]` later breaks nothing. Judgment call, no source read. The M3 agent trial tests whether agents reach for `x[0]`, and E0303 points to the slice. |
 | 36 | 2026-11-05 | A character is one code point. Text slices use character positions, and a bad range traps | `docs/language.md` already counts characters for `.len()`. Grapheme rules need Unicode tables in the runtime, and can arrive as a library. A trap matches list indexing and makes a bug visible, where clamping hides it. Judgment call, no source read. |
 | 37 | 2026-11-05 | `.bytes()` waits for `list`, since its result is `list[byte]` | A stand-in type would be a breaking change once `list` arrives. Scope moved inside M3. |
+| 38 | 2026-11-05 | Lists, maps, and sets start with a small built-in set of tasks. Anything needing `T?`, lambdas, or derived traits moves to that roadmap item | A stand-in for `.get` would be a breaking change once `T?` arrives, the reason in decision 37. The prelude moves to Lucid once generics exist. Scope moved inside M3. Judgment call. |
+| 39 | 2026-11-05 | `key in m` is the membership test, and `for` over a map gives keys. There is no `.has` | The grammar already has `in`, and rule 1 of `agents.md` allows one way. Python uses both forms, so agents have strong priors. This settles the open question on `T?` in a map: `.get` flattens, and `in` tells the cases apart. Judgment call. |
+| 40 | 2026-11-05 | A map uses the compact dict layout, hashed with SipHash through `RandomState` | Insertion order is the spec, and the layout gives it with one allocation. Python moved to SipHash to stop hash flooding (PEP 456), and random keys cannot change the output because order ignores the hash. M4 may change the hash if the benchmarks ask for it. Evidence is in `research.md`. |
+| 41 | 2026-11-05 | A list or map write is a statement that hands the local's count to the runtime, which copies only if the value is shared | A write in an expression could free an element that the same statement still borrows, which breaks a guarantee in `security.md`. |
+| 42 | 2026-11-05 | Every collection slot is 8 bytes for now | One code path until monomorphization exists. `list[byte]` pays 8x memory. M4 measures it. |
+| 43 | 2026-11-05 | `byte` arrives with no literals or arithmetic, until sized numbers | `.bytes()` needs a real type, per decision 37, and the rest of `byte` has a roadmap item. |
+| 44 | 2026-11-05 | A key is `int`, `bool`, `byte`, or `text`. `float` never qualifies, and collections wait for `Hash`. `in` on a list takes the same types | NaN does not equal itself, so a `float` key could never be found again. Judgment call. |
+| 45 | 2026-11-05 | A negative list index traps, a missing map key traps on read, and `.remove` of a missing key does nothing | `language.md` already traps out of bounds, and Python's negative index hides off-by-one bugs. After `.remove` the key is gone either way, so there is no bug to report. Judgment call, and the M3 agent trial tests whether agents reach for `x[-1]`. |
+| 46 | 2026-11-05 | `x[i] = f()` runs the index first, then the value, and each index in a path runs once | Decision 26 keeps evaluation in the order on the page. Python runs the value first, so agents may expect that. Judgment call. |
+| 47 | 2026-11-05 | An empty `[]` or `{}` with no type from its context is E0314. Only earlier siblings give a type, so `[[], [1]]` is an error | Inference from later uses would break local reasoning, and types flow one way through the checker. Judgment call, and the M3 agent trial tests the surprise. |
+| 48 | 2026-11-05 | A write through a path takes the element out of its slot, which holds null until the write ends | Review measured `g[k].push(v)` as quadratic, since the slot and a hidden local both held a count. Grouping into a map of lists is too common to wait for M4. Every index and value is read first, so no safe code sees the null. |
 
 ## Open questions
 
@@ -51,7 +62,6 @@ Decide each one by the milestone shown.
 | Question | Default if undecided | Decide by |
 | --- | --- | --- |
 | How are generic arguments that are not expressions written? `f[int](x)` parses as an index, but `f[int?](x)` is a syntax error. | Parse index contents as a type when an expression fails. | M3 |
-| Is `T?` inside a map a problem? `map[text, int?].get` flattens to `int?`, which loses "key missing" versus "value none". | Accept, and offer `.has(key)`. | M3 |
 | Should `change` receivers be marked at dot calls? | No marker, and require `var`. | M3 |
 | Can a task read a top-level `let` that is not a literal? It needs a defined initialization order. | No: keep decision 27. | M5 |
 | Add an LLVM backend for release builds? | Only if benchmarks demand it. | M4 |

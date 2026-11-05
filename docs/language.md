@@ -64,6 +64,8 @@ Arithmetic and comparison need one type on both sides. `==` and `!=` also work o
 
 A number literal must fit its type, and a `float` literal that is not zero must not round to zero. A `-` directly before a number joins the literal, unless a call, index, or field follows the number. So `-9223372036854775808` is the lowest `int`, and `-1.5.to_int()` negates the result of the call.
 
+A `byte` compares with `==`, `<`, and the like, prints as a number, and converts with `.to_int()`. For now `.bytes()` is the only source of one, and arithmetic on it reports E0901 until sized numbers arrive.
+
 `print` takes one value. A finite `float` prints as a valid literal, with the fewest digits that read back as the same value, such as `3.0`, `0.1`, `1000.0`, or `1.0e21`. The others print as `inf`, `-inf`, and `NaN`. A `none` prints as `none`.
 
 ## Text
@@ -100,7 +102,7 @@ for letter in word   # h, then é, and so on
 
 A slice scans and copies, so its cost grows with the length of `x`. A `for` is linear in total, and is the better way to visit every character.
 
-`.bytes()` gives raw bytes as a `list[byte]`. It is planned, and arrives with `list`.
+`x.bytes()` gives the UTF-8 bytes as a `list[byte]`.
 
 ## Collections
 
@@ -109,8 +111,40 @@ let primes = [2, 3, 5]
 let ages = {"Ada": 36, "Linus": 21}
 let tags = set(["new", "sale"])
 let first = primes[0]        # traps when out of bounds
-let maybe = primes.get(9)    # int?
+let age = ages["Ada"]        # traps when the key is missing
 ```
+
+Lists, maps, and sets are values. `var b = a` then changing `b` never affects `a`.
+
+A list literal needs one element type. An empty `[]` or `{}` takes its type from where it is used: an annotation, a parameter, a return type, the target of an assignment, or an earlier element or `then` branch next to it. So `[[1], []]` works, and `[[], [1]]` is error E0314, as is any empty literal with no such type. An empty set is `set([])`, since `{}` is a map.
+
+```lucid
+var names: list[text] = []
+names.push("Ada")            # add at the end
+names[0] = "Grace"           # traps when out of bounds
+names.swap(0, 0)             # traps when out of bounds
+
+var counts = {"a": 1}
+counts["b"] = 2              # add or replace
+counts["a"] += 1             # traps when the key is missing
+counts.remove("b")           # does nothing when the key is missing
+
+var seen = set([1, 2, 2])    # repeats are dropped
+seen.add(3)
+seen.remove(1)
+```
+
+An index is an `int` from 0, and a negative index traps. A map or set has `int`, `bool`, `byte`, or `text` keys. A `float` cannot be a key, because NaN does not equal itself.
+
+All three have `.len()` and `.is_empty()`. `x in items` and `x not in items` test a list, or the keys of a map or set. A list test is linear, and works for the same types as keys.
+
+A map or set keeps insertion order. Replacing a value keeps its key's place, and a key that is removed and added again goes last. In a map literal, a repeated key replaces the value before it, and keeps its place.
+
+`for` visits a list's elements, a set's values, or a map's keys. It keeps the value it started with, so changing the variable in the body does not affect the loop. `for change` over a list is planned with parameter modes, and it does not work on a map or set.
+
+`push`, `swap`, `add`, and `remove` change their receiver and give no value, so each one is a statement. The receiver is a `var` or a path into one, such as `grid[0].push(1)`. In `x[i] = f()`, the index runs first, and then the value. Each index in a path runs once.
+
+Planned: `.get` waits for `T?`, as do `.pop` and other tasks that may find nothing. List slices, and tasks that take a lambda such as `.map`, are planned too. Printing a collection and `==` on one wait for the derived `Show` and `Equal`. Collections as keys wait for `Hash`.
 
 ## Control flow
 
@@ -283,7 +317,7 @@ match load("app.toml")
 - `x else y` gives `y` in place of the error.
 - An unused error is a compile error.
 
-A **trap** is an unrecoverable bug: out-of-bounds index or text slice, overflow, a zero divisor, a failed conversion, stack overflow, a reached `...`, failed `expect`, a `shared` access conflict, running out of memory, or a failed write to stdout. A trap prints its source position and exits with code 101, except that running out of memory and a failed write to stdout have no position. A stack trace is planned for M5. Traps cannot be caught.
+A **trap** is an unrecoverable bug: out-of-bounds index or text slice, a missing map key, overflow, a zero divisor, a failed conversion, stack overflow, a reached `...`, failed `expect`, a `shared` access conflict, running out of memory, or a failed write to stdout. A trap prints its source position and exits with code 101, except that running out of memory and a failed write to stdout have no position. A stack trace is planned for M5. Traps cannot be caught.
 
 ## Generics
 

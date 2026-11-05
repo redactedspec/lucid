@@ -1,0 +1,41 @@
+collection_types.lcd:2:13: error E0303: this list needs `int`, found `text`
+collection_types.lcd:3:21: error E0303: this list needs `int`, found `float`
+  note: conversions are explicit: use `.to_int()`
+collection_types.lcd:4:23: error E0303: this map needs `int`, found `text`
+collection_types.lcd:5:9: error E0303: `float` cannot be a key
+collection_types.lcd:6:8: error E0303: `float` cannot be a key
+collection_types.lcd:7:8: error E0303: `map` needs two types
+collection_types.lcd:8:8: error E0303: `list` needs one type
+collection_types.lcd:9:13: error E0303: `set` needs a list, found `int`
+collection_types.lcd:10:9: error E0307: `set` takes one list
+collection_types.lcd:11:13: error E0303: a list index needs `int`, found `text`
+collection_types.lcd:12:18: error E0303: a map key needs `text`, found `int`
+collection_types.lcd:13:9: error E0303: a set has no index
+  note: to test for a value, use `x in items`
+collection_types.lcd:14:9: error E0303: this needs one index
+collection_types.lcd:15:14: error E0303: `in` needs a list, map, or set, found `int`
+collection_types.lcd:16:9: error E0303: `in` needs `int`, found `text`
+collection_types.lcd:17:9: error E0303: `push` gives no value, so it must be a statement
+collection_types.lcd:18:9: error E0303: `bytes` does not work on `list[byte]`
+collection_types.lcd:20:8: error E0303: this argument needs `int`, found `text`
+collection_types.lcd:21:1: error E0307: `push` takes 1 positional argument
+collection_types.lcd:22:1: error E0307: `push` takes 1 positional argument
+collection_types.lcd:23:1: error E0303: `add` does not work on `list[int]`
+collection_types.lcd:24:8: error E0303: this assignment needs `int`, found `text`
+collection_types.lcd:26:10: error E0303: this argument needs `text`, found `int`
+collection_types.lcd:27:1: error E0303: `push` does not work on `map[text, int]`
+collection_types.lcd:29:1: error E0303: a set has no index
+  note: to test for a value, use `x in items`
+collection_types.lcd:31:1: error E0303: text cannot change
+collection_types.lcd:32:10: error E0303: `for` cannot loop over `int`
+collection_types.lcd:34:17: error E0303: a key cannot change
+collection_types.lcd:36:9: error E0303: `+` needs one type on both sides, found `int` and `list[int]`
+  note: conversions are explicit: use `.to_float()` or `.to_int()`
+collection_types.lcd:37:9: error E0303: `+` needs a number, found `list[int]`
+collection_types.lcd:38:20: error E0303: an empty map does not fit `set[int]`
+  note: an empty set is `set([])`
+collection_types.lcd:39:15: error E0303: an empty list does not fit `int`
+collection_types.lcd:40:21: error E0303: an empty map does not fit `list[int]`
+collection_types.lcd:41:1: error E0301: name `undefined_name` is not defined
+collection_types.lcd:42:1: error E0301: name `undefined_task` is not defined
+collection_types.lcd:43:16: error E0303: `in` on a list cannot compare `float`

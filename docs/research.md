@@ -24,6 +24,7 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | ASCII names, text escapes | Judgment call from existing practice | None | Revisit before 1.0 |
 | Division, argument order | Judgment call from existing practice | None | Agent trial at M3 |
 | Text slices, no character type | Judgment call from existing practice | None | Agent trial at M3 |
+| Compact ordered map, SipHash with random keys | Supported by Python and Rust practice | Snippet | Benchmark at M4 |
 
 ## Memory
 
@@ -195,6 +196,14 @@ Decisions 23, 24, and 26. Evidence is weak: these follow existing practice and n
 - **Argument order.** Swift requires labeled arguments in declared order. Python allows any order, and it evaluates in the order written.
 
 Sources: [PEP 238](https://peps.python.org/pep-0238/), [Python expressions](https://docs.python.org/3/reference/expressions.html), [Swift functions](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/functions/).
+
+## Collections
+
+- **Hash flooding.** PEP 456 made SipHash the default string hash in Python, since a remote attacker could recover the secrets of its earlier FNV-based hash. It calls SipHash the best mix of speed and security it reviewed, and notes that setup cost dominates on very short strings, so it offers a cutoff of about 5 to 7 bytes. Level: Snippet.
+- **Rust default.** The `HashMap` docs name SipHash 1-3 with random seeds, and say that the algorithm may change. A 2016 docs change said that DoS resistance is not guaranteed, because of how randomness is acquired. Check the current wording. Level: Snippet.
+- **Compact layout.** CPython's `dictobject.c` describes a table of indices alongside an entries array that is mostly append only, so iterating the entries gives insertion order. Level: Snippet, from source comments.
+
+Sources: [PEP 456](https://peps.python.org/pep-0456/), [Rust HashMap docs change](https://github.com/rust-lang/rust/pull/35371), [CPython dictobject.c](https://chromium.googlesource.com/external/github.com/python/cpython/+/e92ac0a741b125f1cffe8c07b054d1dea7b0a05a/Objects/dictobject.c).
 
 ## Open research
 

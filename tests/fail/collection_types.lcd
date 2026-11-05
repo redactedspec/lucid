@@ -1,0 +1,43 @@
+# Every statement here has one error about a list, map, or set.
+let a = [1, "x"]
+let b: list[int] = [1.5]
+let c = {"a": 1, "b": "c"}
+let d = {1.5: 2}
+let e: set[float] = set([])
+let f: map[int] = {}
+let g: list[int, int] = []
+let h = set(1)
+let i = set([1], [2])
+let j = [1]["x"]
+let k = {"a": 1}[1]
+let l = set([1])[0]
+let m = [1][0, 1]
+let n = 1 in 2
+let o = "x" in [1]
+let q = [1].push(2)
+let r = "x".bytes().bytes()
+var s = [1]
+s.push("x")
+s.push(1, 2)
+s.push(item: 1)
+s.add(1)
+s[0] = "x"
+var t = {"a": 1}
+t.remove(1)
+t.push(1)
+var u = set([1])
+u[0] = 1
+var v = "abc"
+v[0] = "x"
+for w in 1
+    print w
+for change w in {"a": 1}
+    print w
+let x = 1 + [1]
+let y = [1] + [2]
+let aa: set[int] = {}
+let ab: int = []
+let ac: list[int] = {}
+undefined_name = []
+undefined_task([])
+let p = 1.5 in [1.5]

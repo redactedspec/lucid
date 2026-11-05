@@ -1,0 +1,17 @@
+# Features of collections that wait for later roadmap items.
+let a = [1]
+print a
+print "{a}"
+print a == a
+print a[0..1]
+let b: set[list[int]] = set([])
+var c = [1]
+for change d in c
+    print d
+let e = "a".bytes()
+print e[0] + e[0]
+let a = 1
+a.add(2)
+print {1: 2}[1..2]
+print -e[0]
+print [1] in [[1]]

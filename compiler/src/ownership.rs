@@ -19,6 +19,7 @@ fn stmts(locals: &mut Vec<Ty>, stmts: &mut [Stmt]) {
             Stmt::Set(_, value) | Stmt::Return(value) | Stmt::Print(value) | Stmt::Expr(value) => {
                 expr(locals, value);
             }
+            Stmt::Update { args, .. } => args.iter_mut().for_each(|arg| expr(locals, arg)),
             Stmt::Block(body) => self::stmts(locals, body),
             Stmt::If { branches, otherwise } => {
                 for (condition, then) in branches {
@@ -36,7 +37,11 @@ fn stmts(locals: &mut Vec<Ty>, stmts: &mut [Stmt]) {
                 expr(locals, end);
                 self::stmts(locals, body);
             }
-            Stmt::Break | Stmt::Continue | Stmt::PrintText(_) | Stmt::Placeholder(_) => {}
+            Stmt::Clear(_)
+            | Stmt::Break
+            | Stmt::Continue
+            | Stmt::PrintText(_)
+            | Stmt::Placeholder(_) => {}
         }
     }
 }
@@ -49,8 +54,14 @@ fn expr(locals: &mut Vec<Ty>, value: &mut Expr) {
         | ExprKind::None
         | ExprKind::Local(_)
         | ExprKind::Text(_) => {}
-        ExprKind::Call(_, values) | ExprKind::Join(values) => {
+        ExprKind::Call(_, values) | ExprKind::Join(values) | ExprKind::ListOf(values) => {
             values.iter_mut().for_each(|value| expr(locals, value));
+        }
+        ExprKind::MapOf(entries) => {
+            for (key, value) in entries {
+                expr(locals, key);
+                expr(locals, value);
+            }
         }
         ExprKind::Neg(inner)
         | ExprKind::Not(inner)
@@ -59,8 +70,18 @@ fn expr(locals: &mut Vec<Ty>, value: &mut Expr) {
         | ExprKind::ToText(inner)
         | ExprKind::TextLen(inner)
         | ExprKind::TextIsEmpty(inner)
-        | ExprKind::TextByteLen(inner) => expr(locals, inner),
-        ExprKind::Binary(_, left, right) | ExprKind::TextCharAt(left, right) => {
+        | ExprKind::TextByteLen(inner)
+        | ExprKind::TextBytes(inner)
+        | ExprKind::SetOf(inner)
+        | ExprKind::Len(inner) => expr(locals, inner),
+        ExprKind::Binary(_, left, right)
+        | ExprKind::TextCharAt(left, right)
+        | ExprKind::ListGet(left, right)
+        | ExprKind::ListHas(left, right)
+        | ExprKind::MapGet(left, right)
+        | ExprKind::MapHas(left, right)
+        | ExprKind::MapNext(left, right)
+        | ExprKind::MapKey(left, right) => {
             expr(locals, left);
             expr(locals, right);
         }
@@ -79,6 +100,10 @@ fn expr(locals: &mut Vec<Ty>, value: &mut Expr) {
             | ExprKind::Call(..)
             | ExprKind::TextSlice(..)
             | ExprKind::TextCharAt(..)
+            | ExprKind::TextBytes(_)
+            | ExprKind::ListOf(_)
+            | ExprKind::MapOf(_)
+            | ExprKind::SetOf(_)
     );
     if new && value.ty.is_counted() {
         locals.push(value.ty);

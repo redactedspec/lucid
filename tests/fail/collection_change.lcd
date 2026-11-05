@@ -1,0 +1,15 @@
+let a = [1]
+a.push(2)
+a[0] = 2
+
+task f(items: list[int])
+    items.push(1)
+    items[0] = 2
+
+task g() -> list[int]
+    return [1]
+
+g().push(1)
+g()[0] = 1
+var b = [[1]]
+b[0]["x"] = 1

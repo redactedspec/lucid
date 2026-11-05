@@ -2,11 +2,11 @@
 
 use crate::ast::BinaryOp;
 use crate::diag::{Diagnostic, Lines, Span};
-use crate::mir::{Expr, ExprKind, Local, Program, Stmt, Task, Ty};
+use crate::mir::{Expr, ExprKind, Local, Program, Stmt, Task, Ty, Update};
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
-    AbiParam, Block, FuncRef, GlobalValue, InstBuilder, Signature, StackSlotData, StackSlotKind,
-    TrapCode, Type, Value, types,
+    AbiParam, Block, FuncRef, GlobalValue, InstBuilder, MemFlagsData, Signature, StackSlotData,
+    StackSlotKind, TrapCode, Type, Value, types,
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
@@ -14,6 +14,7 @@ use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module, default
 use std::collections::HashMap;
 
 const CODEGEN: &str = "code generation failed";
+const OUT_OF_BOUNDS: &str = "list index out of bounds";
 
 /// False only in the benchmark build. See "Commands" in docs/compiler.md.
 const CHECK_OVERFLOW: bool = !cfg!(feature = "bench-unchecked");
@@ -51,7 +52,7 @@ pub fn run(
 
 fn clif(ty: Ty) -> Type {
     match ty {
-        Ty::Int | Ty::Text => types::I64,
+        Ty::Int | Ty::Byte | Ty::Text | Ty::List(_) | Ty::Map(..) | Ty::Set(_) => types::I64,
         Ty::Float => types::F64,
         Ty::Bool | Ty::None => types::I8,
         Ty::Error => unreachable!("errors stop before the backend"),
@@ -75,6 +76,19 @@ struct Runtime {
     text_slice: FuncId,
     text_byte_len: FuncId,
     text_char_at: FuncId,
+    text_bytes: FuncId,
+    list_new: FuncId,
+    list_push: FuncId,
+    list_set: FuncId,
+    list_swap: FuncId,
+    list_has: FuncId,
+    map_new: FuncId,
+    map_set: FuncId,
+    map_remove: FuncId,
+    map_find: FuncId,
+    map_next: FuncId,
+    map_key: FuncId,
+    set_from: FuncId,
     int_text: FuncId,
     float_text: FuncId,
     bool_text: FuncId,
@@ -118,6 +132,19 @@ fn compile(
     builder.symbol("lucid_text_slice", lucid_rt::lucid_text_slice as *const u8);
     builder.symbol("lucid_text_byte_len", lucid_rt::lucid_text_byte_len as *const u8);
     builder.symbol("lucid_text_char_at", lucid_rt::lucid_text_char_at as *const u8);
+    builder.symbol("lucid_text_bytes", lucid_rt::lucid_text_bytes as *const u8);
+    builder.symbol("lucid_list_new", lucid_rt::lucid_list_new as *const u8);
+    builder.symbol("lucid_list_push", lucid_rt::lucid_list_push as *const u8);
+    builder.symbol("lucid_list_set", lucid_rt::lucid_list_set as *const u8);
+    builder.symbol("lucid_list_swap", lucid_rt::lucid_list_swap as *const u8);
+    builder.symbol("lucid_list_has", lucid_rt::lucid_list_has as *const u8);
+    builder.symbol("lucid_map_new", lucid_rt::lucid_map_new as *const u8);
+    builder.symbol("lucid_map_set", lucid_rt::lucid_map_set as *const u8);
+    builder.symbol("lucid_map_remove", lucid_rt::lucid_map_remove as *const u8);
+    builder.symbol("lucid_map_find", lucid_rt::lucid_map_find as *const u8);
+    builder.symbol("lucid_map_next", lucid_rt::lucid_map_next as *const u8);
+    builder.symbol("lucid_map_key", lucid_rt::lucid_map_key as *const u8);
+    builder.symbol("lucid_set_from", lucid_rt::lucid_set_from as *const u8);
     builder.symbol("lucid_int_text", lucid_rt::lucid_int_text as *const u8);
     builder.symbol("lucid_float_text", lucid_rt::lucid_float_text as *const u8);
     builder.symbol("lucid_bool_text", lucid_rt::lucid_bool_text as *const u8);
@@ -134,6 +161,7 @@ fn compile(
     let (int, float) = ([AbiParam::new(types::I64)], [AbiParam::new(types::F64)]);
     let (byte, value) = ([AbiParam::new(types::I8).uext()], [AbiParam::new(pointer)]);
     let two = [value[0], value[0]];
+    let with_two = [value[0], int[0], int[0]];
     let runtime = Runtime {
         print: import("lucid_print", &text, &[]),
         print_int: import("lucid_print_int", &int, &[]),
@@ -148,9 +176,22 @@ fn compile(
         text_compare: import("lucid_text_compare", &two, &int),
         text_len: import("lucid_text_len", &value, &int),
         text_is_empty: import("lucid_text_is_empty", &value, &[AbiParam::new(types::I8)]),
-        text_slice: import("lucid_text_slice", &[value[0], int[0], int[0]], &value),
+        text_slice: import("lucid_text_slice", &with_two, &value),
         text_byte_len: import("lucid_text_byte_len", &value, &int),
         text_char_at: import("lucid_text_char_at", &[value[0], int[0]], &value),
+        text_bytes: import("lucid_text_bytes", &value, &value),
+        list_new: import("lucid_list_new", &[int[0], byte[0]], &value),
+        list_push: import("lucid_list_push", &two, &value),
+        list_set: import("lucid_list_set", &with_two, &value),
+        list_swap: import("lucid_list_swap", &with_two, &value),
+        list_has: import("lucid_list_has", &two, &[AbiParam::new(types::I8)]),
+        map_new: import("lucid_map_new", &[byte[0], byte[0]], &value),
+        map_set: import("lucid_map_set", &with_two, &value),
+        map_remove: import("lucid_map_remove", &two, &value),
+        map_find: import("lucid_map_find", &two, &value),
+        map_next: import("lucid_map_next", &two, &int),
+        map_key: import("lucid_map_key", &two, &int),
+        set_from: import("lucid_set_from", &value, &value),
         int_text: import("lucid_int_text", &int, &value),
         float_text: import("lucid_float_text", &float, &value),
         bool_text: import("lucid_bool_text", &byte, &value),
@@ -376,6 +417,11 @@ impl Lower<'_, '_> {
                     self.body.def_var(self.vars[*local], value);
                 }
             }
+            Stmt::Update { local, op, args, span } => self.update(*local, *op, args, *span),
+            Stmt::Clear(local) => {
+                let empty = self.body.ins().iconst(self.pointer, 0);
+                self.store(*local, empty);
+            }
             Stmt::Block(stmts) => return self.stmts(stmts),
             Stmt::If { branches, otherwise } => {
                 let done = self.body.create_block();
@@ -499,7 +545,7 @@ impl Lower<'_, '_> {
     fn print(&mut self, expr: &Expr) {
         let value = self.expr(expr);
         match expr.ty {
-            Ty::Int => self.call(self.runtime.print_int, &[value]),
+            Ty::Int | Ty::Byte => self.call(self.runtime.print_int, &[value]),
             Ty::Float => self.call(self.runtime.print_float, &[value]),
             Ty::Bool => self.call(self.runtime.print_bool, &[value]),
             Ty::Text => self.call(self.runtime.text_print, &[value]),
@@ -507,8 +553,94 @@ impl Lower<'_, '_> {
                 self.print_text("none");
                 None
             }
-            Ty::Error => unreachable!("errors stop before the backend"),
+            _ => unreachable!("the checker rejects printing any other type"),
         };
+    }
+
+    /// Lowers a value to the 8-byte form that every runtime slot has.
+    fn slot(&mut self, expr: &Expr) -> Value {
+        let value = self.expr(expr);
+        match expr.ty {
+            Ty::Float => self.body.ins().bitcast(types::I64, MemFlagsData::new(), value),
+            Ty::Bool | Ty::None => self.body.ins().uextend(types::I64, value),
+            _ => value,
+        }
+    }
+
+    /// The reverse of `slot`.
+    fn read_slot(&mut self, slot: Value, ty: Ty) -> Value {
+        match ty {
+            Ty::Float => self.body.ins().bitcast(types::F64, MemFlagsData::new(), slot),
+            Ty::Bool | Ty::None => self.body.ins().ireduce(types::I8, slot),
+            _ => slot,
+        }
+    }
+
+    fn update(&mut self, local: Local, op: Update, args: &[Expr], span: Span) {
+        let mut values = vec![self.body.use_var(self.vars[local])];
+        for arg in args {
+            let value = self.slot(arg);
+            values.push(value);
+        }
+        let runtime = self.runtime;
+        let task = match op {
+            Update::ListPush => runtime.list_push,
+            Update::ListSet => runtime.list_set,
+            Update::ListSwap => runtime.list_swap,
+            Update::MapSet => runtime.map_set,
+            Update::MapRemove => runtime.map_remove,
+        };
+        let result = self.call(task, &values).expect("it returns the new value");
+        if matches!(op, Update::ListSet | Update::ListSwap) {
+            let outside = self.body.ins().icmp_imm_s(IntCC::Equal, result, 0);
+            self.trap_if(outside, OUT_OF_BOUNDS, span);
+        }
+        self.body.def_var(self.vars[local], result);
+    }
+
+    fn list_of(&mut self, items: &[Expr], item: Ty) -> Value {
+        let cap = self.body.ins().iconst(types::I64, items.len() as i64);
+        let counted = self.body.ins().iconst(types::I8, i64::from(item.is_counted()));
+        let mut list =
+            self.call(self.runtime.list_new, &[cap, counted]).expect("it returns a list");
+        for item in items {
+            let value = self.slot(item);
+            let pushed = self.call(self.runtime.list_push, &[list, value]);
+            list = pushed.expect("it returns a list");
+        }
+        list
+    }
+
+    fn map_of(&mut self, entries: &[(Expr, Expr)], key: Ty, value: Ty) -> Value {
+        let keys = self.body.ins().iconst(types::I8, i64::from(key.is_counted()));
+        let values = self.body.ins().iconst(types::I8, i64::from(value.is_counted()));
+        let mut map = self.call(self.runtime.map_new, &[keys, values]).expect("it returns a map");
+        for (key, value) in entries {
+            let key = self.slot(key);
+            let value = self.slot(value);
+            let set = self.call(self.runtime.map_set, &[map, key, value]);
+            map = set.expect("it returns a map");
+        }
+        map
+    }
+
+    fn load_slot(&mut self, address: Value, offset: i32, ty: Ty) -> Value {
+        let flags = MemFlagsData::trusted();
+        let slot = self.body.ins().load(types::I64, flags, address, offset);
+        self.read_slot(slot, ty)
+    }
+
+    /// The bounds check is inline: the unsigned compare also rejects a negative.
+    fn list_get(&mut self, list: &Expr, index: &Expr, ty: Ty, span: Span) -> Value {
+        let list = self.expr(list);
+        let index = self.expr(index);
+        let flags = MemFlagsData::trusted();
+        let len = self.body.ins().load(types::I64, flags, list, lucid_rt::LEN_OFFSET);
+        let outside = self.body.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, index, len);
+        self.trap_if(outside, OUT_OF_BOUNDS, span);
+        let offset = self.body.ins().ishl_imm_s(index, 3);
+        let address = self.body.ins().iadd(list, offset);
+        self.load_slot(address, lucid_rt::SLOTS_OFFSET, ty)
     }
 
     fn print_text(&mut self, text: &str) {
@@ -588,6 +720,63 @@ impl Lower<'_, '_> {
                 let offset = self.expr(offset);
                 self.call(self.runtime.text_char_at, &[text, offset]).expect("it returns a text")
             }
+            ExprKind::TextBytes(value) => {
+                let value = self.expr(value);
+                self.call(self.runtime.text_bytes, &[value]).expect("it returns a list")
+            }
+            ExprKind::ListOf(items) => {
+                let Ty::List(item) = expr.ty else { unreachable!("it has a list type") };
+                self.list_of(items, *item)
+            }
+            ExprKind::MapOf(entries) => {
+                let Ty::Map(key, value) = expr.ty else { unreachable!("it has a map type") };
+                self.map_of(entries, *key, *value)
+            }
+            ExprKind::SetOf(list) => {
+                let list = self.expr(list);
+                self.call(self.runtime.set_from, &[list]).expect("it returns a set")
+            }
+            ExprKind::Len(value) => {
+                let value = self.expr(value);
+                let flags = MemFlagsData::trusted();
+                self.body.ins().load(types::I64, flags, value, lucid_rt::LEN_OFFSET)
+            }
+            ExprKind::ListGet(list, index) => self.list_get(list, index, expr.ty, expr.span),
+            ExprKind::ListHas(value, list) => {
+                let value = self.slot(value);
+                let list = self.expr(list);
+                self.call(self.runtime.list_has, &[list, value]).expect("it returns a bool")
+            }
+            ExprKind::MapGet(map, key) => {
+                let map = self.expr(map);
+                let key = self.slot(key);
+                let found = self.call(self.runtime.map_find, &[map, key]);
+                let found = found.expect("it returns an address");
+                let missing = self.body.ins().icmp_imm_s(IntCC::Equal, found, 0);
+                self.trap_if(missing, "map key not found", expr.span);
+                self.load_slot(found, 0, expr.ty)
+            }
+            ExprKind::MapHas(key, map) => {
+                let key = self.slot(key);
+                let map = self.expr(map);
+                let found = self.call(self.runtime.map_find, &[map, key]);
+                self.body.ins().icmp_imm_s(
+                    IntCC::NotEqual,
+                    found.expect("it returns an address"),
+                    0,
+                )
+            }
+            ExprKind::MapNext(map, position) => {
+                let map = self.expr(map);
+                let position = self.expr(position);
+                self.call(self.runtime.map_next, &[map, position]).expect("it returns an int")
+            }
+            ExprKind::MapKey(map, position) => {
+                let map = self.expr(map);
+                let position = self.expr(position);
+                let key = self.call(self.runtime.map_key, &[map, position]);
+                self.read_slot(key.expect("it returns a key"), expr.ty)
+            }
             ExprKind::Temp(local, value) => {
                 let value = self.expr(value);
                 self.store(*local, value);
@@ -599,7 +788,7 @@ impl Lower<'_, '_> {
     fn text_of(&mut self, expr: &Expr) -> Value {
         let value = self.expr(expr);
         let text = match expr.ty {
-            Ty::Int => self.call(self.runtime.int_text, &[value]),
+            Ty::Int | Ty::Byte => self.call(self.runtime.int_text, &[value]),
             Ty::Float => self.call(self.runtime.float_text, &[value]),
             Ty::Bool => self.call(self.runtime.bool_text, &[value]),
             Ty::None => {

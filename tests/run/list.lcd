@@ -1,0 +1,125 @@
+# Lists: literals, reads, writes, value semantics, and counts.
+
+task total(items: list[int]) -> int
+    var sum = 0
+    for item in items
+        sum += item
+    return sum
+
+task squares(n: int) -> list[int]
+    var result: list[int] = []
+    for i in 0..n
+        result.push(i * i)
+    return result
+
+task add_one(items: list[int], extra: int) -> list[int]
+    var copy = items
+    copy.push(extra)
+    return copy
+
+task names_or_none(flag: bool) -> list[text]
+    return if flag then ["Ada"] else []
+
+task first(items: list[list[text]]) -> text
+    return items[0][0]
+
+var primes = [2, 3, 5]
+print primes[0]
+print primes.len()
+print primes.is_empty()
+primes.push(7)
+primes[1] = 13
+primes[2] += 1
+print total(primes)
+
+# Each value is independent.
+var a = [1, 2]
+var b = a
+b.push(3)
+b[0] = 9
+print "{a.len()} {a[0]} {b.len()} {b[0]}"
+let c = add_one(a, 5)
+print "{a.len()} {c.len()}"
+
+print total(squares(5))
+print total([])
+print names_or_none(true).len()
+print names_or_none(false).is_empty()
+
+# Text elements, float elements, bool elements.
+var words = ["a", "b"]
+words.push("c{words.len()}")
+words[0] = words[1]
+words[1] = "new"
+for word in words
+    print word
+words.swap(0, 2)
+print words[0]
+
+let floats = [1.5, -2.0]
+print floats[0] + floats[1]
+let flags = [true, false]
+print flags[1]
+
+# Nested lists, with writes through them.
+var grid = [[1, 2], [3, 4]]
+var row = grid[1]
+grid[0][1] = 20
+grid[1].push(5)
+row[0] = 30
+print "{grid[0][1]} {grid[1].len()} {grid[1][0]} {row[0]} {row.len()}"
+print grid[1][grid[0][0]]
+
+var names = [["x"]]
+names[0][0] = "y"
+names[0].push("z")
+print first(names)
+
+var counter = 0
+task next(n: int) -> int
+    return n
+
+# An index runs once, and before the value.
+var once = [0, 0]
+once[next(1)] += 5
+print once[1]
+
+# A loop keeps the list it started with.
+var moving = [1, 2, 3]
+for item in moving
+    moving.push(item)
+    moving[0] = 100
+print moving.len()
+
+for item in [10, 20, 30, 40]
+    if item == 20
+        continue
+    if item == 40
+        break
+    print item
+
+for inner in grid
+    for value in inner
+        counter += value
+print counter
+
+print 3 in [1, 2, 3]
+print 4 not in [1, 2, 3]
+print "x" in ["x", "y"]
+print "z" in ["x", "y"]
+print true in [false]
+
+# Text bytes.
+let raw = "aé".bytes()
+print raw.len()
+print raw[1]
+print raw[0].to_int() + 1
+print raw[0] == raw[0]
+print "{raw[2]}"
+print "".bytes().is_empty()
+
+# Growth, past the first copy.
+var many: list[text] = []
+for i in 0..1000
+    many.push("{i}")
+print many[999]

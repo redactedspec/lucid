@@ -54,6 +54,8 @@ for item in items
     items.push(item)          # error: items changes while being iterated
 ```
 
+These checks arrive with parameter modes. Until then a `for` keeps a count of what it visits, so the second example changes a copy and stays memory safe.
+
 Variables, fields, and list elements in `change` paths are checked statically. Overlap on list indexes that cannot be proven distinct, such as `swap(change x[i], change x[j])`, is checked at run time and traps. Use `x.swap(i, j)` to avoid the check.
 
 ## Inference
@@ -98,7 +100,7 @@ The published results for Perceus and Lean come from functional languages, with 
 
 This is the hardest part of the compiler, so it comes with a staged plan:
 
-1. **M3: naive.** Count every use. Correct and slow. Each new value goes to a hidden local, which holds it until overwritten or until the task returns. A `for` over text holds one count on its text in another hidden local, so assigning the variable in the body is safe. A store then counts again, so a value is rarely unique yet, and copy-on-write will copy more than it must.
+1. **M3: naive.** Count every use. Correct and slow. Each new value goes to a hidden local, which holds it until overwritten or until the task returns. A `for` over text or a collection holds one count on it in another hidden local, so assigning the variable in the body is safe. A store then counts again, so a value is rarely unique yet, and copy-on-write copies more than it must. `var x = [1]` holds two counts, so the first write copies once. After that `x` holds its own copy, and writes happen in place. A write through a path such as `grid[i][j] = 1` takes `grid[i]` out of its slot, writes, and puts it back, so it copies nothing unless `grid[i]` is shared. A `for` lets go of its count when the loop ends.
 2. **M4: last-use moves and borrow elision.** Measure against Rust.
 3. **M4: reuse analysis.** Only after measurements justify it.
 

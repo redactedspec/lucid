@@ -1,0 +1,11 @@
+empty_collection.lcd:1:9: error E0314: an empty list needs a type
+  note: write its type, as in `let x: list[int] = []`
+empty_collection.lcd:2:9: error E0314: an empty map needs a type
+  note: write its type, as in `let x: map[text, int] = {}`
+empty_collection.lcd:3:13: error E0314: an empty list needs a type
+  note: write its type, as in `let x: list[int] = []`
+empty_collection.lcd:4:10: error E0314: an empty list needs a type
+  note: write its type, as in `let x: list[int] = []`
+empty_collection.lcd:5:21: error E0303: an empty list does not fit `int`
+empty_collection.lcd:6:7: error E0314: an empty list needs a type
+  note: write its type, as in `let x: list[int] = []`

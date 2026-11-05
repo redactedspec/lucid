@@ -1,0 +1,2 @@
+var ages = {"Ada": 36}
+ages["Bob"] += 1

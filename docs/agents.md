@@ -98,6 +98,7 @@ The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and 
 | E0311 | `break` or `continue` outside a loop |
 | E0312 | Number does not fit its type |
 | E0313 | Default is not a literal |
+| E0314 | Empty list or map has no type to take |
 | E0901 | Parses, but cannot run at this milestone |
 | E0902 | Task frame is too large for the stack check: over 512 KiB, or half the stack for top-level code |
 

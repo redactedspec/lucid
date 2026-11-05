@@ -1,0 +1,93 @@
+# Maps and sets: order, writes, value semantics, and counts.
+
+task score(ages: map[text, int], name: text) -> int
+    return ages[name]
+
+task empty_scores() -> map[text, list[int]]
+    return {}
+
+var ages = {"Ada": 36, "Linus": 21}
+print ages["Ada"]
+print ages.len()
+print ages.is_empty()
+ages["Grace"] = 85
+ages["Ada"] += 1
+print score(ages, "Ada")
+print "Linus" in ages
+print "Bob" not in ages
+
+for name in ages
+    print "{name} {ages[name]}"
+
+# Removing keeps order, and a key added again goes last.
+ages.remove("Linus")
+ages.remove("nobody")
+ages["Linus"] = 1
+for name in ages
+    print name
+
+# Each value is independent.
+var copy = ages
+copy["New"] = 1
+copy.remove("Ada")
+print "{ages.len()} {copy.len()} {"Ada" in ages} {"Ada" in copy}"
+
+# A loop keeps the map it started with.
+for name in ages
+    ages.remove(name)
+print ages.is_empty()
+
+# Other key and value types.
+var squares: map[int, float] = {}
+for i in 0..100
+    squares[i] = (i * i).to_float()
+for i in 0..100
+    if i % 2 == 0
+        squares.remove(i)
+print squares.len()
+print squares[99]
+var seen = 0
+for key in squares
+    seen += key
+print seen
+
+let bools = {true: "yes", false: "no"}
+print bools[true]
+
+let repeats = {"a": 1, "b": 2, "a": 3}
+print "{repeats.len()} {repeats["a"]}"
+
+# Collections as values.
+var scores = empty_scores()
+scores["Ada"] = [1]
+scores["Ada"].push(2)
+print scores["Ada"].len()
+print scores["Ada"][1]
+var deep = {"x": {"y": 1}}
+deep["x"]["z"] = 2
+print deep["x"].len()
+
+# A set drops repeats, and keeps first order.
+var tags = set(["new", "sale", "new"])
+print tags.len()
+print "sale" in tags
+tags.add("old")
+tags.add("new")
+tags.remove("sale")
+for tag in tags
+    print tag
+var others = tags
+others.add("x")
+print "{tags.len()} {others.len()}"
+
+var numbers: set[int] = set([])
+print numbers.is_empty()
+numbers.add(4)
+print 4 in numbers
+for i in 0..1000
+    numbers.add(i % 10)
+print numbers.len()
+
+# Text bytes as keys.
+var bytes: set[byte] = set("hello".bytes())
+print bytes.len()

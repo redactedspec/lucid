@@ -1,0 +1,6 @@
+let a = []
+let b = {}
+let c = set([])
+let d = [[]]
+let e: list[int] = [[]]
+print [].len()

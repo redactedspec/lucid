@@ -2,13 +2,13 @@
 print "ok"
 print undefined_name
 print "{a}"
-let b = [1]
+let b = x => x
 let c: text = "x"
 
 type User
     name: text
 
-task f(change a: list[int])
+task f(change a: int)
     return
 
 let d = 1 + 1

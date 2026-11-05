@@ -20,6 +20,10 @@ A trap ends the program. It is a controlled stop, not undefined behavior. A trap
 
 Safe code has **no undefined behavior**. A compiler or runtime bug that breaks this is a release blocker.
 
+## Hash flooding
+
+Map and set hashes use SipHash through Rust's `RandomState`, with keys chosen once per process. So whoever supplies a map's keys cannot plan collisions, and a map's order never depends on the hash. The Rust documentation does not promise this algorithm forever, so review it when the toolchain changes.
+
 ## Unsafe code
 
 `unsafe` blocks are the only place for raw pointers and foreign calls. Each block needs a comment that states why it is sound. `lucid check` reports all `unsafe` sites, including those in dependencies.

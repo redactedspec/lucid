@@ -37,12 +37,12 @@ Build a thin end-to-end path first. Depth comes later.
 
 - [x] `text` values, interpolation, comparison, `.len()`, `.is_empty()`
 - [x] `text` slicing, iteration
-- [ ] `list`, `map`, `set`, and `text.bytes()`
+- [x] `list`, `map`, `set`, and `text.bytes()`
 - [ ] `type`, `choice`, `match` with exhaustiveness
-- [ ] Unions, `T?`, narrowing, `is`
-- [ ] Generics with monomorphization, traits, derived traits
+- [ ] Unions, `T?`, narrowing, `is`, and `.get`, `.pop`
+- [ ] Generics with monomorphization, traits, derived traits, showing and comparing collections, list slices
 - [ ] Sized numbers, wrapping math tasks, nested tasks, lambdas, task values, `self` and dot calls
-- [ ] Parameter modes and exclusivity checks
+- [ ] Parameter modes, exclusivity checks, `for change` over lists
 - [x] Naive reference counting, leak-checking debug runtime
 - [ ] Draft `docs/agent-guide.md`, and run a 10-task agent trial
 

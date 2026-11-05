@@ -1,0 +1,4 @@
+task at(items: list[text], i: int) -> text
+    return items[i]
+
+print at(["a"], -1)
