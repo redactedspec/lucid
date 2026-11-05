@@ -1,0 +1,11 @@
+let a = 1
+a = 2
+a += 1
+for i in 0..2
+    i = 5
+
+task f(p: int)
+    p = 2
+    limit = 3
+
+let limit = 1

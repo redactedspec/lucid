@@ -1,0 +1,55 @@
+# Integers
+print 2 + 3 * 4
+print (2 + 3) * 4
+print 1_000 + 0xff + 0b101
+print 9223372036854775807
+print -9223372036854775808
+print - (1 + 1)
+
+# `//` rounds down, and `%` takes the sign of the divisor.
+print 7 // 2
+print -7 // 2
+print 7 // -2
+print -7 // -2
+print 7 % 3
+print -7 % 3
+print 7 % -3
+print -7 % -3
+print 6 % -3
+print -9223372036854775808 % -1
+
+# `/` always gives a float, and follows IEEE 754.
+print 7 / 2
+print 1 / 0
+print -1 / 0
+print 7.5 / 2.5
+print 1.0 / 0.0
+
+# Floats
+print 1.5 + 2.25
+print 1.5 - 2.25
+print 1.5 * 2.0
+print -1.5
+print 0.1 + 0.2
+print 1.0e3
+print 1.0e21
+
+# Conversions
+print 3.to_float()
+print 3.99.to_int()
+print (-3.99).to_int()
+print (7.to_float() * 1.5).to_int()
+
+# Comparisons
+print 1 < 2
+print 2 <= 1
+print 3 > 2
+print 3 >= 4
+print 1 == 1
+print 1 != 1
+print 1.5 < 2.5
+print 1.5 == 1.5
+print 1.5 != 1.5
+print true == false
+print true != false
+print (0.0 / 0.0) == (0.0 / 0.0)

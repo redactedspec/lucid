@@ -1,0 +1,1 @@
+to_int_nan.lcd:1:7: trap: float does not fit in `int`

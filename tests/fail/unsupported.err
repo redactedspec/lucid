@@ -1,6 +1,14 @@
-unsupported.lcd:2:1: error E0901: this statement parses, but cannot run yet
-  note: only `print` of plain text runs at this milestone; see docs/roadmap.md
-unsupported.lcd:3:7: error E0901: `print` of a non-text value parses, but cannot run yet
-  note: only `print` of plain text runs at this milestone; see docs/roadmap.md
 unsupported.lcd:4:7: error E0901: text interpolation parses, but cannot run yet
-  note: only `print` of plain text runs at this milestone; see docs/roadmap.md
+  note: see docs/roadmap.md for the milestone that adds it
+unsupported.lcd:5:9: error E0901: a list parses, but cannot run yet
+  note: see docs/roadmap.md for the milestone that adds it
+unsupported.lcd:6:8: error E0901: type `text` parses, but cannot run yet
+  note: see docs/roadmap.md for the milestone that adds it
+unsupported.lcd:6:15: error E0901: a text value parses, but cannot run yet
+  note: see docs/roadmap.md for the milestone that adds it
+unsupported.lcd:8:1: error E0901: `type` parses, but cannot run yet
+  note: see docs/roadmap.md for the milestone that adds it
+unsupported.lcd:11:15: error E0901: a `change` or `take` parameter parses, but cannot run yet
+  note: see docs/roadmap.md for the milestone that adds it
+unsupported.lcd:11:18: error E0901: this type parses, but cannot run yet
+  note: see docs/roadmap.md for the milestone that adds it

@@ -12,6 +12,7 @@ Safe Lucid code cannot produce:
 | Uninitialized reads | All values initialized |
 | Data races | Tasks do not share mutable data outside `lock` and `channel` |
 | Silent integer overflow | Traps in all builds |
+| Stack overflow past the stack's end | A check on entry to each task traps first |
 | Ignored errors | Unused errors do not compile |
 | Unchecked casts | No unchecked casts. Union narrowing is checked |
 

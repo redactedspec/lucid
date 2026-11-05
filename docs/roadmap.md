@@ -21,13 +21,13 @@ Build a thin end-to-end path first. Depth comes later.
 
 **Exit:** `lucid run` prints `Hello, world!`. All files in `examples/` parse, even though they do not yet run.
 
-## M2: Core language
+## M2: Core language (done)
 
-- [ ] `int`, `float`, `bool`, arithmetic with overflow traps
-- [ ] `let`, `var`, `if`, `while`, `for` over ranges
-- [ ] Tasks, recursion, parameter annotations
-- [ ] Type checking for all of the above
-- [ ] First benchmarks, with and without overflow checks
+- [x] `int`, `float`, `bool`, arithmetic with overflow traps
+- [x] `let`, `var`, `if`, `while`, `for` over ranges
+- [x] Tasks, recursion, parameter annotations
+- [x] Type checking for all of the above
+- [x] First benchmarks, with and without overflow checks
 
 **Exit:** FizzBuzz and recursive Fibonacci run. `fib(40)` is within 2x of Rust release.
 
@@ -37,6 +37,7 @@ Build a thin end-to-end path first. Depth comes later.
 - [ ] `type`, `choice`, `match` with exhaustiveness
 - [ ] Unions, `T?`, narrowing, `is`
 - [ ] Generics with monomorphization, traits, derived traits
+- [ ] Sized numbers, nested tasks, lambdas, task values, `self` and dot calls
 - [ ] Parameter modes and exclusivity checks
 - [ ] Naive reference counting, leak-checking debug runtime
 - [ ] Draft `docs/agent-guide.md`, and run a 10-task agent trial
@@ -56,6 +57,7 @@ Build a thin end-to-end path first. Depth comes later.
 ## M5: A usable language
 
 - [ ] `try`, `else`, the `Error` trait, unused-error check
+- [ ] `test`, `expect`, `unsafe`, and stack traces on a trap
 - [ ] Modules, `use`, `public`, packages, `lucid.toml`
 - [ ] `std.fs`, `std.json`, `std.env`, `std.args`, `std.time`
 - [ ] `lucid build`, `test`, `fix`, `explain`, `context`

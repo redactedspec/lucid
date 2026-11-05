@@ -1,0 +1,86 @@
+let answer = 42
+let negative: int = -1
+let pi = 3.25
+let flag = true
+
+print first()
+greet()
+print say_nothing()
+print sum_to(4)
+print is_even(10)
+print fact(10)
+print scale(2)
+print scale(2, by: 5)
+print options(1, b: 3)
+print options(1, a: 2, b: 3)
+print options(1, a: 2)
+print options(1)
+print constants()
+print pick(true)
+print pick(false)
+print early(5)
+print none
+
+var v = 1
+print shadow(5)
+
+task first() -> int
+    return second() + 1
+
+task second() -> int
+    return answer
+
+task greet()
+    print "hello"
+    return
+
+task say_nothing() -> none
+    return none
+
+task sum_to(n: int) -> int
+    var total = 0
+    for i in 1..=n
+        total += i
+    return total
+
+task is_even(n: int) -> bool
+    if n == 0
+        return true
+    return is_odd(n - 1)
+
+task is_odd(n: int) -> bool
+    if n == 0
+        return false
+    return is_even(n - 1)
+
+task fact(n: int) -> int
+    return if n <= 1 then 1 else n * fact(n - 1)
+
+task scale(x: int, by: int = 2) -> int
+    return x * by
+
+task options(x: int, a: int = 10, b: int = 20) -> int
+    return x + a + b
+
+task constants() -> float
+    if flag
+        return pi * negative.to_float()
+    return 0.0
+
+task pick(a: bool) -> int
+    if a
+        return 1
+    else
+        return 2
+    print "unreachable"
+
+task early(n: int) -> int
+    for i in 0..n
+        if i == 3
+            return i
+    return -1
+
+# A local may shadow a task or a top-level name.
+task shadow(v: int) -> int
+    let first = v * 2
+    return first

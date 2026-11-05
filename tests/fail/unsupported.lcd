@@ -1,4 +1,12 @@
+# An unbuilt feature hides other errors, which could be false.
 print "ok"
-let a = 1
-print a
+print undefined_name
 print "{a}"
+let b = [1]
+let c: text = "x"
+
+type User
+    name: text
+
+task f(change a: list[int])
+    return

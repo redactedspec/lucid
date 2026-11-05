@@ -1,0 +1,4 @@
+task_top_var.lcd:5:5: error E0306: a task cannot use top-level `var` `count`
+  note: pass it as a parameter
+task_top_var.lcd:6:12: error E0306: a task cannot use top-level `var` `count`
+  note: pass it as a parameter

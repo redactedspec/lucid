@@ -27,18 +27,18 @@ impl Diagnostic {
 }
 
 /// Maps byte offsets to 1-based lines and columns. Columns count characters.
-struct Lines<'a> {
+pub struct Lines<'a> {
     src: &'a str,
     starts: Vec<usize>,
 }
 
 impl<'a> Lines<'a> {
-    fn new(src: &'a str) -> Self {
+    pub fn new(src: &'a str) -> Self {
         let newlines = src.match_indices('\n').map(|(i, _)| i + 1);
         Self { src, starts: std::iter::once(0).chain(newlines).collect() }
     }
 
-    fn position(&self, offset: usize) -> (usize, usize) {
+    pub fn position(&self, offset: usize) -> (usize, usize) {
         let line = self.starts.partition_point(|&start| start <= offset);
         let start = self.starts[line - 1];
         let prefix = &self.src[start..offset];

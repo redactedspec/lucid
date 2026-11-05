@@ -1,0 +1,37 @@
+let a: float = 1
+let b: int = 1.5
+var c = 1
+c = 2.5
+c /= 2
+if 1
+    print "x"
+while 1.5
+    print "x"
+print 1 + 2.5
+print 1 == 1.5
+print 1.5 // 2.5
+print 1.5 % 2.5
+print true + false
+print true < false
+print none == none
+print -true
+print not 1
+print 1 and true
+print true or 2
+print if 1 then 2 else 3
+print if true then 2 else 3.5
+for i in 1.5..2
+    print i
+for i in 0..true
+    print i
+for i in 3
+    print i
+for change i in 0..3
+    print i
+task f(a: int = 1.5) -> int
+    return 1.5
+task g()
+    return 1
+task h() -> int
+    return
+print f(a: true)

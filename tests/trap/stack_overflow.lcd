@@ -1,0 +1,4 @@
+print -deep(0)
+
+task deep(n: int) -> int
+    return deep(n + 1) + 1

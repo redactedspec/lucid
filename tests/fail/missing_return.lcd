@@ -1,0 +1,13 @@
+task f(a: bool) -> int
+    if a
+        return 1
+
+task g(a: bool) -> int
+    while a
+        return 1
+
+task h(a: bool) -> int
+    if a
+        return 1
+    else
+        print "x"

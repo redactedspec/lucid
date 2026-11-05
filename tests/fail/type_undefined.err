@@ -1,0 +1,3 @@
+type_undefined.lcd:1:8: error E0302: type `Thing` is not defined
+type_undefined.lcd:3:11: error E0302: type `Other` is not defined
+type_undefined.lcd:3:21: error E0302: type `Third` is not defined

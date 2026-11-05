@@ -63,6 +63,8 @@ Rules:
 
 A parser error on a line that already has a lexer error is dropped, since it is usually a side effect.
 
+Type checking runs only on a file with no syntax errors. If a file uses a feature that is not built, `lucid run` reports only E0901, because that feature could supply the names and types that other errors depend on. For the same reason, `lucid check` then reports nothing beyond syntax errors.
+
 The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and types, `E09xx` features not built yet. Every code has a golden test in `tests/fail/`.
 
 | Code | Meaning |
@@ -83,6 +85,18 @@ The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and 
 | E0204 | Chained comparison or range |
 | E0205 | Nesting over 128 levels, or over 1024 operators in one expression |
 | E0206 | Declaration only allowed at top level |
+| E0301 | Name is not defined |
+| E0302 | Type is not defined |
+| E0303 | Types do not fit |
+| E0304 | Name is already defined in this scope |
+| E0305 | Name cannot change |
+| E0306 | Task uses a top-level `var` |
+| E0307 | Arguments or parameters are in the wrong form |
+| E0308 | Called value is not a task |
+| E0309 | Task may end without returning |
+| E0310 | `return` outside a task |
+| E0311 | `break` or `continue` outside a loop |
+| E0312 | Number does not fit its type |
 | E0901 | Parses, but cannot run at this milestone |
 
 ## Agent onboarding

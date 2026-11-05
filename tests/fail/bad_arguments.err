@@ -1,0 +1,9 @@
+bad_arguments.lcd:4:20: error E0307: `b` needs a default, like the one before it
+bad_arguments.lcd:7:7: error E0307: `f` is missing argument `a`
+bad_arguments.lcd:8:12: error E0307: `f` has too many positional arguments
+bad_arguments.lcd:9:7: error E0307: `f` is missing argument `a`
+bad_arguments.lcd:9:12: error E0307: `a` has no default, so pass it by position
+bad_arguments.lcd:10:15: error E0307: `f` has no parameter `d`
+bad_arguments.lcd:11:21: error E0307: `b` is out of parameter order
+bad_arguments.lcd:12:18: error E0307: a positional argument cannot follow a named one
+bad_arguments.lcd:13:21: error E0307: `b` is out of parameter order

@@ -1,0 +1,76 @@
+var count = 0
+while count < 3
+    count += 1
+print count
+
+for i in 0..3
+    print i
+for i in 2..=3
+    print i
+for i in 3..1
+    print "never"
+for i in 5..=4
+    print "never"
+
+# Bounds are read once, and the last `int` ends the loop without overflow.
+var limit = 2
+for i in 0..limit
+    limit = 9
+    print i
+for i in 9223372036854775806..=9223372036854775807
+    print i
+
+for i in 0..10
+    if i == 1
+        continue
+    if i == 3
+        break
+    print i
+
+var n = 0
+while true
+    n += 1
+    if n % 2 == 1
+        continue
+    if n > 4
+        break
+    print n
+
+for i in 0..=2
+    for j in 0..2
+        if j == 1
+            break
+        print i * 10
+
+# Inner scopes may shadow, and do not leak.
+let x = 1
+if x == 1
+    let x = 2.5
+    print x
+print x
+
+var total = 10
+total -= 1
+total *= 3
+var half = 1.0
+half /= 2.0
+print total
+print half
+
+let label = if x == 1 then 10 else 20
+print label
+print if false then 1.5 else 2.5
+
+# `and` and `or` skip the right side.
+print true and false
+print false or true
+print not true
+print false and 1 // (x - 1) == 0
+print true or 1 // (x - 1) == 0
+
+if x == 2
+    print "no"
+else if x == 1
+    print "yes"
+else
+    print "no"

@@ -28,6 +28,12 @@ Add new entries at the end of the list. To reverse a decision, add a new entry t
 | 20 | 2026-11-05 | `print` takes one value | One way to do it. Interpolation already joins values. Closes the M1 open question with its default. |
 | 21 | 2026-11-05 | Names are ASCII for now | Identifier confusables are a known attack (see `research.md`). Widening later breaks nothing, and narrowing later would. |
 | 22 | 2026-11-05 | Text escapes are `\n`, `\t`, `\r`, `\\`, and `\"` only. `"""` text drops a blank closing line | The spec left both undefined. These escapes are common to Python and TypeScript. Swift has the closing-line rule, so the value has no stray line break. |
+| 23 | 2026-11-05 | `/` yields `float` for `int` operands, and follows IEEE 754 | Closes the M2 open question with its default. It matches Python, and `//` is one character away. The agent trial at M3 tests the surprise. |
+| 24 | 2026-11-05 | `//` rounds down, `%` takes the sign of the divisor, both are `int` only, and a zero divisor traps | The spec named floor division, and this pairing keeps `(a // b) * b + a % b == a`, as in Python. `float` operands stay out until a real need appears, since adding them later breaks nothing. |
+| 25 | 2026-11-05 | Stack overflow is a trap, checked on entry to each task | Recursion arrived at M2, and hitting the guard page ends the process with an operating system error, not the documented exit code 101. A software check gives the source position too. |
+| 26 | 2026-11-05 | Named arguments keep parameter order, defaults come last, and only a parameter with a default can be named | Evaluation order is then the order on the page, with no hidden reordering. Swift has the same order rule. One form for each call. |
+| 27 | 2026-11-05 | A task reads a top-level `let` only if its value is a literal | Top-level statements run in order, so a task called earlier could read an uninitialized value. That would break a guarantee in `security.md`. |
+| 28 | 2026-11-05 | A trap message holds its source position, and each site's text is static data | One runtime entry point, and no cost on the hot path. Research favored a shared cold path. A stack trace comes later. |
 
 ## Open questions
 
@@ -35,10 +41,10 @@ Decide each one by the milestone shown.
 
 | Question | Default if undecided | Decide by |
 | --- | --- | --- |
-| Does `/` returning `float` for integers surprise agents? | Keep, matching Python. | M2 |
 | How are generic arguments that are not expressions written? `f[int](x)` parses as an index, but `f[int?](x)` is a syntax error. | Parse index contents as a type when an expression fails. | M3 |
 | Is `T?` inside a map a problem? `map[text, int?].get` flattens to `int?`, which loses "key missing" versus "value none". | Accept, and offer `.has(key)`. | M3 |
 | Should `change` receivers be marked at dot calls? | No marker, and require `var`. | M3 |
+| Can a task read a top-level `let` that is not a literal? It needs a defined initialization order. | No: keep decision 27. | M5 |
 | Add an LLVM backend for release builds? | Only if benchmarks demand it. | M4 |
 | Literal types such as `"open" or "closed"` | Leave out of version 1. | M5 |
 | License | Choose before first public release. | M5 |

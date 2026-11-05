@@ -1,0 +1,7 @@
+redefined.lcd:2:5: error E0304: `a` is already defined
+redefined.lcd:3:5: error E0304: `f` is already defined
+redefined.lcd:6:9: error E0304: `b` is already defined
+redefined.lcd:11:6: error E0304: `f` is already defined
+redefined.lcd:14:16: error E0304: `x` is already defined
+redefined.lcd:15:9: error E0304: `x` is already defined
+redefined.lcd:18:9: error E0304: `i` is already defined

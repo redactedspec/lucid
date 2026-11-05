@@ -1,0 +1,4 @@
+let a: Thing = 1
+
+task f(b: Other) -> Third
+    ...

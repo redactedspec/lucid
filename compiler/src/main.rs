@@ -2,8 +2,10 @@
 
 #[allow(dead_code)] // Later stages read the tree that the parser builds now.
 mod ast;
+mod check;
 mod diag;
 mod lexer;
+mod mir;
 mod native;
 mod parser;
 
@@ -40,11 +42,17 @@ fn cli(args: &[String]) -> ExitCode {
         return usage();
     }
     let (src, file, mut diags) = load(path);
-    if run
-        && diags.is_empty()
-        && let Some(Err(errors)) = file.as_ref().map(native::run)
+    if diags.is_empty()
+        && let Some(file) = &file
     {
+        let (program, errors) = check::check(file);
         diags = errors;
+        if run && diags.is_empty() {
+            native::run(&program, path, &src, STACK_BYTES);
+        } else if !run {
+            // `check` reports errors in the program. An unbuilt feature is not one.
+            diags.retain(|d| d.code != "E0901");
+        }
     }
     if json {
         emit(std::io::stdout(), &diag::render_json(path, &src, &diags));

@@ -1,0 +1,2 @@
+return_outside_task.lcd:1:1: error E0310: `return` is only allowed in a task
+return_outside_task.lcd:3:5: error E0310: `return` is only allowed in a task

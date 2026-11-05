@@ -1,0 +1,4 @@
+task later() -> int
+    ...
+
+print later()

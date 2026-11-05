@@ -1,0 +1,6 @@
+break
+continue
+
+task f()
+    if true
+        break

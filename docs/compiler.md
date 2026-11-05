@@ -4,7 +4,7 @@ The compiler is written in Rust until M9, when its front end moves to Lucid (dec
 
 ## Status
 
-As of M1, the lexer and parser cover the full grammar. `lucid check` runs only those two stages, so it reports syntax errors only. `lucid run` compiles programs made of `print` statements of plain text, and reports E0901 for anything else. `native.rs` reads the syntax tree directly, and the stages between the parser and the backend are planned.
+As of M2, `lucid run` compiles `int`, `float`, `bool`, and `none`, `let`, `var`, `if`, `while`, `for` over ranges, top-level tasks with recursion and defaults, and `print` of those values or of plain text. It reports E0901 for anything else. `check.rs` binds names, checks types, and lowers to MIR in one pass, because with no modules or generics those stages have nothing to do alone. It splits when they arrive. Ownership has nothing to do until M3 brings heap values.
 
 ## Pipeline
 
@@ -12,11 +12,11 @@ As of M1, the lexer and parser cover the full grammar. `lucid check` runs only t
 source text
   -> lexer          tokens with NEWLINE, INDENT, DEDENT
   -> parser         AST, with error recovery
-  -> resolver       names bound across modules
-  -> type checker   inference, narrowing, exhaustiveness
-  -> monomorphizer  concrete tasks and types only
+  -> resolver       names bound across modules (in check.rs for now)
+  -> type checker   inference, narrowing, exhaustiveness (check.rs)
+  -> monomorphizer  concrete tasks and types only (planned)
   -> MIR            simple, explicit, structured operations
-  -> ownership      moves, count operations, exclusivity, reuse
+  -> ownership      moves, count operations, exclusivity, reuse (planned)
   -> backend        Cranelift (native, JIT) or wasm-encoder (web)
 ```
 
@@ -35,9 +35,9 @@ compiler/          Rust crate `lucid`: the CLI and compiler
         ast.rs
         parser.rs
         resolve.rs     planned
-        check.rs       planned
+        check.rs   names, types, lowering to MIR
         mono.rs        planned
-        mir.rs         planned
+        mir.rs     typed, structured operations
         ownership.rs   planned
         native.rs  Cranelift backend
         wasm.rs        planned: WebAssembly backend
@@ -45,12 +45,14 @@ compiler/          Rust crate `lucid`: the CLI and compiler
 runtime/           Rust crate `lucid_rt`: allocator, counting, text, traps
 std/               planned: standard library in Lucid
 tests/             golden tests
-benchmarks/        planned: Lucid and Rust versions of each program
+benchmarks/        Lucid and Rust versions of each program
 ```
 
 ## Runtime
 
-`lucid_rt` is small and has a C ABI. It provides allocation, reference counting, text and list primitives, trap reporting, and task scheduling.
+`lucid_rt` is small and has a C ABI. Today it provides printing and trap reporting. Allocation, reference counting, text and list primitives, and task scheduling are planned.
+
+A trap site is a cold block that passes `lucid_trap` a message holding its source position. Every task checks the stack pointer on entry. At M2 the limit is a constant in the code, because `lucid run` has one thread with a known stack. `lucid build` and `spawn` need a limit per thread.
 
 - `lucid run` links it directly, since the JIT runs inside the compiler process.
 - `lucid build` embeds a prebuilt `lucid_rt` static library in the compiler and passes it to the system linker.
@@ -77,12 +79,13 @@ cargo run -p lucid -- run examples/file.lcd   # the compiler
 cargo test                                    # unit and golden tests
 cargo clippy --all-targets                    # lints
 cargo fmt                                     # formatting
+sh benchmarks/run.sh                          # benchmarks, needs python
 ```
 
 | Command | Behavior | State |
 | --- | --- | --- |
-| `lucid run file.lcd` | Compile with JIT and run | Works for `print` of plain text |
-| `lucid check [--json] file.lcd` | Report diagnostics only | Syntax errors only. Takes a file until packages exist at M5 |
+| `lucid run file.lcd` | Compile with JIT and run | Works for the features under "Status" |
+| `lucid check [--json] file.lcd` | Report diagnostics only | Syntax, name, and type errors, see `agents.md`. Takes a file until packages exist at M5 |
 | `lucid build` | Produce a native executable | Planned |
 | `lucid build --target web` | Produce WebAssembly and a loader | Planned |
 | `lucid test` | Run `test` blocks | Planned |
@@ -92,12 +95,15 @@ cargo fmt                                     # formatting
 | `lucid context MODULE` | Print a compact API | Planned |
 | `lucid doc` | Generate docs | Planned |
 
+The `bench-unchecked` cargo feature removes `+`, `-`, and `*` overflow checks, only so that `benchmarks/run.sh` can measure their cost. It must never ship: `docs/security.md` promises traps in all builds.
+
 Exit codes: 0 for success, 1 for compile errors, 2 for bad usage, and 101 for a trap or a compiler bug. If the reader of compiler output has gone, the output is dropped and the exit code does not change.
 
 ## Testing
 
 - **Golden run tests:** `tests/run/name.lcd` with `name.out` for expected output.
 - **Golden error tests:** `tests/fail/name.lcd` with `name.err` for expected diagnostics, under `lucid run`.
+- **Golden trap tests:** `tests/trap/name.lcd` with `name.err` for the trap message, and exit code 101.
 - **Error code check:** `compiler/tests/golden.rs` fails if a code in the source has no golden test or is missing from `docs/agents.md`.
 - **Examples:** everything in `examples/` must parse. Later milestones raise this to compile.
 - **Ownership-off mode:** the whole suite runs with ownership optimizations disabled, and output must match.

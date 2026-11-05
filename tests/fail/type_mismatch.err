@@ -1,0 +1,38 @@
+type_mismatch.lcd:1:16: error E0303: this annotation needs `float`, found `int`
+  note: conversions are explicit: use `.to_float()`
+type_mismatch.lcd:2:14: error E0303: this annotation needs `int`, found `float`
+  note: conversions are explicit: use `.to_int()`
+type_mismatch.lcd:4:5: error E0303: this assignment needs `int`, found `float`
+  note: conversions are explicit: use `.to_int()`
+type_mismatch.lcd:5:1: error E0303: this assignment needs `int`, found `float`
+  note: conversions are explicit: use `.to_int()`
+type_mismatch.lcd:6:4: error E0303: `if` needs `bool`, found `int`
+type_mismatch.lcd:8:7: error E0303: `while` needs `bool`, found `float`
+type_mismatch.lcd:10:7: error E0303: `+` needs one type on both sides, found `int` and `float`
+  note: conversions are explicit: use `.to_float()` or `.to_int()`
+type_mismatch.lcd:11:7: error E0303: `==` needs one type on both sides, found `int` and `float`
+  note: conversions are explicit: use `.to_float()` or `.to_int()`
+type_mismatch.lcd:12:7: error E0303: `//` needs `int`, found `float`
+type_mismatch.lcd:13:7: error E0303: `%` needs `int`, found `float`
+type_mismatch.lcd:14:7: error E0303: `+` needs a number, found `bool`
+type_mismatch.lcd:15:7: error E0303: `<` needs a number, found `bool`
+type_mismatch.lcd:16:7: error E0303: `==` needs a number, found `none`
+type_mismatch.lcd:17:8: error E0303: `-` needs a number, found `bool`
+type_mismatch.lcd:18:11: error E0303: `not` needs `bool`, found `int`
+type_mismatch.lcd:19:7: error E0303: `and` needs `bool`, found `int`
+type_mismatch.lcd:20:15: error E0303: `or` needs `bool`, found `int`
+type_mismatch.lcd:21:10: error E0303: `if` needs `bool`, found `int`
+type_mismatch.lcd:22:27: error E0303: `else`, to match `then`, needs `int`, found `float`
+  note: conversions are explicit: use `.to_int()`
+type_mismatch.lcd:23:10: error E0303: a range needs `int`, found `float`
+  note: conversions are explicit: use `.to_int()`
+type_mismatch.lcd:25:13: error E0303: a range needs `int`, found `bool`
+type_mismatch.lcd:27:10: error E0303: `for` cannot loop over `int`
+type_mismatch.lcd:29:17: error E0303: a range has nothing to change
+type_mismatch.lcd:31:17: error E0303: this default needs `int`, found `float`
+  note: conversions are explicit: use `.to_int()`
+type_mismatch.lcd:32:12: error E0303: this `return` needs `int`, found `float`
+  note: conversions are explicit: use `.to_int()`
+type_mismatch.lcd:34:12: error E0303: this `return` needs `none`, found `int`
+type_mismatch.lcd:36:5: error E0303: this `return` needs `int`, found `none`
+type_mismatch.lcd:37:12: error E0303: this argument needs `int`, found `bool`

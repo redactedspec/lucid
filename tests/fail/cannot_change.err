@@ -1,0 +1,9 @@
+cannot_change.lcd:2:1: error E0305: `a` cannot change
+  note: only a name declared with `var` can change
+cannot_change.lcd:3:1: error E0305: `a` cannot change
+  note: only a name declared with `var` can change
+cannot_change.lcd:5:5: error E0305: `i` cannot change
+  note: only a name declared with `var` can change
+cannot_change.lcd:8:5: error E0305: `p` cannot change
+  note: only a name declared with `var` can change
+cannot_change.lcd:9:5: error E0305: `limit` cannot change

@@ -2,6 +2,7 @@
 //!
 //! `tests/run/x.lcd` must run, print `x.out`, and exit 0.
 //! `tests/fail/x.lcd` must fail under `lucid run`, print `x.err`, and exit 1.
+//! `tests/trap/x.lcd` must start, then trap with `x.err`, and exit 101.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -71,6 +72,16 @@ fn bad_programs_fail() {
     golden("fail", "err", |output, expected| {
         let stderr = text(&output.stderr);
         (output.status.code() != Some(1) || stderr != expected).then(|| {
+            format!("exit {:?}\nstderr: {stderr:?}\nexpected: {expected:?}", output.status.code())
+        })
+    });
+}
+
+#[test]
+fn traps_stop_the_program() {
+    golden("trap", "err", |output, expected| {
+        let stderr = text(&output.stderr);
+        (output.status.code() != Some(101) || stderr != expected).then(|| {
             format!("exit {:?}\nstderr: {stderr:?}\nexpected: {expected:?}", output.status.code())
         })
     });

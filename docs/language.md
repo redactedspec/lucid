@@ -33,6 +33,8 @@ Every value must be initialized. Shadowing in the same scope is an error.
 
 Tasks cannot read or write a top-level `var`. Pass it as a parameter. This keeps exclusivity checks static.
 
+A task may read a top-level `let` whose value is a literal, with or without a leading `-`. Such a value exists before any statement runs, so a task never sees it uninitialized. Reading any other top-level `let` reports E0901, see the open questions in `decisions.md`.
+
 ## Basic types
 
 | Type | Meaning |
@@ -52,7 +54,17 @@ There are no implicit conversions. Use `.to_float()`, `.to_int()`, and similar t
 
 Integer overflow traps in every build. Wrapping math uses explicit tasks such as `a.wrapping_add(b)`.
 
-`/` always yields `float`. `//` is floor division and yields `int`. `%` is remainder.
+`/` always yields `float`, and follows IEEE 754, so `1 / 0` is `inf`. Two `int` operands are converted to `float` first.
+
+`//` and `%` take `int` operands only. `//` rounds down, and `%` takes the sign of the divisor, so `(a // b) * b + a % b == a`. A zero divisor traps. A `float` operand is a compile error.
+
+Arithmetic and comparison need one type on both sides. `==` and `!=` also work on `bool`. `and` and `or` skip their right side when the left side decides the result.
+
+`x.to_float()` converts an `int`. `x.to_int()` rounds a `float` toward zero, and traps on NaN or a value outside `int`.
+
+A number literal must fit its type. `-9223372036854775808` is the lowest `int` literal, because a leading `-` is part of the literal.
+
+`print` takes one value. A `float` prints as the shortest text that reads back as the same value, such as `3.0`, `0.1`, `1e21`, `inf`, or `NaN`. A `none` prints as `none`.
 
 ## Text
 
@@ -103,9 +115,13 @@ let label = if n == 1 then "item" else "items"
 
 Conditions must be `bool`. There is no truthiness.
 
+A `for` over a range reads its bounds once. The loop name cannot be assigned, and `0..=x` ends cleanly even when `x` is the highest `int`.
+
 ## Tasks
 
-A `task` is a function. Parameters always have types. With no `->`, a task returns `none`. Return types are never inferred, so a signature is always complete.
+A `task` is a function. Parameters always have types. With no `->`, a task returns `none`. Return types are never inferred, so a signature is always complete. A task with a return type must return on every path. `return` is only allowed in a task.
+
+Tasks may be used before their line. A parameter cannot be assigned.
 
 ```lucid
 task add(a: int, b: int) -> int
@@ -115,7 +131,7 @@ task connect(host: text, port: int = 443, secure: bool = true)
     ...
 ```
 
-Arguments are positional. A parameter with a default must be passed by name:
+Arguments are positional. A parameter with a default must be passed by name, and only such a parameter can be. Parameters with defaults come last. Named arguments follow positional ones, in parameter order, so arguments always run in the order written. A default is a literal.
 
 ```lucid
 connect("example.com", port: 8080)
@@ -246,7 +262,7 @@ match load("app.toml")
 - `x else y` gives `y` in place of the error.
 - An unused error is a compile error.
 
-A **trap** is an unrecoverable bug: out-of-bounds index, overflow, failed `expect`, or a `shared` access conflict. A trap prints a stack trace and exits with code 101. Traps cannot be caught.
+A **trap** is an unrecoverable bug: out-of-bounds index, overflow, a zero divisor, a failed conversion, stack overflow, a reached `...`, failed `expect`, or a `shared` access conflict. A trap prints its source position and exits with code 101. A stack trace is planned for M5. Traps cannot be caught.
 
 ## Generics
 

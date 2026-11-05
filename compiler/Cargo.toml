@@ -3,6 +3,10 @@ name = "lucid"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# Removes overflow checks, only to measure their cost. See docs/compiler.md.
+bench-unchecked = []
+
 [dependencies]
 cranelift-codegen = "0.137.1"
 cranelift-frontend = "0.137.1"
