@@ -28,7 +28,8 @@ Goals conflict. Resolve conflicts in this order:
 
 - **Task signatures need types.** Python needs none. Locals and lambdas are inferred, so everyday code stays light.
 - **Some programs pay for reference counting.** Lucid hides ownership, so the compiler cannot prove everything. Heavily shared data costs more than hand-tuned Rust. `lucid check --costs` shows where.
-- **Peak speed is a staged target.** Cranelift compiles fast but optimizes less than LLVM. An LLVM release backend stays possible later.
+- **Peak speed is a staged target.** Cranelift compiles about 10x faster than LLVM, but published data shows code from 14% slower up to 2x slower on some benchmarks. An LLVM release backend stays possible later.
+- **Agent-friendliness is unproven.** Models have training data for Python and none for Lucid. See [research.md](research.md).
 - **Reference cycles leak unless `weak` is used.** A leak is safe but still a bug.
 - **Stored references do not exist.** Some designs common in C++ or Rust need indexes or `shared` instead.
 

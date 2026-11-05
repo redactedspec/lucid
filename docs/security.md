@@ -52,7 +52,11 @@ mailer = { version = "0.4", allow = ["net"] }
 
 **Enforcement:** imports are checked at compile time. A dependency that imports `std.net` without an `allow` entry from its parent fails the build. Path and name limits are enforced at run time in `std`.
 
-**Limit:** `unsafe` code can bypass any of this. For that reason, `unsafe` is itself a permission, and it should be granted rarely.
+**Transitive rule:** a package must hold every permission that its dependencies hold. Otherwise, a package with no `net` permission could reach the network by calling a dependency that has it.
+
+**Limit:** `unsafe` and `process` can bypass all of this. Native code ignores these checks, and a child process does not inherit them. Treat both as full trust, and grant them rarely. Deno and Node.js document the same limits.
+
+Permissions are not a sandbox. They limit what dependencies can do by accident or casual misuse. To run untrusted code, use operating system isolation.
 
 ## Supply chain
 

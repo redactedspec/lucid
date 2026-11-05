@@ -94,6 +94,8 @@ These are known costs of this model, not bugs:
 
 ## Research risk
 
+The published results for Perceus and Lean come from functional languages, with memory-focused benchmarks. Lucid applies them to code that looks imperative, and no production language has shipped this exact model. See [research.md](research.md).
+
 This is the hardest part of the compiler, so it comes with a staged plan:
 
 1. **M3: naive.** Count every use. Correct and slow.

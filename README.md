@@ -30,5 +30,6 @@ Read in this order:
 | [compiler.md](docs/compiler.md) | Compiler architecture and toolchain |
 | [roadmap.md](docs/roadmap.md) | Milestones with exit criteria |
 | [decisions.md](docs/decisions.md) | Decision log and open questions |
+| [research.md](docs/research.md) | Evidence behind each decision, and its gaps |
 
 [examples/](examples/) holds target programs. They become the first compiler tests.

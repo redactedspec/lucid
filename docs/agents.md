@@ -60,8 +60,10 @@ Rules:
 
 ## Agent onboarding
 
-The repository ships `docs/agent-guide.md` from M5 onward. It is one compact file with the full language, for pasting into any agent context. CI checks that it stays under the token budget and that all its code compiles.
+The repository ships `docs/agent-guide.md`, drafted at M3. It is one compact file with the full language, for pasting into any agent context. CI checks that it stays under the token budget and that all its code compiles.
+
+Models have no Lucid training data, so this guide and the diagnostics carry the whole load. Evidence is in [research.md](research.md).
 
 ## Agent benchmark
 
-Added at M5. It is a fixed set of 50 programming tasks, each with tests. Agents get only `agent-guide.md`. The benchmark tracks first-attempt compile rate, first-attempt test pass rate, and repair turns. Compare against the same tasks in Python and TypeScript. Treat a repeated failure as a language or diagnostics defect.
+A 10-task trial runs at M3, so that a syntax problem surfaces before the language freezes. The full benchmark arrives at M5. It is a fixed set of 50 programming tasks, each with tests. Agents get only `agent-guide.md`. The benchmark tracks first-attempt compile rate, first-attempt test pass rate, and repair turns. Compare against the same tasks in Python and TypeScript. Treat a repeated failure as a language or diagnostics defect.

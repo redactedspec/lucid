@@ -30,6 +30,8 @@ let limit: int = 10  # optional annotation
 
 Every value must be initialized. Shadowing in the same scope is an error.
 
+Tasks cannot read or write a top-level `var`. Pass it as a parameter. This keeps exclusivity checks static.
+
 ## Basic types
 
 | Type | Meaning |

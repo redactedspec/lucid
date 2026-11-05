@@ -26,7 +26,7 @@ Build a thin end-to-end path first. Depth comes later.
 - [ ] `let`, `var`, `if`, `while`, `for` over ranges
 - [ ] Tasks, recursion, parameter annotations
 - [ ] Type checking for all of the above
-- [ ] First benchmarks
+- [ ] First benchmarks, with and without overflow checks
 
 **Exit:** FizzBuzz and recursive Fibonacci run. `fib(40)` is within 2x of Rust release.
 
@@ -38,8 +38,9 @@ Build a thin end-to-end path first. Depth comes later.
 - [ ] Generics with monomorphization, traits, derived traits
 - [ ] Parameter modes and exclusivity checks
 - [ ] Naive reference counting, leak-checking debug runtime
+- [ ] Draft `docs/agent-guide.md`, and run a 10-task agent trial
 
-**Exit:** `examples/hello.lcd` runs. Golden tests cover every feature above, with no leaks under the debug runtime.
+**Exit:** `examples/hello.lcd` runs. Golden tests cover every feature above, with no leaks under the debug runtime. Trial failures are recorded in `docs/research.md`.
 
 ## M4: Ownership performance
 
@@ -59,7 +60,7 @@ Build a thin end-to-end path first. Depth comes later.
 - [ ] `lucid build`, `test`, `fix`, `explain`, `context`
 - [ ] `lucid fmt`, written in Lucid as first dogfooding test
 - [ ] Permission checks
-- [ ] Agent guide and agent benchmark
+- [ ] Full agent benchmark
 - [ ] Fuzzing
 
 **Exit:** `examples/todo.lcd` builds to a standalone `.exe` and works.
