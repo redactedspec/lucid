@@ -1,0 +1,1 @@
+bad_indent.lcd:2:1: error E0102: indentation of 2 spaces; each block is 4 spaces deeper

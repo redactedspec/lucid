@@ -1,0 +1,6 @@
+unsupported.lcd:2:1: error E0901: this statement parses, but cannot run yet
+  note: only `print` of plain text runs at this milestone; see docs/roadmap.md
+unsupported.lcd:3:7: error E0901: `print` of a non-text value parses, but cannot run yet
+  note: only `print` of plain text runs at this milestone; see docs/roadmap.md
+unsupported.lcd:4:7: error E0901: text interpolation parses, but cannot run yet
+  note: only `print` of plain text runs at this milestone; see docs/roadmap.md

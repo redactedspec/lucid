@@ -45,6 +45,15 @@ impl<'a> Lines<'a> {
     }
 }
 
+/// Merges parser diagnostics into `diags`, except on lines that already have
+/// one. The lexer's recovery often causes a second, misleading parse error.
+pub fn add_unless_same_line(src: &str, diags: &mut Vec<Diagnostic>, more: Vec<Diagnostic>) {
+    let lines = Lines::new(src);
+    let line = |d: &Diagnostic| lines.position(d.span.start).0;
+    let taken: std::collections::HashSet<usize> = diags.iter().map(line).collect();
+    diags.extend(more.into_iter().filter(|d| !taken.contains(&line(d))));
+}
+
 /// Diagnostics must print in a stable order: by position, then as found.
 fn sorted(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
     let mut sorted: Vec<_> = diags.iter().collect();
@@ -120,10 +129,10 @@ mod tests {
     #[test]
     fn json_has_the_documented_shape_and_escapes_text() {
         let span = Span { start: 0, end: 2 };
-        let diags = [Diagnostic::new("E0000", "bad \"x\"", span).note("a\nb")];
+        let diags = [Diagnostic::new("T0", "bad \"x\"", span).note("a\nb")];
         assert_eq!(
             render_json("a\\b.lcd", "ab", &diags),
-            "[{\"code\":\"E0000\",\"severity\":\"error\",\"message\":\"bad \\\"x\\\"\",\
+            "[{\"code\":\"T0\",\"severity\":\"error\",\"message\":\"bad \\\"x\\\"\",\
              \"file\":\"a\\\\b.lcd\",\"line\":1,\"column\":1,\"end_line\":1,\"end_column\":3,\
              \"notes\":[\"a\\nb\"],\"fixes\":[]}]\n"
         );

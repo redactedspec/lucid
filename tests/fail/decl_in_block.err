@@ -1,0 +1,1 @@
+decl_in_block.lcd:2:5: error E0206: `use` is only allowed at top level

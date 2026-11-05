@@ -61,10 +61,14 @@ Rules:
 
 ### Error codes
 
+A parser error on a line that already has a lexer error is dropped, since it is usually a side effect.
+
 The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and types, `E09xx` features not built yet. Every code has a golden test in `tests/fail/`.
 
 | Code | Meaning |
 | --- | --- |
+| E0001 | Cannot read the file |
+| E0002 | File is not valid UTF-8 |
 | E0101 | Tab in indentation |
 | E0102 | Indentation width is wrong |
 | E0103 | Unexpected character |
@@ -73,7 +77,13 @@ The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and 
 | E0106 | Single `}` in text |
 | E0107 | Malformed number |
 | E0108 | Text after an opening `"""` |
+| E0201 | Unexpected token |
+| E0202 | Invalid assignment target |
+| E0203 | `match` used as a value has a block arm |
+| E0204 | Chained comparison or range |
 | E0205 | Nesting is too deep (limit 128) |
+| E0206 | Declaration only allowed at top level |
+| E0901 | Parses, but cannot run at this milestone |
 
 ## Agent onboarding
 

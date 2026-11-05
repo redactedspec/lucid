@@ -41,7 +41,7 @@ Docs describe what is true now. Mark planned items as planned, and remove claims
 
 ## Commands
 
-No compiler exists until M1. The planned commands are listed in `docs/compiler.md`.
+`cargo test` runs unit and golden tests. Other commands are in `docs/compiler.md`.
 
 ## Commits
 

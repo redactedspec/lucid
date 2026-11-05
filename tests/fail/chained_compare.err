@@ -1,0 +1,4 @@
+chained_compare.lcd:1:15: error E0204: comparisons cannot be chained
+  note: join them with `and`
+chained_compare.lcd:2:13: error E0204: ranges cannot be chained
+  note: use one `..` or `..=`

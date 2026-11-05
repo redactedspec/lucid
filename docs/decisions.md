@@ -27,7 +27,7 @@ Add new entries at the end of the list. To reverse a decision, add a new entry t
 | 19 | 2026-11-04 | Run an agent trial at M3, not M5 | Models have no Lucid training data, so agent-friendliness must be tested before syntax settles. |
 | 20 | 2026-11-05 | `print` takes one value | One way to do it. Interpolation already joins values. Closes the M1 open question with its default. |
 | 21 | 2026-11-05 | Names are ASCII for now | Identifier confusables are a known attack (see `research.md`). Widening later breaks nothing, and narrowing later would. |
-| 22 | 2026-11-05 | Text escapes are `\n`, `\t`, `\r`, `\`, and `\"` only. `"""` text drops a blank closing line | The spec left both undefined. These escapes are common to Python and TypeScript. Swift has the closing-line rule, so the value has no stray line break. |
+| 22 | 2026-11-05 | Text escapes are `\n`, `\t`, `\r`, `\\`, and `\"` only. `"""` text drops a blank closing line | The spec left both undefined. These escapes are common to Python and TypeScript. Swift has the closing-line rule, so the value has no stray line break. |
 
 ## Open questions
 

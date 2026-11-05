@@ -1,0 +1,6 @@
+let = 1
+print
+let ok = 2
+task f(
+    print "skipped"
+let = 3

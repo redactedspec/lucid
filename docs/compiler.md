@@ -2,6 +2,10 @@
 
 The compiler is written in Rust until M9, when its front end moves to Lucid (decision 16). The lexer, parser, type checker, and ownership analysis are hand-written. Machine code comes from Cranelift, and browser code comes from a WebAssembly backend.
 
+## Status
+
+As of M1, the lexer and parser cover the full grammar. `lucid check` runs only those two stages, so it reports syntax errors only. `lucid run` compiles programs made of `print` statements of plain text, and reports E0901 for anything else. `native.rs` reads the syntax tree directly, and the stages between the parser and the backend are planned.
+
 ## Pipeline
 
 ```text
@@ -30,17 +34,18 @@ compiler/          Rust crate `lucid`: the CLI and compiler
         lexer.rs
         ast.rs
         parser.rs
-        resolve.rs
-        check.rs
-        mono.rs
-        mir.rs
-        ownership.rs
+        resolve.rs     planned
+        check.rs       planned
+        mono.rs        planned
+        mir.rs         planned
+        ownership.rs   planned
         native.rs  Cranelift backend
-        wasm.rs    WebAssembly backend
+        wasm.rs        planned: WebAssembly backend
+    tests/golden.rs    runs everything in `tests/` and `examples/`
 runtime/           Rust crate `lucid_rt`: allocator, counting, text, traps
-std/               standard library in Lucid
+std/               planned: standard library in Lucid
 tests/             golden tests
-benchmarks/        Lucid and Rust versions of each program
+benchmarks/        planned: Lucid and Rust versions of each program
 ```
 
 ## Runtime
@@ -57,32 +62,44 @@ benchmarks/        Lucid and Rust versions of each program
 | --- | --- |
 | `cranelift-codegen`, `cranelift-frontend`, `cranelift-module` | Native code generation |
 | `cranelift-jit` | `lucid run` |
-| `cranelift-object` | Object files for `lucid build` |
-| `target-lexicon` | Target descriptions |
-| `wasm-encoder` | WebAssembly output |
+| `cranelift-object` | Object files for `lucid build` (added when needed) |
+| `target-lexicon` | Target descriptions (added when needed) |
+| `wasm-encoder` | WebAssembly output (added when needed) |
 
-Use the latest stable release of each at M1. No parser generators and no CLI framework.
+Cranelift crates are at 0.137, the latest stable release at M1. No parser generators and no CLI framework.
 
 ## Commands
 
-| Command | Behavior |
-| --- | --- |
-| `lucid run file.lcd` | Compile with JIT and run |
-| `lucid build` | Produce a native executable |
-| `lucid build --target web` | Produce WebAssembly and a loader |
-| `lucid check` | Report diagnostics only |
-| `lucid test` | Run `test` blocks |
-| `lucid fmt` | Format, no options |
-| `lucid fix` | Apply suggested fixes |
-| `lucid explain CODE` | Explain an error code |
-| `lucid context MODULE` | Print a compact API |
-| `lucid doc` | Generate docs |
+Run from the repository root:
+
+```sh
+cargo run -p lucid -- run examples/file.lcd   # the compiler
+cargo test                                    # unit and golden tests
+cargo clippy --all-targets                    # lints
+cargo fmt                                     # formatting
+```
+
+| Command | Behavior | State |
+| --- | --- | --- |
+| `lucid run file.lcd` | Compile with JIT and run | Works for `print` of plain text |
+| `lucid check [--json] file.lcd` | Report diagnostics only | Syntax errors only. Takes a file until packages exist at M5 |
+| `lucid build` | Produce a native executable | Planned |
+| `lucid build --target web` | Produce WebAssembly and a loader | Planned |
+| `lucid test` | Run `test` blocks | Planned |
+| `lucid fmt` | Format, no options | Planned |
+| `lucid fix` | Apply suggested fixes | Planned |
+| `lucid explain CODE` | Explain an error code | Planned |
+| `lucid context MODULE` | Print a compact API | Planned |
+| `lucid doc` | Generate docs | Planned |
+
+Exit codes: 0 for success, 1 for compile errors, 2 for bad usage, and 101 for a trap or a compiler bug.
 
 ## Testing
 
 - **Golden run tests:** `tests/run/name.lcd` with `name.out` for expected output.
-- **Golden error tests:** `tests/fail/name.lcd` with `name.err` for expected diagnostics.
-- **Examples:** everything in `examples/` must compile.
+- **Golden error tests:** `tests/fail/name.lcd` with `name.err` for expected diagnostics, under `lucid run`.
+- **Error code check:** `compiler/tests/golden.rs` fails if a code in the source has no golden test or is missing from `docs/agents.md`.
+- **Examples:** everything in `examples/` must parse. Later milestones raise this to compile.
 - **Ownership-off mode:** the whole suite runs with ownership optimizations disabled, and output must match.
 - **Memory checks:** a debug runtime counts allocations, and reports leaks and double frees for each test.
 - **Fuzzing:** add from M5. Parser and checker must never panic.

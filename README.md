@@ -12,7 +12,7 @@ for person in people
     print greet(person)
 ```
 
-**Status:** design stage. No compiler exists yet. Next step: milestone M1 in [docs/roadmap.md](docs/roadmap.md).
+**Status:** early. The lexer and parser cover the full grammar, and `lucid run` runs `print` of plain text. Progress is in [docs/roadmap.md](docs/roadmap.md).
 
 ## Docs
 

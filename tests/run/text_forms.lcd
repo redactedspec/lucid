@@ -1,0 +1,13 @@
+# Comments and blank lines produce nothing.
+
+print "" # empty
+print "a\tb\\c\"d"
+print "line\nbreak"
+print "{{braces}}"
+print "héllo → 世界"
+print """
+    first
+      second
+
+    third
+    """

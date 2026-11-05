@@ -10,13 +10,13 @@ Documents and example programs.
 
 Build a thin end-to-end path first. Depth comes later.
 
-- [ ] Cargo workspace with `compiler/` and `runtime/`
+- [x] Cargo workspace with `compiler/` and `runtime/`
 - [x] Diagnostics with codes and `--json`
 - [x] Lexer with layout tokens, for the full grammar
-- [ ] Parser for the full grammar, with error recovery
-- [ ] Cranelift JIT backend
-- [ ] `print` of text, `lucid run`, `lucid check`
-- [ ] Golden test runner
+- [x] Parser for the full grammar, with error recovery
+- [x] Cranelift JIT backend
+- [x] `print` of text, `lucid run`, `lucid check`
+- [x] Golden test runner
 - [ ] Claude Code setup from "Planned setup" in `docs/claude-code.md`
 
 **Exit:** `lucid run` prints `Hello, world!`. All files in `examples/` parse, even though they do not yet run.

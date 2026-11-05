@@ -1,0 +1,2 @@
+bad_number.lcd:1:9: error E0107: malformed number `0x`
+bad_number.lcd:2:9: error E0107: malformed number `1e5`

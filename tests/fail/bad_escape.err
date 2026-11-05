@@ -1,0 +1,1 @@
+bad_escape.lcd:1:9: error E0105: unknown escape; use \n \t \r \\ or \"

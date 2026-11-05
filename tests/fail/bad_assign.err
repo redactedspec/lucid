@@ -1,0 +1,1 @@
+bad_assign.lcd:1:1: error E0202: can only assign to a name, field, or index

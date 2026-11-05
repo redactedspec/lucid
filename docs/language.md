@@ -65,7 +65,7 @@ let block = """
     """
 ```
 
-Escapes are `\n`, `\t`, `\r`, `\`, and `\"`. Interpolated expressions may contain text of their own. In `"""` text, the first line break, the common indentation, and a final line holding only the closing quotes are all removed. So `block` above has two lines and no trailing line break.
+Escapes are `\n`, `\t`, `\r`, `\\`, and `\"`. Interpolated expressions may contain text of their own. In `"""` text, the first line break, the common indentation, and a final line holding only the closing quotes are all removed. So `block` above has two lines and no trailing line break.
 
 Length, slicing, and iteration work on Unicode characters by default. `.bytes()` gives raw bytes.
 

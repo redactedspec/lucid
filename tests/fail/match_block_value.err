@@ -1,0 +1,2 @@
+match_block_value.lcd:2:9: error E0203: a `match` used as a value cannot have a block arm
+  note: put the arm in one expression, or assign inside a `match` statement
