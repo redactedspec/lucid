@@ -231,6 +231,9 @@ pub enum ExprKind {
     TextBytes(Box<Expr>),
     /// A new list.
     ListOf(Vec<Expr>),
+    /// A new list from these elements, up to but not including `end`. Traps
+    /// unless `0 <= start <= end <= len`.
+    ListSlice(Box<Expr>, Box<Expr>, Box<Expr>),
     /// A new map. A later repeat of a key wins.
     MapOf(Vec<(Expr, Expr)>),
     /// A new set from a list.

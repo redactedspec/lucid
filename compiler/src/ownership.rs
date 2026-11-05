@@ -91,7 +91,9 @@ fn expr(locals: &mut Vec<Ty>, value: &mut Expr) {
             expr(locals, left);
             expr(locals, right);
         }
-        ExprKind::If(first, second, third) | ExprKind::TextSlice(first, second, third) => {
+        ExprKind::If(first, second, third)
+        | ExprKind::TextSlice(first, second, third)
+        | ExprKind::ListSlice(first, second, third) => {
             expr(locals, first);
             expr(locals, second);
             expr(locals, third);
@@ -109,6 +111,7 @@ fn expr(locals: &mut Vec<Ty>, value: &mut Expr) {
             | ExprKind::Join(_)
             | ExprKind::Call(..)
             | ExprKind::TextSlice(..)
+            | ExprKind::ListSlice(..)
             | ExprKind::TextCharAt(..)
             | ExprKind::TextBytes(_)
             | ExprKind::ListOf(_)

@@ -641,6 +641,33 @@ pub unsafe extern "C" fn lucid_list_has(list: *mut List, value: i64) -> bool {
     unsafe { slots(list).iter().any(|&slot| same_key(counted, slot, value)) }
 }
 
+/// A new list of the elements from `start` up to but not including `end`.
+/// Returns null if the range is not `0 <= start <= end <= len`, and compiled
+/// code then traps.
+///
+/// # Safety
+///
+/// `list` must point to a live list.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_list_slice(list: *mut List, start: i64, end: i64) -> *mut List {
+    // SAFETY: the caller guarantees a live list, and the range is checked here.
+    unsafe {
+        let old = slots(list);
+        if start < 0 || end < start || end as u64 > old.len() as u64 {
+            return std::ptr::null_mut();
+        }
+        let part = &old[start as usize..end as usize];
+        let counted = is_counted(list);
+        let copy = list_alloc(part.len(), counted);
+        (*copy).len = part.len();
+        slots(copy).copy_from_slice(part);
+        if counted {
+            part.iter().for_each(|&slot| retain_slot(slot));
+        }
+        copy
+    }
+}
+
 /// A record with a count of one. Compiled code fills all `len` slots at once,
 /// and retains those below `counted`, before anything can read them.
 #[unsafe(no_mangle)]

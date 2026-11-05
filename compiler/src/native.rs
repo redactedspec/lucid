@@ -90,6 +90,7 @@ struct Runtime {
     list_pop: FuncId,
     list_swap: FuncId,
     list_has: FuncId,
+    list_slice: FuncId,
     map_new: FuncId,
     map_set: FuncId,
     map_remove: FuncId,
@@ -149,6 +150,7 @@ fn compile(
     builder.symbol("lucid_list_pop", lucid_rt::lucid_list_pop as *const u8);
     builder.symbol("lucid_list_swap", lucid_rt::lucid_list_swap as *const u8);
     builder.symbol("lucid_list_has", lucid_rt::lucid_list_has as *const u8);
+    builder.symbol("lucid_list_slice", lucid_rt::lucid_list_slice as *const u8);
     builder.symbol("lucid_map_new", lucid_rt::lucid_map_new as *const u8);
     builder.symbol("lucid_map_set", lucid_rt::lucid_map_set as *const u8);
     builder.symbol("lucid_map_remove", lucid_rt::lucid_map_remove as *const u8);
@@ -199,6 +201,7 @@ fn compile(
         list_pop: import("lucid_list_pop", &value, &value),
         list_swap: import("lucid_list_swap", &with_two, &value),
         list_has: import("lucid_list_has", &two, &[AbiParam::new(types::I8)]),
+        list_slice: import("lucid_list_slice", &with_two, &value),
         map_new: import("lucid_map_new", &[byte[0], byte[0]], &value),
         map_set: import("lucid_map_set", &with_two, &value),
         map_remove: import("lucid_map_remove", &two, &value),
@@ -739,14 +742,12 @@ impl Lower<'_, '_> {
                 self.call(self.runtime.text_is_empty, &[value]).expect("it returns a bool")
             }
             ExprKind::TextSlice(text, start, end) => {
-                let text = self.expr(text);
-                let start = self.expr(start);
-                let end = self.expr(end);
-                let slice = self.call(self.runtime.text_slice, &[text, start, end]);
-                let slice = slice.expect("it returns a text");
-                let outside = self.body.ins().icmp_imm_s(IntCC::Equal, slice, 0);
-                self.trap_if(outside, "text slice out of bounds", expr.span);
-                slice
+                let task = self.runtime.text_slice;
+                self.slice(task, [text, start, end], "text slice out of bounds", expr.span)
+            }
+            ExprKind::ListSlice(list, start, end) => {
+                let task = self.runtime.list_slice;
+                self.slice(task, [list, start, end], "list slice out of bounds", expr.span)
             }
             ExprKind::TextByteLen(value) => {
                 let value = self.expr(value);
@@ -845,6 +846,15 @@ impl Lower<'_, '_> {
                 value
             }
         }
+    }
+
+    /// Traps at `span` if `task` gives null for the range.
+    fn slice(&mut self, task: FuncId, args: [&Expr; 3], message: &str, span: Span) -> Value {
+        let args = args.map(|arg| self.expr(arg));
+        let slice = self.call(task, &args).expect("it returns a value");
+        let outside = self.body.ins().icmp_imm_s(IntCC::Equal, slice, 0);
+        self.trap_if(outside, message, span);
+        slice
     }
 
     fn text_of(&mut self, expr: &Expr) -> Value {

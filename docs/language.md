@@ -157,7 +157,9 @@ while top is int
     top = stack.pop()
 ```
 
-Planned: list slices, and tasks that take a lambda such as `.map`. Printing a collection and `==` on one wait for the derived `Show` and `Equal`. Collections as keys wait for `Hash`.
+`x[a..b]` on a list is a new list with the elements from `a` up to but not including `b`, and `x[a..=b]` means `x[a..b + 1]`. Both ends are required, and a range out of bounds traps, by the same rules as text. A slice copies, so it cannot be written to.
+
+Planned: tasks that take a lambda such as `.map`. Printing a collection and `==` on one wait for the derived `Show` and `Equal`. Collections as keys wait for `Hash`.
 
 ## Control flow
 
@@ -388,7 +390,7 @@ match load("app.toml")
 - `x else y` gives `y` in place of the error.
 - An unused error is a compile error.
 
-A **trap** is an unrecoverable bug: out-of-bounds index or text slice, a missing map key, overflow, a zero divisor, a failed conversion, stack overflow, a reached `...`, failed `expect`, a `shared` access conflict, running out of memory, or a failed write to stdout. A trap prints its source position and exits with code 101, except that running out of memory and a failed write to stdout have no position. A stack trace is planned for M5. Traps cannot be caught.
+A **trap** is an unrecoverable bug: out-of-bounds index or slice, a missing map key, overflow, a zero divisor, a failed conversion, stack overflow, a reached `...`, failed `expect`, a `shared` access conflict, running out of memory, or a failed write to stdout. A trap prints its source position and exits with code 101, except that running out of memory and a failed write to stdout have no position. A stack trace is planned for M5. Traps cannot be caught.
 
 ## Generics
 

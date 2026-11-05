@@ -2102,7 +2102,17 @@ impl<'a> Checker<'a> {
 
     fn index(&mut self, base: &'a ast::Expr, indices: &'a [ast::Expr], span: Span) -> Expr {
         let value = self.expr(base);
-        if value.ty != Ty::Text {
+        let slice = match indices {
+            [
+                ast::Expr {
+                    kind: Ast::Binary(op @ (BinaryOp::Range | BinaryOp::RangeInclusive), start, end),
+                    ..
+                },
+            ] => Some((*op, start, end)),
+            _ => None,
+        };
+        let is_list = matches!(value.ty, Ty::List(_));
+        if value.ty != Ty::Text && !(is_list && slice.is_some()) {
             let Some((key, ty)) = self.key(value.ty, indices, span) else {
                 return poisoned(span);
             };
@@ -2112,17 +2122,9 @@ impl<'a> Checker<'a> {
             };
             return Expr { kind, ty, span };
         }
-        let (op, start, end) = match indices {
-            [
-                ast::Expr {
-                    kind: Ast::Binary(op @ (BinaryOp::Range | BinaryOp::RangeInclusive), start, end),
-                    ..
-                },
-            ] => (*op, start, end),
-            _ => {
-                let diag = Diagnostic::new("E0303", "text needs a range index", span);
-                return self.report(diag.note("for one character, use `x[i..i + 1]`"));
-            }
+        let Some((op, start, end)) = slice else {
+            let diag = Diagnostic::new("E0303", "text needs a range index", span);
+            return self.report(diag.note("for one character, use `x[i..i + 1]`"));
         };
         let (start, mut end) = self.range(start, end);
         if op == BinaryOp::RangeInclusive {
@@ -2131,8 +2133,13 @@ impl<'a> Checker<'a> {
             let kind = ExprKind::Binary(BinaryOp::Add, end.into(), one.into());
             end = Expr { kind, ty: Ty::Int, span };
         }
-        let kind = ExprKind::TextSlice(value.into(), start.into(), end.into());
-        Expr { kind, ty: Ty::Text, span }
+        let ty = value.ty;
+        let kind = if is_list {
+            ExprKind::ListSlice(value.into(), start.into(), end.into())
+        } else {
+            ExprKind::TextSlice(value.into(), start.into(), end.into())
+        };
+        Expr { kind, ty, span }
     }
 
     /// Checks an index of a list or map of type `ty`, or of a value that can
@@ -2149,7 +2156,8 @@ impl<'a> Checker<'a> {
                     },
                 ],
             ) => {
-                self.unsupported("a list slice", span);
+                let diag = Diagnostic::new("E0305", "a list slice cannot change", span);
+                self.report(diag.note("a slice is a new list: write to the elements of the list"));
                 None
             }
             (Ty::List(item), [index]) => {

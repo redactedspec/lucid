@@ -1,0 +1,2 @@
+list_slice_write.lcd:2:1: error E0305: a list slice cannot change
+  note: a slice is a new list: write to the elements of the list

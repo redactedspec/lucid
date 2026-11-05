@@ -54,7 +54,7 @@ benchmarks/        Lucid and Rust versions of each program
 
 A task with counted locals has one exit block, which releases them, so code size does not grow with returns times locals. Every other task returns directly.
 
-Every heap value starts with a count and a kind, so one `lucid_retain` and `lucid_release` serve all of them, and the kind tells `lucid_release` what to release inside. A text is one allocation: this header, a byte length, then its UTF-8 bytes. Every text literal allocates when it runs, except directly under `print`. A slice or a loop character is a new text with copied bytes. `check.rs` lowers a `for` over text or a collection to a `while` over a hidden position.
+Every heap value starts with a count and a kind, so one `lucid_retain` and `lucid_release` serve all of them, and the kind tells `lucid_release` what to release inside. A text is one allocation: this header, a byte length, then its UTF-8 bytes. Every text literal allocates when it runs, except directly under `print`. A text slice, a list slice, or a loop character is a new value with its contents copied. `check.rs` lowers a `for` over text or a collection to a `while` over a hidden position.
 
 A list is one allocation: the header, a length, a capacity, then 8-byte slots. Every element type uses one slot size, so `list[byte]` costs 8 bytes per byte for now. A map is one allocation too, with the layout of a compact dict: entries in insertion order, then a table of `2 * cap` indexes into them. A removed entry stays as a gap until the next rebuild. A set is a map with unused values. Hashes come from `RandomState`, keyed once per process.
 
