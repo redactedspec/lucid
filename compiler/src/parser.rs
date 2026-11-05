@@ -58,10 +58,10 @@ impl Parser {
         Span { start, end: end.max(start) }
     }
 
-    fn advance(&mut self) -> Token {
-        let token = self.token().clone();
+    fn advance(&mut self) -> Span {
+        let span = self.token().span;
         self.pos = (self.pos + 1).min(self.tokens.len() - 1);
-        token
+        span
     }
 
     fn eat(&mut self, sym: &str) -> bool {
@@ -109,7 +109,7 @@ impl Parser {
     fn name(&mut self) -> Parsed<Name> {
         if let TokenKind::Name(text) = self.kind() {
             let text = text.clone();
-            let span = self.advance().span;
+            let span = self.advance();
             Ok(Name { text, span })
         } else {
             self.expected("a name")
@@ -355,7 +355,7 @@ impl Parser {
             ParamMode::Read
         };
         if self.at("self") {
-            let span = self.advance().span;
+            let span = self.advance();
             let ty = if self.eat(":") { Some(self.ty()?) } else { None };
             let name = Name { text: "self".into(), span };
             return Ok(Param { mode, name, ty, default: None });
@@ -455,11 +455,12 @@ impl Parser {
             return self.type_atom();
         }
         self.nested(|p| {
-            let wrap = match p.advance().kind {
+            let wrap = match p.kind() {
                 TokenKind::Sym("shared") => TypeKind::Shared,
                 TokenKind::Sym("weak") => TypeKind::Weak,
                 _ => TypeKind::Any,
             };
+            p.advance();
             let inner = p.type_prefix()?;
             Ok(Type { kind: wrap(Box::new(inner)), span: p.since(start) })
         })
@@ -508,7 +509,8 @@ impl Parser {
     }
 
     fn let_stmt(&mut self) -> Parsed<StmtKind> {
-        let mutable = self.advance().kind == TokenKind::Sym("var");
+        let mutable = self.at("var");
+        self.advance();
         let name = self.name()?;
         let ty = if self.eat(":") { Some(self.ty()?) } else { None };
         self.expect("=")?;
@@ -946,34 +948,19 @@ impl Parser {
 
     fn primary(&mut self) -> Parsed<Expr> {
         let start = self.start();
-        let kind = match self.kind().clone() {
-            TokenKind::Name(name) => {
-                self.advance();
-                ExprKind::Name(name)
-            }
-            TokenKind::Int(lexeme) => {
-                self.advance();
-                ExprKind::Int(lexeme)
-            }
-            TokenKind::Float(lexeme) => {
-                self.advance();
-                ExprKind::Float(lexeme)
-            }
-            TokenKind::Text(parts) => {
+        let first = self.pos;
+        let kind = match self.kind() {
+            TokenKind::Name(name) => ExprKind::Name(name.clone()),
+            TokenKind::Int(lexeme) => ExprKind::Int(lexeme.clone()),
+            TokenKind::Float(lexeme) => ExprKind::Float(lexeme.clone()),
+            TokenKind::Sym("self") => ExprKind::SelfValue,
+            TokenKind::Sym("none") => ExprKind::None,
+            TokenKind::Sym("true") => ExprKind::Bool(true),
+            TokenKind::Sym("false") => ExprKind::Bool(false),
+            TokenKind::Text(_) => {
+                let parts = self.take_text();
                 self.advance();
                 ExprKind::Text(self.text_parts(parts)?)
-            }
-            TokenKind::Sym("self") => {
-                self.advance();
-                ExprKind::SelfValue
-            }
-            TokenKind::Sym("none") => {
-                self.advance();
-                ExprKind::None
-            }
-            TokenKind::Sym(sym @ ("true" | "false")) => {
-                self.advance();
-                ExprKind::Bool(sym == "true")
             }
             TokenKind::Sym("(") => {
                 self.advance();
@@ -1009,7 +996,20 @@ impl Parser {
             }
             _ => return self.expected("an expression"),
         };
+        if self.pos == first {
+            self.advance();
+        }
         Ok(Expr { kind, span: self.since(start) })
+    }
+
+    /// Moves the parts out of the current text token. The parser never reads
+    /// a token twice, so nothing needs them after this.
+    fn take_text(&mut self) -> Vec<RawPart> {
+        let index = self.pos.min(self.tokens.len() - 1);
+        match &mut self.tokens[index].kind {
+            TokenKind::Text(parts) => std::mem::take(parts),
+            _ => Vec::new(),
+        }
     }
 
     fn text_parts(&mut self, parts: Vec<RawPart>) -> Parsed<Vec<TextPart>> {
