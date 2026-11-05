@@ -1,0 +1,88 @@
+trait Describe
+    task describe(self) -> text
+
+trait Bad
+    task nothing() -> int
+
+trait Typed
+    task area(self: int) -> int
+
+type Dog
+    name: text
+
+type Cat
+    lives: int
+
+type Tree
+    on: bool
+
+task describe(self: Dog) -> text
+    return self.name
+
+task describe(self: Dog) -> text
+    return "again"
+
+task describe[T](self: list[T]) -> text
+    return "list"
+
+task describe(self: list[int]) -> text
+    return "ints"
+
+task len(self: text) -> int
+    return 0
+
+task loose[T](self: T)
+    return
+
+task late(a: int, self: Dog)
+    return
+
+task untyped(self)
+    return
+
+task show_all[T: Describe](items: list[T])
+    for item in items
+        print item.describe()
+        print item.missing()
+        print item
+
+task sum[T](a: T, b: T) -> T
+    return a + b
+
+task less[T](a: T, b: T) -> bool
+    return a < b
+
+task same[T](a: T, b: T) -> bool
+    return a == b
+
+task unknown[T: Nope](a: T)
+    return
+
+task wrong[T: Dog](a: T)
+    return
+
+task complex[T: list[int]](a: T)
+    return
+
+task keys[T](a: list[T]) -> set[T]
+    return set(a)
+
+type Sorted[T: Show]
+    items: list[T]
+
+type Bound
+    field: Sorted[Describe]
+
+show_all([Cat(lives: 1)])
+describe(Dog(name: "a"))
+let a: Describe = Dog(name: "a")
+print Dog(name: "a").to_int()
+print 1.size()
+print Dog(name: "a") + Dog(name: "b")
+print Tree(on: true) < Tree(on: false)
+
+trait Show
+    task show(self) -> text
+
+type Equal
+    a: int

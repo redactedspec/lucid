@@ -26,6 +26,12 @@ const MAX_ALIASES: usize = 128;
 /// this limit counts as finite, and `mono.rs` stops any that really grows.
 const MAX_FINITE_CHECK: usize = 1024;
 
+/// Traits that the compiler knows, and that a bound can name.
+const BUILT_IN_TRAITS: [&str; 8] = ["Equal", "Order", "Show", "Hash", "Add", "Sub", "Mul", "Div"];
+
+/// Traits in the spec that are not built yet.
+const LATER_TRAITS: [&str; 3] = ["Copy", "Json", "Error"];
+
 /// Dot calls that change their receiver, so they only work as statements, or
 /// for `pop`, as the whole value of one.
 const CHANGING_CALLS: [&str; 5] = ["push", "swap", "add", "remove", "pop"];
@@ -52,18 +58,26 @@ pub fn check(file: &ast::File) -> (Program, Vec<Diagnostic>) {
     let main = checker.main(file);
 
     let datas = checker.datas.iter().map(Data::shape).collect();
+    let methods = checker.methods.iter().map(|(&name, ids)| (name.into(), ids.clone())).collect();
     let mut diags = checker.diags;
     if diags.iter().any(|d| d.code == "E0901") {
         diags.retain(|d| d.code == "E0901");
     }
-    (Program { tasks, main, types: checker.table, datas }, diags)
+    (Program { tasks, main, types: checker.table, datas, methods }, diags)
 }
 
 /// Type parameters in scope, with the type that each one stands for.
 type TypeEnv<'a> = Vec<(&'a str, Ty)>;
 
+/// The traits that each type parameter in scope has, by position.
+type Bounds<'a> = Vec<Vec<&'a str>>;
+
 struct Signature<'a> {
+    name: &'a ast::Name,
     type_params: TypeEnv<'a>,
+    bounds: Bounds<'a>,
+    /// A task of a trait: it has no body, and `self` has no type here.
+    in_trait: bool,
     params: Vec<Param<'a>>,
     returns: Ty,
 }
@@ -90,6 +104,7 @@ struct Data<'a> {
     /// With its own parameters as type arguments.
     ty: Ty,
     type_params: TypeEnv<'a>,
+    bounds: Bounds<'a>,
     choice: bool,
     variants: Vec<Variant<'a>>,
 }
@@ -150,6 +165,16 @@ struct Checker<'a> {
     types: HashMap<&'a str, Named<'a>>,
     /// The type parameters that a written name can reach here.
     type_params: TypeEnv<'a>,
+    bounds: Bounds<'a>,
+    /// Tasks with a `self` parameter. A name may have one per receiver type.
+    methods: HashMap<&'a str, Vec<usize>>,
+    /// The tasks that each trait requires, as indexes into `signatures`.
+    traits: HashMap<&'a str, Vec<usize>>,
+    /// True once every task is declared, so that bounds can be checked.
+    ready: bool,
+    /// Bounds on type arguments written in a declaration: the type, the trait,
+    /// the span, and the bounds in scope there.
+    deferred: Vec<(Ty, &'a str, Span, Bounds<'a>)>,
     datas: Vec<Data<'a>>,
     /// A type or variant name, with its data and variant index.
     constructors: HashMap<&'a str, (usize, usize)>,
@@ -183,6 +208,19 @@ fn mentions(ty: Ty, part: Ty) -> bool {
             Ty::Data(_, _, args) | Ty::Union(args) => args.iter().any(|&a| mentions(a, part)),
             _ => false,
         }
+}
+
+/// True for a task that the language builds in for this type.
+fn builtin_method(ty: Ty, name: &str) -> bool {
+    match ty {
+        Ty::Int => name == "to_float",
+        Ty::Float | Ty::Byte => name == "to_int",
+        Ty::Text => matches!(name, "len" | "is_empty" | "bytes"),
+        Ty::List(_) => matches!(name, "len" | "is_empty" | "get" | "push" | "pop" | "swap"),
+        Ty::Map(..) => matches!(name, "len" | "is_empty" | "get" | "remove"),
+        Ty::Set(_) => matches!(name, "len" | "is_empty" | "add" | "remove"),
+        _ => false,
+    }
 }
 
 fn poisoned(span: Span) -> Expr {
@@ -419,7 +457,11 @@ impl<'a> Checker<'a> {
                 facts
             }
             Ast::Is { value, negated, target } => {
-                let Ast::Name(name) = &value.kind else { return Vec::new() };
+                let name = match &value.kind {
+                    Ast::Name(name) => name.as_str(),
+                    Ast::SelfValue => "self",
+                    _ => return Vec::new(),
+                };
                 let Some(local) = self.lookup(name) else { return Vec::new() };
                 let reported = self.diags.len();
                 let want = self.is_target(target);
@@ -529,6 +571,11 @@ impl<'a> Checker<'a> {
         if LATER_TYPES.contains(&name) {
             return self.unsupported(&format!("type `{name}`"), span).ty;
         }
+        if self.is_trait(name) {
+            let message = format!("`{name}` is a trait, not a type");
+            let note = format!("use it as a bound, as in `[T: {name}]`");
+            return self.report(Diagnostic::new("E0303", message, span).note(note)).ty;
+        }
         match self.types.get_key_value(name) {
             Some((_, &Named::Known(known))) => {
                 if self.arity(name, 0, args.len(), span) {
@@ -542,6 +589,7 @@ impl<'a> Checker<'a> {
                 if !self.arity(name, want, args.len(), span) {
                     return Ty::Error;
                 }
+                self.check_data_bounds(id, &args, span);
                 let Ty::Data(name, ..) = self.datas[id].ty else {
                     unreachable!("a data type has its own name")
                 };
@@ -617,6 +665,9 @@ impl<'a> Checker<'a> {
     fn check_key(&mut self, ty: Ty, span: Span) {
         match ty {
             Ty::Error => {}
+            Ty::Param(..) => {
+                self.require(ty, "Hash", span);
+            }
             _ if ty.is_compound() => {
                 self.unsupported(&format!("`{}` as a key", ty.name()), span);
             }
@@ -645,20 +696,195 @@ impl<'a> Checker<'a> {
     /// Like `define`, for a name that a type or `set(...)` already means.
     fn define_data(&mut self, name: &'a ast::Name) -> bool {
         let text = name.text.as_str();
-        if BUILT_IN_TYPES.contains(&text) || LATER_TYPES.contains(&text) {
+        let reserved = BUILT_IN_TYPES.contains(&text)
+            || LATER_TYPES.contains(&text)
+            || BUILT_IN_TRAITS.contains(&text)
+            || LATER_TRAITS.contains(&text)
+            || self.traits.contains_key(text);
+        if reserved {
             self.fail("E0304", format!("`{text}` is already defined"), name.span);
             return false;
         }
         self.define(name)
     }
 
-    fn data_header(&mut self, public: bool, params: &[ast::TypeParam], span: Span) {
+    fn data_header(&mut self, public: bool, span: Span) {
         if public {
             self.unsupported("`public`", span);
         }
-        if let Some(first) = params.iter().find(|param| param.bound.is_some()) {
-            self.unsupported("a type parameter bound", first.name.span);
+    }
+
+    fn is_trait(&self, name: &str) -> bool {
+        self.traits.contains_key(name) || BUILT_IN_TRAITS.contains(&name)
+    }
+
+    /// The traits that each parameter of a declaration has.
+    fn bounds_of(&mut self, params: &'a [ast::TypeParam]) -> Bounds<'a> {
+        let mut all = Vec::with_capacity(params.len());
+        for param in params {
+            let mut traits = Vec::with_capacity(param.bounds.len());
+            for bound in &param.bounds {
+                let name = match &bound.kind {
+                    TypeKind::Named { path, args } if args.is_empty() => match path.as_slice() {
+                        [name] => Some(name.text.as_str()),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                match name {
+                    Some(name) if self.is_trait(name) => traits.push(name),
+                    Some(name) if LATER_TRAITS.contains(&name) => {
+                        self.unsupported(&format!("trait `{name}`"), bound.span);
+                    }
+                    Some(name) if self.types.contains_key(name) => {
+                        let message = format!("`{name}` is a type, not a trait");
+                        self.fail("E0302", message, bound.span);
+                    }
+                    Some(name) => {
+                        let message = format!("trait `{name}` is not defined");
+                        self.fail("E0302", message, bound.span);
+                    }
+                    None => {
+                        self.fail("E0302", "a bound must name a trait".into(), bound.span);
+                    }
+                }
+            }
+            all.push(traits);
         }
+        all
+    }
+
+    /// Checks the bounds of a generic `type` or `choice`, now or once every
+    /// task is declared.
+    fn check_data_bounds(&mut self, id: usize, args: &[Ty], span: Span) {
+        let bounds = self.datas[id].bounds.clone();
+        for (&ty, traits) in args.iter().zip(bounds) {
+            for name in traits {
+                if self.ready {
+                    self.require(ty, name, span);
+                } else {
+                    self.deferred.push((ty, name, span, self.bounds.clone()));
+                }
+            }
+        }
+    }
+
+    /// Reports E0320 unless a type has a trait.
+    fn require(&mut self, ty: Ty, name: &str, span: Span) -> bool {
+        let found = self.satisfies(ty, name);
+        if !found {
+            let message = format!("`{}` does not have `{name}`", ty.name());
+            let diag = Diagnostic::new("E0320", message, span);
+            self.report(if let Ty::Param(param, _) = ty {
+                diag.note(format!("add a bound, as in `[{param}: {name}]`"))
+            } else {
+                diag
+            });
+        }
+        found
+    }
+
+    fn satisfies(&mut self, ty: Ty, name: &str) -> bool {
+        self.satisfied(ty, name, &mut Vec::new())
+    }
+
+    /// True if a type has a trait. `seen` holds the types on the way here: a
+    /// recursive type has a trait if nothing else in it lacks one.
+    fn satisfied(&mut self, ty: Ty, name: &str, seen: &mut Vec<Ty>) -> bool {
+        if ty == Ty::Error {
+            return true;
+        }
+        if let Ty::Param(_, index) = ty {
+            return self.bounds.get(index).is_some_and(|traits| traits.contains(&name));
+        }
+        let written = match name {
+            "Show" => "show",
+            "Equal" => "equal",
+            "Order" => "compare",
+            "Add" => "add",
+            "Sub" => "sub",
+            "Mul" => "mul",
+            "Div" => "div",
+            _ => "",
+        };
+        if let Some(found) = self.written_task(written, ty) {
+            return found;
+        }
+        if !BUILT_IN_TRAITS.contains(&name) {
+            let tasks = self.traits.get(name).cloned().unwrap_or_default();
+            return tasks.into_iter().all(|task| self.fits_trait_task(ty, task));
+        }
+        let parts: Vec<Ty> = match ty {
+            Ty::List(item) | Ty::Set(item) => vec![*item],
+            Ty::Map(key, value) => vec![*key, *value],
+            Ty::Union(members) => members.to_vec(),
+            Ty::Data(..) => self.variants_of(ty).into_iter().flatten().collect(),
+            _ => Vec::new(),
+        };
+        let holds = match name {
+            "Show" | "Equal" => true,
+            "Hash" => return ty.is_key(),
+            "Order" => {
+                matches!(ty, Ty::Int | Ty::Float | Ty::Byte | Ty::Text | Ty::List(_))
+                    || matches!(ty, Ty::Data(..))
+            }
+            "Div" => return ty == Ty::Float,
+            _ => return matches!(ty, Ty::Int | Ty::Float),
+        };
+        if !holds {
+            return false;
+        }
+        if matches!(ty, Ty::Data(..)) {
+            if seen.contains(&ty) || seen.len() == MAX_ALIASES {
+                return true;
+            }
+            seen.push(ty);
+        }
+        parts.into_iter().all(|part| self.satisfied(part, name, seen))
+    }
+
+    /// With a hand-written task for this type, true if its bounds hold.
+    /// `None` if there is no such task.
+    fn written_task(&mut self, name: &str, ty: Ty) -> Option<bool> {
+        let (id, known) = self.find_method(name, ty)?;
+        let bounds = self.signatures[id].bounds.clone();
+        for (arg, traits) in known.iter().zip(bounds) {
+            for name in traits {
+                if !arg.is_some_and(|arg| self.satisfies(arg, name)) {
+                    return Some(false);
+                }
+            }
+        }
+        Some(true)
+    }
+
+    /// True if `ty` has a task that matches a task of a trait.
+    fn fits_trait_task(&mut self, ty: Ty, task: usize) -> bool {
+        let name = &self.signatures[task].name.text;
+        let Some(true) = self.written_task(name, ty) else { return false };
+        let Some((id, known)) = self.find_method(name, ty) else { return false };
+        let Some(args) = known.into_iter().collect::<Option<Vec<Ty>>>() else { return false };
+        let wanted: Vec<Ty> = self.signatures[task].params.iter().map(|p| p.ty).collect();
+        let have: Vec<Ty> = self.signatures[id].params.iter().map(|p| p.ty).collect();
+        let (want_returns, have_returns) =
+            (self.signatures[task].returns, self.signatures[id].returns);
+        let have: Vec<Ty> = have.into_iter().map(|p| self.table.subst(p, &args)).collect();
+        let have_returns = self.table.subst(have_returns, &args);
+        wanted.len() == have.len() && wanted[1..] == have[1..] && want_returns == have_returns
+    }
+
+    /// The task with a `self` parameter that takes this type, if any, and what
+    /// the type shows about its type parameters.
+    fn find_method(&mut self, name: &str, ty: Ty) -> Option<(usize, Vec<Option<Ty>>)> {
+        for id in self.methods.get(name).cloned().unwrap_or_default() {
+            let pattern = self.signatures[id].params[0].ty;
+            let mut known = vec![None; self.signatures[id].type_params.len()];
+            self.table.unify(pattern, ty, &mut known);
+            if self.partial(pattern, &known) == Some(ty) {
+                return Some((id, known));
+            }
+        }
+        None
     }
 
     /// Reports a type parameter that reuses a name. A field or parameter could
@@ -669,6 +895,8 @@ impl<'a> Checker<'a> {
             let text = param.name.text.as_str();
             let taken = seen.contains(&text)
                 || self.types.contains_key(text)
+                || self.is_trait(text)
+                || LATER_TRAITS.contains(&text)
                 || BUILT_IN_TYPES.contains(&text)
                 || LATER_TYPES.contains(&text);
             if taken {
@@ -686,10 +914,11 @@ impl<'a> Checker<'a> {
     ) -> usize {
         let id = self.datas.len();
         let type_params = own_params(params);
+        let bounds = self.bounds_of(params);
         let args: Vec<Ty> = type_params.iter().map(|&(_, ty)| ty).collect();
         let generic = !args.is_empty();
         let ty = Ty::Data(name.text.clone().leak(), id, args.leak());
-        self.datas.push(Data { name, ty, type_params, choice, variants: Vec::new() });
+        self.datas.push(Data { name, ty, type_params, bounds, choice, variants: Vec::new() });
         let named = if generic { Named::Generic(id) } else { Named::Known(ty) };
         self.types.insert(&name.text, named);
         id
@@ -702,9 +931,14 @@ impl<'a> Checker<'a> {
         let mut headers = Vec::new();
         let mut written: Vec<(usize, usize, Vec<WrittenField<'a>>)> = Vec::new();
         for stmt in &file.stmts {
+            if let StmtKind::Trait(def) = &stmt.kind {
+                self.declare_trait(def, stmt.span);
+            }
+        }
+        for stmt in &file.stmts {
             match &stmt.kind {
                 StmtKind::Type(def) => {
-                    self.data_header(def.public, &def.type_params, stmt.span);
+                    self.data_header(def.public, stmt.span);
                     if !self.define_data(&def.name) {
                         continue;
                     }
@@ -713,6 +947,9 @@ impl<'a> Checker<'a> {
                         TypeBody::Alias(target) => {
                             let name = def.name.text.as_str();
                             let params = def.type_params.as_slice();
+                            if let Some(bound) = params.iter().find_map(|p| p.bounds.first()) {
+                                self.unsupported("a bound on an alias", bound.span);
+                            }
                             self.types.insert(name, Named::Alias(target, params));
                             aliases.push((name, target, params, def.name.span));
                         }
@@ -730,7 +967,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 StmtKind::Choice(def) => {
-                    self.data_header(def.public, &def.type_params, stmt.span);
+                    self.data_header(def.public, stmt.span);
                     if !self.define_data(&def.name) {
                         continue;
                     }
@@ -768,8 +1005,10 @@ impl<'a> Checker<'a> {
         }
         for (id, variant, fields) in written {
             self.type_params.clone_from(&self.datas[id].type_params);
+            self.bounds.clone_from(&self.datas[id].bounds);
             let fields = self.fields(fields);
             self.type_params.clear();
+            self.bounds.clear();
             self.datas[id].variants[variant].fields = fields;
         }
         self.check_finite();
@@ -853,6 +1092,87 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// A trait name goes in before anything that may name it. Its tasks wait
+    /// for `declare`, since their types may be any type.
+    fn declare_trait(&mut self, def: &'a ast::TraitDef, span: Span) {
+        if def.public {
+            self.unsupported("`public`", span);
+        }
+        if let Some(first) = def.type_params.first() {
+            self.unsupported("a generic trait", first.name.span);
+        }
+        if self.define_data(&def.name) {
+            self.traits.insert(&def.name.text, Vec::new());
+        }
+    }
+
+    /// Reports what no receiver may do: overlap another one, take the name of
+    /// a built-in task, or give a derived task the wrong signature.
+    fn check_methods(&mut self) {
+        for id in 0..self.signatures.len() {
+            let signature = &self.signatures[id];
+            if signature.in_trait || signature.params.first().is_none_or(|p| p.name != "self") {
+                continue;
+            }
+            let (name, span, receiver) =
+                (signature.name.text.as_str(), signature.name.span, signature.params[0].ty);
+            if receiver == Ty::Error {
+                continue;
+            }
+            if matches!(receiver, Ty::Param(..)) {
+                let message = "`self` needs a type that is not a bare type parameter";
+                self.fail("E0307", message.into(), span);
+                continue;
+            }
+            let earlier: Vec<usize> =
+                self.methods[name].iter().copied().filter(|&o| o < id).collect();
+            let overlaps = earlier.into_iter().any(|other| self.overlap(id, other));
+            if overlaps || builtin_method(receiver, name) {
+                self.fail("E0304", format!("`{name}` is already defined"), span);
+            }
+            self.check_written_shape(id);
+        }
+    }
+
+    /// True if one value could be the receiver of both tasks.
+    fn overlap(&mut self, a: usize, b: usize) -> bool {
+        [(a, b), (b, a)].into_iter().any(|(a, b)| {
+            let pattern = self.signatures[a].params[0].ty;
+            let other = self.signatures[b].params[0].ty;
+            let mut known = vec![None; self.signatures[a].type_params.len()];
+            self.table.unify(pattern, other, &mut known);
+            self.partial(pattern, &known) == Some(other)
+        })
+    }
+
+    /// A task named after a derived one replaces it, so it must fit. See
+    /// decision 73.
+    fn check_written_shape(&mut self, id: usize) {
+        let signature = &self.signatures[id];
+        let (name, span) = (signature.name.text.as_str(), signature.name.span);
+        let receiver = signature.params[0].ty;
+        let (others, returns) = match name {
+            "show" => (0, Ty::Text),
+            "equal" => (1, Ty::Bool),
+            "compare" => (1, Ty::Int),
+            "add" | "sub" | "mul" | "div" => (1, receiver),
+            _ => return,
+        };
+        let fits = signature.params.len() == others + 1
+            && signature.params[1..].iter().all(|p| p.ty == receiver)
+            && signature.returns == returns
+            && receiver.is_compound();
+        if !fits {
+            let other = if others == 1 { ", other: T" } else { "" };
+            let message = format!("`{name}` replaces a derived task, so it needs this form");
+            let note = format!(
+                "write `task {name}(self: T{other}) -> {}`, for a `type`, `choice`, or collection `T`",
+                if returns == receiver { "T".into() } else { returns.name() }
+            );
+            self.report(Diagnostic::new("E0323", message, span).note(note));
+        }
+    }
+
     /// First pass: tasks and top-level values may be used before their line.
     fn declare(&mut self, file: &'a ast::File) {
         for stmt in &file.stmts {
@@ -865,11 +1185,33 @@ impl<'a> Checker<'a> {
                 self.unsupported("`public`", stmt.span);
             }
             let name = def.sig.name.text.as_str();
-            if self.define(&def.sig.name) {
-                self.task_ids.insert(name, self.signatures.len());
+            let id = self.signatures.len();
+            if def.sig.params.first().is_some_and(|param| param.name.text == "self") {
+                self.methods.entry(name).or_default().push(id);
+            } else if self.define(&def.sig.name) {
+                self.task_ids.insert(name, id);
             }
-            let signature = self.signature(&def.sig);
+            let signature = self.signature(&def.sig, false);
             self.signatures.push(signature);
+        }
+        for stmt in &file.stmts {
+            let StmtKind::Trait(def) = &stmt.kind else { continue };
+            for sig in &def.tasks {
+                if let Some(first) = sig.type_params.first() {
+                    self.unsupported("a generic task in a trait", first.name.span);
+                }
+                if sig.params.first().is_none_or(|param| param.name.text != "self") {
+                    let message = format!("`{}` needs `self` first", sig.name.text);
+                    self.fail("E0307", message, sig.name.span);
+                    continue;
+                }
+                let id = self.signatures.len();
+                let signature = self.signature(sig, true);
+                self.signatures.push(signature);
+                if let Some(tasks) = self.traits.get_mut(def.name.text.as_str()) {
+                    tasks.push(id);
+                }
+            }
         }
         for stmt in &file.stmts {
             if let StmtKind::Let { mutable, name, ty, value } = &stmt.kind {
@@ -881,15 +1223,21 @@ impl<'a> Checker<'a> {
                 self.top.insert(&name.text, top);
             }
         }
+        self.check_methods();
+        self.ready = true;
+        for (ty, name, span, bounds) in std::mem::take(&mut self.deferred) {
+            self.bounds = bounds;
+            self.require(ty, name, span);
+        }
+        self.bounds.clear();
     }
 
-    fn signature(&mut self, sig: &'a ast::TaskSig) -> Signature<'a> {
-        if let Some(first) = sig.type_params.iter().find(|param| param.bound.is_some()) {
-            self.unsupported("a type parameter bound", first.name.span);
-        }
+    fn signature(&mut self, sig: &'a ast::TaskSig, in_trait: bool) -> Signature<'a> {
         self.check_type_params(&sig.type_params);
         let type_params = own_params(&sig.type_params);
+        let bounds = self.bounds_of(&sig.type_params);
         self.type_params.clone_from(&type_params);
+        self.bounds.clone_from(&bounds);
         let mut params: Vec<Param<'a>> = Vec::new();
         for param in &sig.params {
             let span = param.name.span;
@@ -898,7 +1246,14 @@ impl<'a> Checker<'a> {
             }
             let ty = param.ty.as_ref().map_or(Ty::Error, |ty| self.ty(ty));
             if param.name.text == "self" {
-                self.unsupported("a `self` parameter", span);
+                if !params.is_empty() {
+                    self.fail("E0307", "`self` must come first".into(), span);
+                } else if in_trait && param.ty.is_some() {
+                    self.fail("E0307", "`self` has no type in a trait".into(), span);
+                } else if !in_trait && param.ty.is_none() {
+                    let diag = Diagnostic::new("E0307", "`self` needs a type here", span);
+                    self.report(diag.note("write `self: User`. Only a trait leaves it out"));
+                }
             } else if params.iter().any(|p| p.name == param.name.text) {
                 self.fail("E0304", format!("`{}` is already defined", param.name.text), span);
             }
@@ -912,7 +1267,8 @@ impl<'a> Checker<'a> {
         }
         let returns = sig.returns.as_ref().map_or(Ty::None, |ty| self.ty(ty));
         self.type_params.clear();
-        Signature { type_params, params, returns }
+        self.bounds.clear();
+        Signature { name: &sig.name, type_params, bounds, in_trait, params, returns }
     }
 
     fn default_value(&mut self, value: &'a ast::Expr, ty: Ty) -> Expr {
@@ -934,6 +1290,7 @@ impl<'a> Checker<'a> {
         let returns = self.signatures[id].returns;
         self.returns = Some(returns);
         self.type_params.clone_from(&self.signatures[id].type_params);
+        self.bounds.clone_from(&self.signatures[id].bounds);
         let params: Vec<(&'a str, Ty)> =
             self.signatures[id].params.iter().map(|p| (p.name, p.ty)).collect();
         let mut scope = HashMap::new();
@@ -951,6 +1308,7 @@ impl<'a> Checker<'a> {
         self.mutable.clear();
         let type_params = self.type_params.len();
         self.type_params.clear();
+        self.bounds.clear();
         let locals = std::mem::take(&mut self.locals);
         Task { params: params.len(), type_params, returns, locals, body, span }
     }
@@ -1096,8 +1454,7 @@ impl<'a> Checker<'a> {
             StmtKind::Expr(value) => return self.expr_stmt(value, span),
             StmtKind::Use { .. } => return self.later("`use`", span),
             StmtKind::Test { .. } => return self.later("`test`", span),
-            StmtKind::Type(_) | StmtKind::Choice(_) => return None,
-            StmtKind::Trait(_) => return self.later("`trait`", span),
+            StmtKind::Type(_) | StmtKind::Choice(_) | StmtKind::Trait(_) => return None,
             StmtKind::Expect(_) => return self.later("`expect`", span),
             StmtKind::Unsafe(_) => return self.later("`unsafe`", span),
         })
@@ -1888,6 +2245,7 @@ impl<'a> Checker<'a> {
         let Some(args) = self.solved(name, &params, &known, reported, span) else {
             return poisoned(span);
         };
+        self.check_data_bounds(id, args, span);
         for (index, value) in &mut fields {
             let ty = self.datas[id].variants[variant].fields[*index].ty;
             let ty = self.table.subst(ty, args);
@@ -2396,7 +2754,7 @@ impl<'a> Checker<'a> {
                 let diag = Diagnostic::new("E0322", "a type cannot be a value", span);
                 return self.report(diag.note("a type only goes in brackets, as in `f[int?](x)`"));
             }
-            Ast::SelfValue => return self.unsupported("`self`", span),
+            Ast::SelfValue => return self.name("self", span),
         };
         Expr { kind, ty, span }
     }
@@ -2550,26 +2908,17 @@ impl<'a> Checker<'a> {
                 let kind = ExprKind::Binary(BinaryOp::Eq, len, int(ExprKind::Int(0)));
                 Expr { kind, ty: Ty::Bool, span }
             }
-            ty => self.no_dot_call("is_empty", ty, span),
+            _ => self.method_call(value, "is_empty", &[], span),
         }
-    }
-
-    fn no_dot_call(&mut self, name: &str, ty: Ty, span: Span) -> Expr {
-        let diag =
-            Diagnostic::new("E0303", format!("`{name}` does not work on `{}`", ty.name()), span);
-        self.report(if matches!(ty, Ty::Union(_)) { diag.note(TEST_UNION) } else { diag })
     }
 
     /// `x.get(i)` on a list, or `x.get(key)` on a map. A map's value may hold
     /// `none` itself, and `V?` then is `V`, as decision 39 says.
-    fn get(&mut self, base: &'a ast::Expr, args: &'a [ast::Arg], span: Span) -> Expr {
-        let value = self.expr(base);
+    fn get(&mut self, value: Expr, args: &'a [ast::Arg], span: Span) -> Expr {
         let (key_ty, item) = match value.ty {
-            Ty::Error => return poisoned(span),
             Ty::List(item) => (Ty::Int, *item),
             Ty::Map(key, item) => (*key, *item),
-            Ty::Data(..) => return self.unsupported("this dot call", span),
-            ty => return self.no_dot_call("get", ty, span),
+            _ => unreachable!("`builtin_method` allows only these"),
         };
         let [ast::Arg { name: None, change: false, value: key }] = args else {
             return self.fail("E0307", "`get` takes 1 positional argument".into(), span);
@@ -2620,29 +2969,10 @@ impl<'a> Checker<'a> {
 
     /// Reports a value that `print` and interpolation cannot show.
     fn showable(&mut self, value: Expr) -> Expr {
-        if let Ty::Param(name, _) = value.ty {
-            let message = format!("`{name}` might not be shown here");
-            return self.fail("E0303", message, value.span);
+        if !self.require(value.ty, "Show", value.span) {
+            return poisoned(value.span);
         }
         value
-    }
-
-    /// True if `<` and the like work on a type: numbers, text, and lists and
-    /// data made of those. `seen` ends the walk on a recursive type.
-    fn ordered(&mut self, ty: Ty, seen: &mut Vec<Ty>) -> bool {
-        match ty {
-            Ty::Int | Ty::Float | Ty::Byte | Ty::Text | Ty::Error => true,
-            Ty::List(item) => self.ordered(*item, seen),
-            Ty::Data(..) => {
-                if seen.contains(&ty) || seen.len() == MAX_ALIASES {
-                    return true;
-                }
-                seen.push(ty);
-                let variants = self.variants_of(ty);
-                variants.iter().flatten().all(|&field| self.ordered(field, seen))
-            }
-            _ => false,
-        }
     }
 
     fn text(&mut self, parts: &'a [TextPart], span: Span) -> Expr {
@@ -2748,9 +3078,8 @@ impl<'a> Checker<'a> {
                 return self.fail("E0303", message, right.span);
             }
         };
-        if let Ty::Param(name, _) = item {
-            let message = format!("`in` might not compare `{name}`");
-            return self.fail("E0303", message, right.span);
+        if list && !self.require(item, "Equal", right.span) {
+            return poisoned(span);
         }
         let left = self.widen(left, item);
         self.expect(&left, item, "`in`");
@@ -2809,12 +3138,22 @@ impl<'a> Checker<'a> {
             Ty::Text => equality || order,
             Ty::Byte if equality || order => true,
             Ty::Byte => return self.unsupported("arithmetic on `byte`", span),
-            ty if ty.is_compound() && equality => true,
-            ty if ty.is_compound() && order => {
-                if !self.ordered(ty, &mut Vec::new()) {
-                    let message = format!("`{name}` cannot order `{}`", ty.name());
-                    let note = "only numbers, text, and lists and types of them have an order";
-                    return self.report(Diagnostic::new("E0303", message, span).note(note));
+            ty if (ty.is_compound() || matches!(ty, Ty::Param(..))) && (equality || order) => {
+                let trait_name = if equality { "Equal" } else { "Order" };
+                if !self.require(ty, trait_name, span) {
+                    return poisoned(span);
+                }
+                true
+            }
+            Ty::Data(..) | Ty::Param(..) if !int_only => {
+                let trait_name = match op {
+                    BinaryOp::Add => "Add",
+                    BinaryOp::Sub => "Sub",
+                    BinaryOp::Mul => "Mul",
+                    _ => "Div",
+                };
+                if !self.require(ty, trait_name, span) {
+                    return poisoned(span);
                 }
                 true
             }
@@ -2832,7 +3171,7 @@ impl<'a> Checker<'a> {
         }
         let result = match op {
             _ if equality || order => Ty::Bool,
-            BinaryOp::Div => Ty::Float,
+            BinaryOp::Div if matches!(ty, Ty::Int | Ty::Float) => Ty::Float,
             _ => ty,
         };
         let float = |value: Expr| {
@@ -2855,56 +3194,9 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> Expr {
         match &callee.kind {
-            Ast::Field { base, name } if CHANGING_CALLS.contains(&name.text.as_str()) => {
+            Ast::Field { base, name } => {
                 let value = self.expr(base);
-                match value.ty {
-                    Ty::Error => poisoned(span),
-                    Ty::List(_) if name.text == "pop" => {
-                        let message = "`pop` changes its list, so it must be a whole statement, \
-                                       or all of the value of `let`, `var`, `return`, or an \
-                                       assignment to a name";
-                        self.fail("E0303", message.into(), span)
-                    }
-                    ty if name.text == "pop" && !matches!(ty, Ty::Data(..)) => {
-                        self.no_dot_call("pop", ty, span)
-                    }
-                    ty if ty.is_collection() => {
-                        let message =
-                            format!("`{}` gives no value, so it must be a statement", name.text);
-                        self.fail("E0303", message, span)
-                    }
-                    ty @ Ty::Union(_) => self.no_dot_call(&name.text, ty, span),
-                    _ => self.unsupported("this dot call", span),
-                }
-            }
-            Ast::Field { base, name } if name.text == "get" => self.get(base, args, span),
-            Ast::Field { base, name } if args.is_empty() => {
-                let value = self.expr(base);
-                match (value.ty, name.text.as_str()) {
-                    (Ty::Error, _) => poisoned(span),
-                    (Ty::Int, "to_float") => {
-                        Expr { kind: ExprKind::ToFloat(value.into()), ty: Ty::Float, span }
-                    }
-                    (Ty::Float, "to_int") => {
-                        Expr { kind: ExprKind::ToInt(value.into()), ty: Ty::Int, span }
-                    }
-                    (Ty::Text, "len") => {
-                        Expr { kind: ExprKind::TextLen(value.into()), ty: Ty::Int, span }
-                    }
-                    (Ty::Text, "bytes") => {
-                        let ty = Ty::List(&Ty::Byte);
-                        Expr { kind: ExprKind::TextBytes(value.into()), ty, span }
-                    }
-                    (Ty::Byte, "to_int") => Expr { ty: Ty::Int, ..value },
-                    (ty, "len") if ty.is_collection() => {
-                        Expr { kind: ExprKind::Len(value.into()), ty: Ty::Int, span }
-                    }
-                    (_, "is_empty") => self.is_empty(value, span),
-                    (ty, "to_float" | "to_int" | "len" | "bytes") => {
-                        self.no_dot_call(&name.text, ty, span)
-                    }
-                    _ => self.unsupported("this dot call", span),
-                }
+                self.dot_call(value, name, args, span)
             }
             Ast::Name(name) if self.is_set_call(name) => self.set_call(args, want, span),
             Ast::Index { base, indices } => {
@@ -2921,7 +3213,7 @@ impl<'a> Checker<'a> {
                         let Some(types) = self.explicit(indices, count, name, span) else {
                             return self.poison_args(args, span);
                         };
-                        return self.task_call(id, name, Some(&types), args, span);
+                        return self.task_call(id, name, Some(&types), None, args, span);
                     }
                 }
                 self.unsupported("this call", span)
@@ -2931,7 +3223,7 @@ impl<'a> Checker<'a> {
                     return self.construct_call(target, name, None, want, args, span);
                 }
                 if let Some(id) = self.task_named(name) {
-                    return self.task_call(id, name, None, args, span);
+                    return self.task_call(id, name, None, None, args, span);
                 }
                 for arg in args {
                     self.expected(&arg.value, Some(Ty::Error));
@@ -2939,7 +3231,11 @@ impl<'a> Checker<'a> {
                 if self.lookup(name).is_some() || self.top.contains_key(name.as_str()) {
                     return self.fail("E0308", format!("`{name}` is not a task"), callee.span);
                 }
-                self.fail("E0301", format!("name `{name}` is not defined"), callee.span)
+                let diag =
+                    Diagnostic::new("E0301", format!("name `{name}` is not defined"), callee.span);
+                let dotted = self.methods.contains_key(name.as_str());
+                let note = format!("`{name}` has `self`, so call it with a dot: `x.{name}()`");
+                self.report(if dotted { diag.note(note) } else { diag })
             }
             _ => self.unsupported("this call", span),
         }
@@ -2952,18 +3248,21 @@ impl<'a> Checker<'a> {
         id: usize,
         name: &str,
         explicit: Option<&[Ty]>,
+        receiver: Option<(Expr, Vec<Option<Ty>>)>,
         args: &'a [ast::Arg],
         span: Span,
     ) -> Expr {
         let reported = self.diags.len();
+        let (receiver, seeded) = receiver.unzip();
         let mut known: Vec<Option<Ty>> = match explicit {
             Some(types) => types.iter().copied().map(Some).collect(),
-            None => vec![None; self.signatures[id].type_params.len()],
+            None => seeded.unwrap_or(vec![None; self.signatures[id].type_params.len()]),
         };
         let count = self.signatures[id].params.len();
         let required = self.signatures[id].params.iter().filter(|p| p.default.is_none()).count();
         let mut values: Vec<Option<Expr>> = vec![None; count];
-        let mut next = 0;
+        let mut next = usize::from(receiver.is_some());
+        values[..next].clone_from_slice(&[receiver][..next]);
         let mut named = false;
         for arg in args {
             if arg.change {
@@ -3019,6 +3318,12 @@ impl<'a> Checker<'a> {
         let Some(types) = self.solved(name, &params, &known, reported, span) else {
             return poisoned(span);
         };
+        let bounds = self.signatures[id].bounds.clone();
+        for (&ty, traits) in types.iter().zip(bounds) {
+            for name in traits {
+                self.require(ty, name, span);
+            }
+        }
         let mut lowered = Vec::with_capacity(count);
         for (slot, value) in values.into_iter().enumerate() {
             let param = &self.signatures[id].params[slot];
@@ -3033,7 +3338,90 @@ impl<'a> Checker<'a> {
         }
         let returns = self.signatures[id].returns;
         let ty = self.table.subst(returns, types);
+        if self.signatures[id].in_trait {
+            let name = self.signatures[id].name.text.clone().leak();
+            return Expr { kind: ExprKind::Method(name, lowered), ty, span };
+        }
         Expr { kind: ExprKind::Call(id, types, lowered), ty, span }
+    }
+
+    /// `x.f(a)` for a task with a `self` parameter. On a type parameter it
+    /// looks in the traits of its bounds, and `mono.rs` finds the real task.
+    fn method_call(&mut self, value: Expr, name: &str, args: &'a [ast::Arg], span: Span) -> Expr {
+        let ty = value.ty;
+        if let Ty::Param(_, index) = ty {
+            let traits = self.bounds.get(index).cloned().unwrap_or_default();
+            let tasks = traits.iter().flat_map(|t| self.traits.get(t).cloned().unwrap_or_default());
+            let tasks: Vec<usize> = tasks.collect();
+            let found = tasks.into_iter().find(|&id| self.signatures[id].name.text == name);
+            if let Some(id) = found {
+                return self.task_call(id, name, None, Some((value, Vec::new())), args, span);
+            }
+        }
+        if let Some((id, known)) = self.find_method(name, ty) {
+            return self.task_call(id, name, None, Some((value, known)), args, span);
+        }
+        let poison = self.poison_args(args, span);
+        let free = self.task_named(name).is_some();
+        let diag =
+            Diagnostic::new("E0303", format!("`{name}` does not work on `{}`", ty.name()), span);
+        self.report(if matches!(ty, Ty::Union(_)) {
+            diag.note(TEST_UNION)
+        } else if free {
+            diag.note(format!("`{name}` has no `self`, so call it as `{name}(x)`"))
+        } else if matches!(ty, Ty::Param(..)) {
+            diag.note("a bound with this task lets a type parameter use it")
+        } else {
+            diag
+        });
+        poison
+    }
+
+    /// A dot call: a built-in task on a built-in type, or else a method.
+    fn dot_call(
+        &mut self,
+        value: Expr,
+        name: &'a ast::Name,
+        args: &'a [ast::Arg],
+        span: Span,
+    ) -> Expr {
+        let ty = value.ty;
+        if ty == Ty::Error {
+            return self.poison_args(args, span);
+        }
+        let text = name.text.as_str();
+        if !builtin_method(ty, text) {
+            return self.method_call(value, text, args, span);
+        }
+        if text == "pop" {
+            let message = "`pop` changes its list, so it must be a whole statement, or all of \
+                           the value of `let`, `var`, `return`, or an assignment to a name";
+            return self.fail("E0303", message.into(), span);
+        }
+        if CHANGING_CALLS.contains(&text) {
+            let message = format!("`{text}` gives no value, so it must be a statement");
+            return self.fail("E0303", message, span);
+        }
+        if text == "get" {
+            return self.get(value, args, span);
+        }
+        if !args.is_empty() {
+            self.poison_args(args, span);
+            return self.fail("E0307", format!("`{text}` takes no arguments"), span);
+        }
+        let int = |kind| Expr { kind, ty: Ty::Int, span };
+        let boxed: Box<Expr> = value.clone().into();
+        match (ty, text) {
+            (Ty::Int, "to_float") => Expr { kind: ExprKind::ToFloat(boxed), ty: Ty::Float, span },
+            (Ty::Float, "to_int") => int(ExprKind::ToInt(boxed)),
+            (Ty::Text, "len") => int(ExprKind::TextLen(boxed)),
+            (Ty::Text, "bytes") => {
+                Expr { kind: ExprKind::TextBytes(boxed), ty: Ty::List(&Ty::Byte), span }
+            }
+            (Ty::Byte, "to_int") => Expr { ty: Ty::Int, ..value },
+            (_, "len") => int(ExprKind::Len(boxed)),
+            _ => self.is_empty(value, span),
+        }
     }
 
     /// Lowers arguments of a call that already failed, to report their errors.

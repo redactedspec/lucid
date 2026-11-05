@@ -92,7 +92,7 @@ pub struct TaskDef {
 
 pub struct TypeParam {
     pub name: Name,
-    pub bound: Option<Type>,
+    pub bounds: Vec<Type>,
 }
 
 #[derive(Clone, Copy, PartialEq)]

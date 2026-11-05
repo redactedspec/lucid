@@ -1,0 +1,16 @@
+generic_bound.lcd:20:22: error E0303: this argument needs `int`, found `text`
+generic_bound.lcd:23:7: error E0320: `Cat` does not have `Named`
+generic_bound.lcd:24:7: error E0320: `int` does not have `Named`
+generic_bound.lcd:28:7: error E0320: `text` does not have `Add`
+generic_bound.lcd:29:7: error E0320: `Dog` does not have `Add`
+generic_bound.lcd:33:7: error E0320: `int` does not have `Div`
+generic_bound.lcd:37:7: error E0320: `float` does not have `Hash`
+generic_bound.lcd:38:7: error E0320: `Dog` does not have `Hash`
+generic_bound.lcd:42:7: error E0320: `bool` does not have `Order`
+generic_bound.lcd:43:7: error E0320: `none` does not have `Order`
+generic_bound.lcd:51:10: error E0320: `bool` does not have `Order`
+generic_bound.lcd:53:23: error E0320: `T` does not have `Order`
+  note: add a bound, as in `[T: Order]`
+generic_bound.lcd:54:12: error E0320: `T` does not have `Order`
+  note: add a bound, as in `[T: Order]`
+generic_bound.lcd:59:7: error E0320: `bool` does not have `Order`

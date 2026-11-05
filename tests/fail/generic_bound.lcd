@@ -1,0 +1,60 @@
+trait Named
+    task name_of(self, n: int) -> text
+
+type Dog
+    a: int
+
+type Cat
+    a: int
+
+task name_of(self: Dog, n: int) -> text
+    return "dog"
+
+task name_of(self: Cat, n: text) -> text
+    return "cat"
+
+task use_it[T: Named](a: T) -> text
+    return a.name_of(1)
+
+task named[T: Named](a: T) -> text
+    return a.name_of("x")
+
+print use_it(Dog(a: 1))
+print use_it(Cat(a: 1))
+print use_it(1)
+
+task add_all[T: Add](a: T) -> T
+    return a + a
+print add_all("a")
+print add_all(Dog(a: 1))
+
+task ratio[T: Div](a: T) -> T
+    return a / a
+print ratio(1)
+
+task keyed[T: Hash](a: T) -> int
+    return 1
+print keyed(1.5)
+print keyed(Dog(a: 1))
+
+task ordered[T: Order](a: T) -> int
+    return 1
+print ordered(true)
+print ordered(none)
+print ordered([1])
+print ordered(Dog(a: 1))
+
+type Sorted[T: Order]
+    items: list[T]
+
+type Flags
+    all: Sorted[bool]
+
+task wrap[T](a: T) -> Sorted[T]
+    return Sorted(items: [a])
+
+task fine[T: Order](a: T) -> Sorted[T]
+    return Sorted(items: [a])
+
+print Sorted(items: [true])
+print fine(1)

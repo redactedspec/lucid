@@ -1,0 +1,37 @@
+traits.lcd:5:10: error E0307: `nothing` needs `self` first
+traits.lcd:8:15: error E0307: `self` has no type in a trait
+traits.lcd:22:6: error E0304: `describe` is already defined
+traits.lcd:28:6: error E0304: `describe` is already defined
+traits.lcd:31:6: error E0304: `len` is already defined
+traits.lcd:34:6: error E0307: `self` needs a type that is not a bare type parameter
+traits.lcd:37:19: error E0307: `self` must come first
+traits.lcd:40:14: error E0307: `self` needs a type here
+  note: write `self: User`. Only a trait leaves it out
+traits.lcd:46:15: error E0303: `missing` does not work on `T`
+  note: a bound with this task lets a type parameter use it
+traits.lcd:47:15: error E0320: `T` does not have `Show`
+  note: add a bound, as in `[T: Show]`
+traits.lcd:50:12: error E0320: `T` does not have `Add`
+  note: add a bound, as in `[T: Add]`
+traits.lcd:53:12: error E0320: `T` does not have `Order`
+  note: add a bound, as in `[T: Order]`
+traits.lcd:56:12: error E0320: `T` does not have `Equal`
+  note: add a bound, as in `[T: Equal]`
+traits.lcd:58:17: error E0302: trait `Nope` is not defined
+traits.lcd:61:15: error E0302: `Dog` is a type, not a trait
+traits.lcd:64:17: error E0302: a bound must name a trait
+traits.lcd:67:29: error E0320: `T` does not have `Hash`
+  note: add a bound, as in `[T: Hash]`
+traits.lcd:74:19: error E0303: `Describe` is a trait, not a type
+  note: use it as a bound, as in `[T: Describe]`
+traits.lcd:76:1: error E0320: `Cat` does not have `Describe`
+traits.lcd:77:1: error E0301: name `describe` is not defined
+  note: `describe` has `self`, so call it with a dot: `x.describe()`
+traits.lcd:78:8: error E0303: `Describe` is a trait, not a type
+  note: use it as a bound, as in `[T: Describe]`
+traits.lcd:79:7: error E0303: `to_int` does not work on `Dog`
+traits.lcd:80:7: error E0303: `size` does not work on `int`
+traits.lcd:81:7: error E0320: `Dog` does not have `Add`
+traits.lcd:82:7: error E0320: `Tree` does not have `Order`
+traits.lcd:84:7: error E0304: `Show` is already defined
+traits.lcd:87:6: error E0304: `Equal` is already defined

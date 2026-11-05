@@ -25,6 +25,7 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | Division, argument order | Judgment call from existing practice | None | Agent trial at M3 |
 | Type arguments in brackets, read in one pass | Follows Go. Form also proposed for Python | Read, parser Snippet | Agent trial at M3 |
 | Generic body checked once, then substituted in MIR | Follows Rust and Go, not C++ templates | Snippet | Agent trial at M3 |
+| Dot calls by receiver type, bounds required for every use | Judgment call from Rust and Python practice | None | Agent trial at M3 |
 | Union narrowing by control flow | Follows TypeScript and Kotlin, tightened for memory safety | Read | Agent trial at M3 |
 | Text slices, no character type | Judgment call from existing practice | None | Agent trial at M3 |
 | Compact ordered map, SipHash with random keys | Supported by Python and Rust practice | Snippet | Benchmark at M4 |

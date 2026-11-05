@@ -1,0 +1,14 @@
+trait_later.lcd:1:12: error E0901: a generic trait parses, but cannot run yet
+  note: see docs/roadmap.md for the milestone that adds it
+trait_later.lcd:5:15: error E0901: a generic task in a trait parses, but cannot run yet
+  note: see docs/roadmap.md for the milestone that adds it
+trait_later.lcd:7:1: error E0901: `public` parses, but cannot run yet
+  note: see docs/roadmap.md for the milestone that adds it
+trait_later.lcd:10:15: error E0901: a bound on an alias parses, but cannot run yet
+  note: see docs/roadmap.md for the milestone that adds it
+trait_later.lcd:12:14: error E0901: trait `Copy` parses, but cannot run yet
+  note: see docs/roadmap.md for the milestone that adds it
+trait_later.lcd:15:14: error E0901: trait `Json` parses, but cannot run yet
+  note: see docs/roadmap.md for the milestone that adds it
+trait_later.lcd:18:15: error E0901: trait `Error` parses, but cannot run yet
+  note: see docs/roadmap.md for the milestone that adds it

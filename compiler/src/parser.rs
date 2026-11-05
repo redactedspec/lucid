@@ -338,8 +338,14 @@ impl Parser {
         let mut params = Vec::new();
         loop {
             let name = self.name()?;
-            let bound = if self.eat(":") { Some(self.ty()?) } else { None };
-            params.push(TypeParam { name, bound });
+            let mut bounds = Vec::new();
+            if self.eat(":") {
+                bounds.push(self.ty()?);
+                while self.eat("and") {
+                    bounds.push(self.ty()?);
+                }
+            }
+            params.push(TypeParam { name, bounds });
             if !self.eat(",") || self.at("]") {
                 break;
             }

@@ -260,7 +260,7 @@ Types may refer to each other in any order. A type that always holds another val
 
 ## Methods
 
-A task with first parameter `self` may be called with a dot. There is no `impl` block or class.
+A task with first parameter `self` is called with a dot. There is no `impl` block or class.
 
 ```lucid
 task is_adult(self: User) -> bool
@@ -273,7 +273,9 @@ if ada.is_adult()
     print "welcome"
 ```
 
-`x.f(a)` means `f(x, a)`. The receiver must be a `var` when `self` is `change`. The `change` keyword is not repeated on a dot call.
+`x.f(a)` runs the task `f` whose `self` type is the type of `x`. So one name can have one task per type, and such a name stays out of the shared namespace of "Choices". `f(x, a)` is an error, since one job has one form. `self` needs a type, which cannot be a bare type parameter, and `self: list[T]` covers every list. Two tasks of one name whose receivers can overlap are an error, and so is a built-in name on a built-in type, such as `len` on `text`. A dot call does not widen its receiver: an `int` does not reach `self: int?`. `x is empty` calls `x.is_empty()`.
+
+The receiver must be a `var` when `self` is `change`, which arrives with parameter modes. The `change` keyword is not repeated on a dot call.
 
 ## Choices
 
@@ -409,7 +411,7 @@ type Pair[A, B]
 
 Generics are monomorphized: each used combination gets its own compiled code. An alias can be generic too, as in `type Table[V] = map[text, V]`.
 
-A generic body is checked once, where it is written, and a parameter is an opaque type there. So it works for every type or for none, and a call can never fail inside the body. Until bounds arrive, a body can only store, pass, and return a `T`. A generic program that keeps asking for a larger type of itself is error E0903, even if it would stop at run time.
+A generic body is checked once, where it is written, and a parameter is an opaque type there. So it works for every type or for none, and a call can never fail inside the body. Without a bound, a body can only store, pass, and return a `T`. A bound gives it more, see "Traits". A generic program that keeps asking for a larger type of itself is error E0903, even if it would stop at run time.
 
 Type arguments come from the values, left to right, as an empty list takes its type from an earlier element. So `pair(1, [])` works for `pair[T](a: T, b: list[T])`, and `T` is `int` in `first([1, 2])`. A type that the values do not show is error E0319. Brackets name it, and they hold any type:
 
@@ -438,9 +440,36 @@ task show_all[T: Describe](items: list[T])
         print item.describe()
 ```
 
-Bounds use static dispatch. `any Describe` is a boxed value with dynamic dispatch, which allows mixed lists.
+A task of a trait takes `self` first, with no type. A type has the trait if it has a task of that name with the same other parameters and the same return type. A bound names a trait, and `and` joins several: `[T: Show and Equal]`. Generic types take bounds too, as in `type Sorted[T: Order]`. A type that lacks a bound is error E0320 at the call, or in the type that names it.
 
-The compiler derives `Equal`, `Hash`, `Order`, `Show`, `Copy`, and `Json` for a type when all its fields support them. Writing the task by hand overrides the derived version. There are no macros. So far `Equal`, `Order`, and `Show` exist, with no bounds or hand-written versions yet, and they follow the rules in "Collections", "Types", and "Choices". In a derived order a NaN compares as neither less nor more, so it counts as a tie.
+Bounds use static dispatch. Planned: `any Describe` is a boxed value with dynamic dispatch, which allows mixed lists. A trait with type parameters, and a generic task in a trait, are planned too.
+
+| Trait | Lets a `T` | Who has it |
+| --- | --- | --- |
+| `Show` | `print` and interpolation | every type |
+| `Equal` | `==`, `!=`, `in` on a list | every type |
+| `Order` | `<`, `<=`, `>`, `>=` | numbers, `text`, and lists and `type` or `choice` values made of those |
+| `Hash` | be a key of a map or set | `int`, `bool`, `byte`, `text` |
+| `Add`, `Sub`, `Mul` | `+`, `-`, `*` | `int`, `float` |
+| `Div` | `/`, which gives a `T` | `float`. An `int` does not have it, since `/` on `int` gives `float` |
+
+The compiler derives `Equal`, `Hash`, `Order`, `Show`, `Copy`, and `Json` for a type when all its fields support them. Writing the task by hand overrides the derived version, and works inside larger values too. There are no macros. So far `Equal`, `Order`, and `Show` are derived, by the rules in "Collections", "Types", and "Choices". In a derived order a NaN compares as neither less nor more, so it counts as a tie. Planned: `Hash` on compound values, `Copy`, and `Json`.
+
+```lucid
+task show(self: Money) -> text
+    return "${self.cents // 100}"
+
+task equal(self: Money, other: Money) -> bool
+    return self.cents == other.cents
+
+task compare(self: Money, other: Money) -> int      # negative, zero, or positive
+    return self.cents - other.cents
+
+task add(self: Money, other: Money) -> Money        # also sub, mul, and div
+    return Money(cents: self.cents + other.cents)
+```
+
+These names replace derived tasks or give an operator, so each must have this form, on a `type`, `choice`, or collection. Any other form is error E0323.
 
 Operators are defined by the traits `Add`, `Sub`, `Mul`, `Div`, `Equal`, and `Order`. No other operators can be overloaded, and no new operators can be defined.
 

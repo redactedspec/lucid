@@ -19,6 +19,8 @@ const MAX_INSTANCES: usize = 20_000;
 pub fn run(program: &mut Program) -> Vec<Diagnostic> {
     let source = std::mem::take(&mut program.tasks);
     let mut mono = Mono {
+        source: &source,
+        methods: &program.methods,
         datas: &program.datas,
         types: &mut program.types,
         instances: HashMap::new(),
@@ -65,6 +67,8 @@ enum Job {
 }
 
 pub struct Mono<'a> {
+    source: &'a [Task],
+    methods: &'a HashMap<String, Vec<usize>>,
     pub datas: &'a [Shape],
     pub types: &'a mut Types,
     /// A generic task with its type arguments, and its place in `done`.
@@ -90,6 +94,23 @@ impl Mono<'_> {
         self.instances.insert((id, args), slot);
         self.queue.push((slot, Job::Task(id, args)));
         slot
+    }
+
+    /// The task with a `self` parameter that takes this type, if any. The
+    /// checker keeps receivers from overlapping, so one fits at most.
+    pub fn method(&mut self, name: &str, ty: Ty, span: Span) -> Option<usize> {
+        let ids = self.methods.get(name)?;
+        for &id in ids {
+            let task = &self.source[id];
+            let mut known = vec![None; task.type_params];
+            let pattern = task.locals[0];
+            self.types.unify(pattern, ty, &mut known);
+            let Some(args) = known.into_iter().collect::<Option<Vec<Ty>>>() else { continue };
+            if self.types.subst(pattern, &args) == ty {
+                return Some(self.instance(id, args.leak(), span));
+            }
+        }
+        None
     }
 
     /// The derived task of this kind for a type.
@@ -239,8 +260,12 @@ impl Visit for Mono<'_> {
                 return;
             }
             ExprKind::Binary(op, left, right) if left.ty.is_compound() => {
-                *value = self.compare(op, *left, *right, span);
+                *value = self.compare(op, *left, *right, ty, span);
                 return;
+            }
+            ExprKind::Method(name, values) => {
+                let slot = self.method(name, values[0].ty, span);
+                ExprKind::Call(slot.expect("a bound was checked at the call"), &[], values)
             }
             ExprKind::ListHas(item, list) if !item.ty.is_key() => {
                 *value = self.list_has(*item, *list, span);

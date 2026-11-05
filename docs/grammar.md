@@ -51,7 +51,7 @@ task_def    = task_sig NEWLINE block
             | "unsafe" "extern" task_sig NEWLINE ;
 task_sig    = "task" NAME [ type_params ] "(" [ params ] ")" [ "->" type ] ;
 type_params = "[" type_param { "," type_param } [ "," ] "]" ;
-type_param  = NAME [ ":" type ] ;
+type_param  = NAME [ ":" type { "and" type } ] ;
 params      = param { "," param } [ "," ] ;
 param       = [ "change" | "take" ] ( "self" [ ":" type ] | NAME ":" type [ "=" expression ] ) ;
 

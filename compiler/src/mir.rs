@@ -3,6 +3,7 @@
 
 use crate::ast::BinaryOp;
 use crate::diag::Span;
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Ty {
@@ -264,6 +265,8 @@ pub struct Program {
     pub main: Task,
     pub types: Types,
     pub datas: Vec<Shape>,
+    /// The tasks with a `self` parameter, by name.
+    pub methods: HashMap<String, Vec<usize>>,
 }
 
 #[derive(Clone)]
@@ -440,6 +443,9 @@ pub enum ExprKind {
     View(Box<Expr>),
     /// True if a union holds one of these types. `mono.rs` makes this a `TagIn`.
     Holds(Box<Expr>, Vec<Ty>),
+    /// A task from a trait bound. `mono.rs` makes this a `Call` to the task
+    /// with this name for the type of the first argument.
+    Method(&'static str, Vec<Expr>),
     /// Runs these statements, which only `Set` hidden locals, then gives a value.
     Seq(Vec<Stmt>, Box<Expr>),
     /// Evaluates a new value, and stores its count in this local, whose old
@@ -492,7 +498,10 @@ pub trait Visit {
             | ExprKind::None
             | ExprKind::Local(_)
             | ExprKind::Text(_) => {}
-            ExprKind::Call(_, _, values) | ExprKind::Join(values) | ExprKind::ListOf(values) => {
+            ExprKind::Call(_, _, values)
+            | ExprKind::Method(_, values)
+            | ExprKind::Join(values)
+            | ExprKind::ListOf(values) => {
                 values.iter_mut().for_each(|value| self.expr(value));
             }
             ExprKind::New { fields, .. } => {

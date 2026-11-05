@@ -1,5 +1,7 @@
-generics.lcd:8:11: error E0303: `+` needs a number, found `T`
-generics.lcd:9:13: error E0303: `T` might not be shown here
+generics.lcd:8:11: error E0320: `T` does not have `Add`
+  note: add a bound, as in `[T: Add]`
+generics.lcd:9:13: error E0320: `T` does not have `Show`
+  note: add a bound, as in `[T: Show]`
 generics.lcd:10:8: error E0303: `is none` gives one answer for every `T`
   note: `is` tests what a union holds, and `==` tests equality
 generics.lcd:12:12: error E0303: this `return` needs `T`, found `int`

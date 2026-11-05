@@ -42,8 +42,9 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] Unions, `T?`, narrowing, `is`, and `.get`, `.pop`
 - [x] Generics with monomorphization, list slices
 - [x] Derived `Show`, `Equal`, and `Order`, showing and comparing collections
-- [ ] Traits, bounds, hand-written overrides, `Hash` on compound keys
-- [ ] Sized numbers, wrapping math tasks, nested tasks, lambdas, task values, `self` and dot calls
+- [x] Traits, bounds, hand-written overrides, `self` and dot calls
+- [ ] `Hash` on compound keys, `any` values
+- [ ] Sized numbers, wrapping math tasks, nested tasks, lambdas, task values
 - [ ] Parameter modes, exclusivity checks, `for change` over lists
 - [x] Naive reference counting, leak-checking debug runtime
 - [ ] Draft `docs/agent-guide.md`, and run a 10-task agent trial

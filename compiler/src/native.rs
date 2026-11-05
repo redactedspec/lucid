@@ -857,7 +857,8 @@ impl Lower<'_, '_> {
             ExprKind::Member { .. }
             | ExprKind::Wrap(_)
             | ExprKind::View(_)
-            | ExprKind::Holds(..) => unreachable!("`mono.rs` replaces these"),
+            | ExprKind::Holds(..)
+            | ExprKind::Method(..) => unreachable!("`mono.rs` replaces these"),
         }
     }
 

@@ -1,0 +1,20 @@
+type Money
+    cents: int
+
+type Far
+    cents: int
+
+task show(self: Money) -> int
+    return 1
+
+task equal(self: Money, other: Far) -> bool
+    return true
+
+task compare(self: Money) -> int
+    return 0
+
+task add(self: Far, other: Far) -> int
+    return 1
+
+task show(self: int) -> text
+    return ""

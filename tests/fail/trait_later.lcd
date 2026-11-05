@@ -1,0 +1,19 @@
+trait Pair[T]
+    task first(self) -> T
+
+trait Generic
+    task make[T](self, value: T) -> T
+
+public trait Open
+    task open(self)
+
+type Table[V: Hash] = map[text, V]
+
+task copy[T: Copy](a: T)
+    return
+
+task item[T: Json](a: T)
+    return
+
+task error[T: Error](a: T)
+    return

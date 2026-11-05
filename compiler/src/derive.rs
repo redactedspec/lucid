@@ -132,7 +132,9 @@ impl Mono<'_> {
         let ty = value.ty;
         match ty {
             Ty::Text => Expr { kind: ExprKind::TextQuote(boxed(value)), ty, span },
-            _ if ty.is_compound() => self.call(Derived::Show, ty, vec![value], Ty::Text, span),
+            _ if ty.is_compound() => {
+                self.written_or(Derived::Show, "show", vec![value], Ty::Text, span)
+            }
             _ => Expr { kind: ExprKind::ToText(boxed(value)), ty: Ty::Text, span },
         }
     }
@@ -160,7 +162,7 @@ impl Mono<'_> {
         match left.ty {
             Ty::None => Expr { kind: ExprKind::Bool(true), ty: Ty::Bool, span },
             ty if ty.is_compound() => {
-                self.call(Derived::Equal, ty, vec![left, right], Ty::Bool, span)
+                self.written_or(Derived::Equal, "equal", vec![left, right], Ty::Bool, span)
             }
             _ => {
                 let kind = ExprKind::Binary(BinaryOp::Eq, boxed(left), boxed(right));
@@ -173,8 +175,7 @@ impl Mono<'_> {
     /// for a number or text, so they must be plain reads. NaN gives zero.
     fn compared(&mut self, left: Expr, right: Expr, span: Span) -> Expr {
         if left.ty.is_compound() {
-            let ty = left.ty;
-            return self.call(Derived::Compare, ty, vec![left, right], Ty::Int, span);
+            return self.written_or(Derived::Compare, "compare", vec![left, right], Ty::Int, span);
         }
         let int = |value| Expr { kind: ExprKind::Int(value), ty: Ty::Int, span };
         let test = |op, a: &Expr, b: &Expr| {
@@ -187,8 +188,20 @@ impl Mono<'_> {
         Expr { kind: ExprKind::If(boxed(less), boxed(int(-1)), boxed(later)), ty: Ty::Int, span }
     }
 
-    /// `==`, `!=`, `<`, `<=`, `>`, or `>=` on values made of other values.
-    pub fn compare(&mut self, op: BinaryOp, left: Expr, right: Expr, span: Span) -> Expr {
+    /// An operator on values made of other values. `ty` is its result.
+    pub fn compare(&mut self, op: BinaryOp, left: Expr, right: Expr, ty: Ty, span: Span) -> Expr {
+        let arithmetic = match op {
+            BinaryOp::Add => Some("add"),
+            BinaryOp::Sub => Some("sub"),
+            BinaryOp::Mul => Some("mul"),
+            BinaryOp::Div => Some("div"),
+            _ => None,
+        };
+        if let Some(name) = arithmetic {
+            let slot = self.method(name, left.ty, span);
+            let slot = slot.expect("the checker found this task");
+            return Expr { kind: ExprKind::Call(slot, &[], vec![left, right]), ty, span };
+        }
         match op {
             BinaryOp::Eq => self.equal(left, right, span),
             BinaryOp::Ne => {
@@ -206,12 +219,25 @@ impl Mono<'_> {
 
     /// `value in list` for a type that the runtime cannot compare.
     pub fn list_has(&mut self, value: Expr, list: Expr, span: Span) -> Expr {
-        let ty = value.ty;
-        self.call(Derived::Has, ty, vec![value, list], Ty::Bool, span)
+        let slot = self.derived(Derived::Has, value.ty, span);
+        Expr { kind: ExprKind::Call(slot, &[], vec![value, list]), ty: Ty::Bool, span }
     }
 
-    fn call(&mut self, kind: Derived, ty: Ty, args: Vec<Expr>, returns: Ty, span: Span) -> Expr {
-        let slot = self.derived(kind, ty, span);
+    /// A hand-written task for the type of the first argument, or else the
+    /// derived one.
+    fn written_or(
+        &mut self,
+        kind: Derived,
+        name: &str,
+        args: Vec<Expr>,
+        returns: Ty,
+        span: Span,
+    ) -> Expr {
+        let ty = args[0].ty;
+        let slot = match self.method(name, ty, span) {
+            Some(slot) => slot,
+            None => self.derived(kind, ty, span),
+        };
         Expr { kind: ExprKind::Call(slot, &[], args), ty: returns, span }
     }
 

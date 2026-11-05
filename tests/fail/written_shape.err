@@ -1,0 +1,10 @@
+written_shape.lcd:7:6: error E0323: `show` replaces a derived task, so it needs this form
+  note: write `task show(self: T) -> text`, for a `type`, `choice`, or collection `T`
+written_shape.lcd:10:6: error E0323: `equal` replaces a derived task, so it needs this form
+  note: write `task equal(self: T, other: T) -> bool`, for a `type`, `choice`, or collection `T`
+written_shape.lcd:13:6: error E0323: `compare` replaces a derived task, so it needs this form
+  note: write `task compare(self: T, other: T) -> int`, for a `type`, `choice`, or collection `T`
+written_shape.lcd:16:6: error E0323: `add` replaces a derived task, so it needs this form
+  note: write `task add(self: T, other: T) -> T`, for a `type`, `choice`, or collection `T`
+written_shape.lcd:19:6: error E0323: `show` replaces a derived task, so it needs this form
+  note: write `task show(self: T) -> text`, for a `type`, `choice`, or collection `T`
