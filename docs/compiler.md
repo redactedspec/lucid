@@ -4,7 +4,7 @@ The compiler is written in Rust until M9, when its front end moves to Lucid (dec
 
 ## Status
 
-M3 is in progress. `lucid run` compiles `int`, `float`, `bool`, `none`, `text`, `list`, `map`, `set`, a basic `byte`, interpolation, text slices, `let`, `var`, `if`, `while`, `for` over ranges, text, and collections, top-level tasks with recursion and defaults, and `print`. It reports E0901 for anything else. `check.rs` binds names, checks types, and lowers to MIR in one pass, because with no modules or generics those stages have nothing to do alone. It splits when they arrive. `Ty` keeps compound types behind leaked references, so it stays `Copy`. List, map, and set tasks are built into `check.rs` until generics can express them. `ownership.rs` is the naive stage: it gives each new heap value an owner, and "Counting" in `mir.rs` states the rules that a backend follows.
+M3 is in progress. `lucid run` compiles `int`, `float`, `bool`, `none`, `text`, `list`, `map`, `set`, a basic `byte`, `type`, `choice`, `match`, interpolation, text slices, `let`, `var`, `if`, `while`, `for` over ranges, text, and collections, top-level tasks with recursion and defaults, and `print`. It reports E0901 for anything else. `check.rs` binds names, checks types, and lowers to MIR in one pass, because with no modules or generics those stages have nothing to do alone. It splits when they arrive. `Ty` keeps compound types behind leaked references, so it stays `Copy`. `Ty::Data` holds a name and an index into the checker's table, so a recursive type needs no cycle in `Ty`. A `match` lowers to an `if` chain on a hidden local, and the last arm has no test, since the exhaustiveness check proves what remains. List, map, and set tasks are built into `check.rs` until generics can express them. `ownership.rs` is the naive stage: it gives each new heap value an owner, and "Counting" in `mir.rs` states the rules that a backend follows.
 
 ## Pipeline
 
@@ -50,7 +50,7 @@ benchmarks/        Lucid and Rust versions of each program
 
 ## Runtime
 
-`lucid_rt` is small and has a C ABI. Today it provides printing, trap reporting, allocation, reference counting, and text, list, and map primitives. Task scheduling is planned.
+`lucid_rt` is small and has a C ABI. Today it provides printing, trap reporting, allocation, reference counting, and text, list, map, and record primitives. Task scheduling is planned.
 
 A task with counted locals has one exit block, which releases them, so code size does not grow with returns times locals. Every other task returns directly.
 
@@ -59,6 +59,10 @@ Every heap value starts with a count and a kind, so one `lucid_retain` and `luci
 A list is one allocation: the header, a length, a capacity, then 8-byte slots. Every element type uses one slot size, so `list[byte]` costs 8 bytes per byte for now. A map is one allocation too, with the layout of a compact dict: entries in insertion order, then a table of `2 * cap` indexes into them. A removed entry stays as a gap until the next rebuild. A set is a map with unused values. Hashes come from `RandomState`, keyed once per process.
 
 Compiled code reads a list's length and elements inline. Every change goes through a runtime task that takes the local's count and returns the value to store. That task is where copy-on-write happens: it writes in place if the count is one, and otherwise copies. So MIR changes a collection only through `Stmt::Update`, never in an expression. A write through a path such as `x[i].push(1)` first reads every index and value, then takes `x[i]` out of its slot, which holds null until the write puts it back. So the element has one count, and needs no copy.
+
+A `type` or `choice` value is a record: the header, a variant tag, a length, a count of counted slots, then 8-byte slots. Counted fields take the first slots, so a record needs no per-type description to know what it holds. Compiled code builds a record and reads its slots inline. A write goes through `lucid_record_set`, which copies if the record is shared. A variant with no fields allocates too, for now.
+
+`lucid_release` uses no recursion. A value whose count reaches zero waits on a list linked through its own count field, because a recursive `choice` can nest as deep as memory allows.
 
 In a debug build of `lucid_rt`, which is what `cargo test` runs, a released value keeps its memory and is marked dead. So a double free, or a retain of a dead value, traps with `runtime bug`. `lucid run` also traps at exit if any value is still live.
 

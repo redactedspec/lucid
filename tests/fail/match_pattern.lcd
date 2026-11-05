@@ -1,0 +1,31 @@
+choice Shape
+    Circle(radius: float)
+    Rect(width: float, height: float)
+    Point
+
+task f(s: Shape, n: int, name: text)
+    match s
+        Circl(r) -> print "misspelled"
+        _ -> print "x"
+    match s
+        Pont -> print "catches nothing"
+        _ -> print "x"
+    match s
+        Rect(a) -> print "too few"
+        Circle -> print "too few"
+        Point() -> print "no parentheses"
+        Rect(a, b, c) -> print "too many"
+    match n
+        Circle(r) -> print "x"
+        _ -> print "x"
+    match name
+        "{name}" -> print "x"
+        _ -> print "x"
+    match n
+        "a" -> print "x"
+        _ -> print "x"
+    match s
+        Rect(Point, _) -> print "patterns do not nest"
+        _ -> print "x"
+    match n
+        Point -> print "wrong subject"

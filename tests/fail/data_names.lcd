@@ -1,0 +1,27 @@
+type User
+    name: text
+    name: int
+
+type User
+    a: int
+
+type int
+    a: int
+
+choice A
+    B
+    C
+
+choice D
+    B
+
+task A()
+    print "x"
+
+type C = int
+choice Sized
+    set
+let User = 1
+choice Modes
+    Bad(change a: int)
+    Worse(self: int)

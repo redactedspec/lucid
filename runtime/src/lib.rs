@@ -27,6 +27,7 @@ enum Kind {
     Text,
     List { counted: bool },
     Map { key_counted: bool, value_counted: bool },
+    Record,
 }
 
 /// A counted, immutable UTF-8 text. Its bytes follow this header.
@@ -54,6 +55,16 @@ pub struct Map {
     len: usize,
     used: usize,
     cap: usize,
+}
+
+/// A counted `type` or `choice` value. `tag` is its variant. `len` 8-byte slots
+/// follow this header, and the first `counted` of them hold counted values.
+#[repr(C)]
+pub struct Record {
+    head: Head,
+    tag: usize,
+    len: usize,
+    counted: usize,
 }
 
 #[repr(C)]
@@ -84,6 +95,10 @@ pub const LEN_OFFSET: i32 = offset_of!(List, len) as i32;
 pub const SLOTS_OFFSET: i32 = size_of::<List>() as i32;
 const _: () = assert!(offset_of!(Map, len) == offset_of!(List, len));
 
+/// Compiled code reads a record's variant and slots here.
+pub const TAG_OFFSET: i32 = offset_of!(Record, tag) as i32;
+pub const RECORD_SLOTS_OFFSET: i32 = size_of::<Record>() as i32;
+
 /// Debug builds only: the count of a released value.
 const DEAD: usize = usize::MAX;
 
@@ -101,6 +116,10 @@ fn list_size(cap: usize) -> usize {
 fn map_size(cap: usize) -> usize {
     let per_entry = size_of::<Entry>() + 2 * size_of::<usize>();
     cap.saturating_mul(per_entry).saturating_add(size_of::<Map>())
+}
+
+fn record_size(len: usize) -> usize {
+    len.saturating_mul(size_of::<i64>()).saturating_add(size_of::<Record>())
 }
 
 fn layout(size: usize) -> Layout {
@@ -226,45 +245,76 @@ pub unsafe extern "C" fn lucid_retain(value: *mut Head) {
 /// Gives up one count of `value`, which may be null: a local starts that way.
 /// The last count releases what the value holds, and frees it.
 ///
+/// A recursive `choice` can nest as deep as memory allows, so this never
+/// recurses. A value waiting here keeps the next one in its `count`, which is
+/// unused once it reaches zero. So this needs no stack and no allocation.
+///
 /// # Safety
 ///
 /// `value` must be null, or point to a live value that this caller has a count of.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lucid_release(value: *mut Head) {
+    let mut pending = std::ptr::null_mut();
+    // SAFETY: the caller guarantees a live value, `kind` tells each value's
+    // layout, and a value on `pending` has no other holder.
+    unsafe {
+        drop_count(value, &mut pending);
+        while !pending.is_null() {
+            let value = pending;
+            pending = (*value).count as *mut Head;
+            match (*value).kind {
+                Kind::Text => free(value, text_size((*value.cast::<Text>()).len)),
+                Kind::List { counted } => {
+                    let list = value.cast::<List>();
+                    if counted {
+                        for &slot in slots(list).iter() {
+                            drop_count(slot as *mut Head, &mut pending);
+                        }
+                    }
+                    free(value, list_size((*list).cap));
+                }
+                Kind::Map { key_counted, value_counted } => {
+                    let map = value.cast::<Map>();
+                    for entry in entries(map).iter().filter(|entry| entry.hash != REMOVED) {
+                        if key_counted {
+                            drop_count(entry.key as *mut Head, &mut pending);
+                        }
+                        if value_counted {
+                            drop_count(entry.value as *mut Head, &mut pending);
+                        }
+                    }
+                    free(value, map_size((*map).cap));
+                }
+                Kind::Record => {
+                    let record = value.cast::<Record>();
+                    for &slot in &record_slots(record)[..(*record).counted] {
+                        drop_count(slot as *mut Head, &mut pending);
+                    }
+                    free(value, record_size((*record).len));
+                }
+            }
+        }
+    }
+}
+
+/// Gives up one count of `value`. The last count adds it to `pending`.
+///
+/// # Safety
+///
+/// `value` must be null, or point to a live value that this caller has a count of.
+unsafe fn drop_count(value: *mut Head, pending: &mut *mut Head) {
     if value.is_null() {
         return;
     }
-    // SAFETY: the caller guarantees a live value, and `kind` tells its layout.
-    // Nesting is limited by the depth of a written type, so this cannot run deep.
+    // SAFETY: the caller guarantees a live value.
     unsafe {
         if cfg!(debug_assertions) && (*value).count == DEAD {
             trap(b"trap: runtime bug: double free");
         }
         (*value).count -= 1;
-        if (*value).count > 0 {
-            return;
-        }
-        match (*value).kind {
-            Kind::Text => free(value, text_size((*value.cast::<Text>()).len)),
-            Kind::List { counted } => {
-                let list = value.cast::<List>();
-                if counted {
-                    slots(list).iter().for_each(|&slot| release_slot(slot));
-                }
-                free(value, list_size((*list).cap));
-            }
-            Kind::Map { key_counted, value_counted } => {
-                let map = value.cast::<Map>();
-                for entry in entries(map).iter().filter(|entry| entry.hash != REMOVED) {
-                    if key_counted {
-                        release_slot(entry.key);
-                    }
-                    if value_counted {
-                        release_slot(entry.value);
-                    }
-                }
-                free(value, map_size((*map).cap));
-            }
+        if (*value).count == 0 {
+            (*value).count = *pending as usize;
+            *pending = value;
         }
     }
 }
@@ -567,6 +617,63 @@ pub unsafe extern "C" fn lucid_list_has(list: *mut List, value: i64) -> bool {
     let counted = is_counted(list);
     // SAFETY: the caller guarantees a live list, and borrows hold for this call.
     unsafe { slots(list).iter().any(|&slot| same_key(counted, slot, value)) }
+}
+
+/// A record with a count of one. Compiled code fills all `len` slots at once,
+/// and retains those below `counted`, before anything can read them.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_record_new(tag: usize, len: usize, counted: usize) -> *mut Record {
+    let head = Head { count: 1, kind: Kind::Record };
+    object(record_size(len), Record { head, tag, len, counted })
+}
+
+/// # Safety
+///
+/// `record` must point to a live record, and no other slice of it may be in
+/// use. The slice must not outlive it.
+unsafe fn record_slots<'a>(record: *mut Record) -> &'a mut [i64] {
+    // SAFETY: the caller guarantees a live record, whose slots follow the header.
+    unsafe {
+        check_live(record.cast());
+        std::slice::from_raw_parts_mut(record.add(1).cast(), (*record).len)
+    }
+}
+
+/// Replaces a value, and returns the record that replaces `record`: `record`
+/// itself if the caller has the only count, else a copy. A slot below `counted`
+/// may hold null while compiled code writes through it. See "Counting" in mir.rs.
+///
+/// # Safety
+///
+/// `record` must point to a live record that this caller gives one count of,
+/// and `slot` must be below its `len`. `value` must fit the slot, and is borrowed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_record_set(
+    mut record: *mut Record,
+    slot: usize,
+    value: i64,
+) -> *mut Record {
+    // SAFETY: the caller guarantees this. The new value is retained first,
+    // since it may be the old one.
+    unsafe {
+        let (tag, len, counted) = ((*record).tag, (*record).len, (*record).counted);
+        if slot < counted {
+            retain_slot(value);
+        }
+        if (*record).head.count > 1 {
+            let copy = lucid_record_new(tag, len, counted);
+            let old = record_slots(record);
+            std::ptr::copy_nonoverlapping(old.as_ptr(), copy.add(1).cast(), len);
+            old[..counted].iter().for_each(|&held| retain_slot(held));
+            (*record).head.count -= 1;
+            record = copy;
+        }
+        let old = std::mem::replace(&mut record_slots(record)[slot], value);
+        if slot < counted {
+            release_slot(old);
+        }
+        record
+    }
 }
 
 /// The keys of a process. Random keys stop a remote input from choosing

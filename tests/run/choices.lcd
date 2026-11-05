@@ -1,0 +1,110 @@
+# Choices, match as a statement and as a value, and recursion.
+choice Shape
+    Circle(radius: float)
+    Rect(width: float, height: float = 1.0)
+    Named(label: text, inner: list[text])
+    Point
+
+task area(shape: Shape) -> float
+    return match shape
+        Circle(radius) -> 3.0 * radius * radius
+        Rect(width, height) -> width * height
+        Named(_, _) -> 0.5
+        Point -> 0.0
+
+task describe(shape: Shape) -> text
+    match shape
+        Circle(r) -> return "circle {r}"
+        Rect(_, h) ->
+            let doubled = h * 2.0
+            return "rect {doubled}"
+        Named(label, inner) -> return "{label} of {inner.len()}"
+        Point -> return "point"
+
+task is_round(shape: Shape) -> bool
+    return match shape
+        Circle(_) -> true
+        _ -> false
+
+let shapes = [
+    Circle(radius: 2.0),
+    Rect(height: 3.0, width: 2.0),
+    Rect(width: 4.0),
+    Named(label: "group", inner: ["a", "b"]),
+    Point,
+]
+for shape in shapes
+    print area(shape)
+    print describe(shape)
+    print is_round(shape)
+
+# An arm may assign the value it matched.
+var current = Circle(radius: 1.0)
+match current
+    Circle(radius) ->
+        current = Named(label: "was {radius}", inner: [])
+        print radius
+    _ -> print "other"
+print describe(current)
+
+# Statement arms: calls, changes, loops.
+var log: list[text] = []
+for shape in shapes
+    match shape
+        Point ->
+            continue
+        Named(label, _) ->
+            log.push(label)
+            break
+        Circle(_) -> log.push("c")
+        _ -> log.push("r")
+print log.len()
+print log[2]
+
+# A recursive choice.
+choice Tree
+    Leaf
+    Node(left: Tree, value: int, right: Tree)
+
+task insert(tree: Tree, value: int) -> Tree
+    return match tree
+        Leaf -> Node(left: Leaf, value: value, right: Leaf)
+        Node(left, here, right) -> rebuild(left, here, right, value)
+
+task rebuild(left: Tree, here: int, right: Tree, value: int) -> Tree
+    if value < here
+        return Node(left: insert(left, value), value: here, right: right)
+    return Node(left: left, value: here, right: insert(right, value))
+
+task sum(tree: Tree) -> int
+    return match tree
+        Leaf -> 0
+        Node(left, value, right) -> sum(left) + value + sum(right)
+
+var tree = Leaf
+for value in [5, 2, 8, 1]
+    tree = insert(tree, value)
+print sum(tree)
+
+# Choices inside records, and a record inside a choice.
+type Item
+    shape: Shape
+    count: int
+
+var item = Item(shape: Point, count: 1)
+item.shape = Circle(radius: 1.0)
+print describe(item.shape)
+
+choice Wrapper
+    Holds(item: Item)
+
+let held = Holds(item: item)
+item.count = 2
+match held
+    Holds(inner) -> print inner.count
+
+# The type of an arm comes from the context.
+let nothing: list[int] = match item.count
+    2 -> []
+    _ -> [1]
+print nothing.len()

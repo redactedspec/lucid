@@ -1,0 +1,83 @@
+# Match on numbers, text, and bool, with literals and names.
+task size(n: int) -> text
+    return match n
+        0 -> "none"
+        1 -> "one"
+        0x10 -> "sixteen"
+        -1 -> "minus one"
+        other -> "{other}"
+
+task sign(on: bool) -> int
+    match on
+        true -> return 1
+        false -> return -1
+
+task greet(word: text) -> text
+    let reply = match word
+        "hi" -> "hello"
+        "" -> "nothing"
+        "a{{b" -> "brace"
+        _ -> "unknown {word}"
+    return reply
+
+task ratio(x: float) -> text
+    return match x
+        1.5 -> "exact"
+        -1.5 -> "negative"
+        _ -> "other"
+
+task pick(n: int) -> int
+    var x = match n
+        1 -> 10
+        2 -> return 20
+        _ -> 30
+    x += 1
+    return x
+
+print size(0)
+print size(1)
+print size(16)
+print size(-1)
+print size(-3)
+print sign(true)
+print sign(false)
+print greet("hi")
+print greet("")
+print greet("x")
+print greet("a{{b")
+print ratio(1.5)
+print ratio(-1.5)
+print ratio(2.0)
+print pick(1)
+print pick(2)
+print pick(3)
+
+# Top-level bindings, and each arm in its own scope.
+let n = 2
+match n
+    1 -> print "one"
+    x ->
+        let y = x * 2
+        print y
+match n
+    x -> print x + 1
+
+# The subject runs once.
+task noisy() -> int
+    print "ran"
+    return 1
+
+match noisy()
+    0 -> print "zero"
+    1 -> print "one"
+    _ -> print "many"
+
+# A task may share a name with a built-in type.
+task set(n: int) -> int
+    return n + 1
+
+print set(1)
+
+let words = ["a", "b"]
+match words
+    all -> print all.len()

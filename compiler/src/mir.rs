@@ -17,6 +17,9 @@ pub enum Ty {
     List(&'static Ty),
     Map(&'static Ty, &'static Ty),
     Set(&'static Ty),
+    /// A `type` or `choice`, by its name and its index in the checker's table.
+    /// A counted record, whatever its fields. See "Runtime" in docs/compiler.md.
+    Data(&'static str, usize),
     /// Already reported. Hides follow-on errors, and never reaches a backend.
     Error,
 }
@@ -39,12 +42,19 @@ impl Ty {
             Ty::List(item) => format!("list[{}]", item.name()),
             Ty::Map(key, value) => format!("map[{}, {}]", key.name(), value.name()),
             Ty::Set(item) => format!("set[{}]", item.name()),
+            Ty::Data(name, _) => name.into(),
             Ty::Error => "unknown".into(),
         }
     }
 
     pub fn is_counted(self) -> bool {
-        self == Ty::Text || self.is_collection()
+        self == Ty::Text || self.is_compound()
+    }
+
+    /// True for a value made of other values. Comparing, showing, and hashing
+    /// one waits for derived traits.
+    pub fn is_compound(self) -> bool {
+        self.is_collection() || matches!(self, Ty::Data(..))
     }
 
     pub fn is_collection(self) -> bool {
@@ -66,7 +76,7 @@ pub type Local = usize;
 // old one. A parameter is borrowed from the caller, and is never `Set`. `Return`
 // retains its value, then releases every counted local that is not a parameter.
 //
-// A list, map, or set in a local changes only through `Stmt::Update`, which gives
+// A list, map, set, or record in a local changes only through `Stmt::Update`, which gives
 // the runtime that local's count, and stores the value that comes back. So a
 // counted expression stays valid across its statement. Its elements stay valid
 // too, since their container cannot change until the statement ends.
@@ -91,7 +101,7 @@ pub struct Task {
 
 pub enum Stmt {
     Set(Local, Expr),
-    /// Changes the list, map, or set in this local, which may then move.
+    /// Changes the list, map, set, or record in this local, which may then move.
     /// Traps at `span` if a list index is out of bounds.
     Update {
         local: Local,
@@ -142,6 +152,8 @@ pub enum Update {
     MapSet,
     /// Key.
     MapRemove,
+    /// Slot, value.
+    FieldSet,
 }
 
 #[derive(Clone)]
@@ -210,6 +222,17 @@ pub enum ExprKind {
     MapNext(Box<Expr>, Box<Expr>),
     /// The key at a position from `MapNext`.
     MapKey(Box<Expr>, Box<Expr>),
+    /// A new record. Values run in this order, each going to its slot, and
+    /// together they fill every slot. Slots below `counted` hold counted values.
+    New {
+        tag: usize,
+        counted: usize,
+        fields: Vec<(usize, Expr)>,
+    },
+    /// The value in a slot of a record.
+    Field(Box<Expr>, usize),
+    /// The variant of a record.
+    Tag(Box<Expr>),
     /// Evaluates a new value, and stores its count in this local, whose old
     /// value is released. Added by `ownership.rs`.
     Temp(Local, Box<Expr>),

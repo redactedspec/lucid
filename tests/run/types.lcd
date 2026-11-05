@@ -1,0 +1,103 @@
+# Records: named fields, defaults, aliases, and value semantics.
+type UserId = int
+type Names = list[text]
+
+type User
+    id: UserId
+    name: text
+    active: bool = true
+    score: float = 1.5
+    tags: Names
+
+type Team
+    lead: User
+    members: list[User]
+    size: int = 0
+
+task rename(user: User, name: text) -> User
+    var copy = user
+    copy.name = name
+    return copy
+
+task make(id: int) -> User
+    return User(tags: [], name: "user {id}", id: id)
+
+let ada = User(id: 1, name: "Ada", tags: ["math"])
+print ada.id
+print ada.name
+print ada.active
+print ada.score
+print ada.tags[0]
+print "{ada.name} has {ada.tags.len()} tag"
+
+# A copy never affects the value it came from.
+var b = ada
+b.name = "Grace"
+b.id += 41
+b.score *= 2.0
+b.active = false
+b.tags.push("ships")
+print ada.name
+print ada.id
+print ada.score
+print ada.active
+print ada.tags.len()
+print b.name
+print b.id
+print b.score
+print b.active
+print b.tags.len()
+
+print rename(ada, "Linus").name
+print ada.name
+print make(7).name
+
+# Writes through a path.
+var team = Team(lead: ada, members: [ada, b], size: 2)
+var other = team
+team.lead.name = "Lead"
+team.members[1].tags.push("deep")
+team.members[0].score += 1.0
+team.members.push(make(3))
+team.size = team.members.len()
+print team.lead.name
+print team.members[1].tags.len()
+print team.members[0].score
+print team.size
+print other.lead.name
+print other.members[1].tags.len()
+print other.members[0].score
+print other.size
+print ada.name
+
+# A value that holds itself through a list.
+type Node
+    value: int
+    children: list[Node]
+
+task total(node: Node) -> int
+    var sum = node.value
+    for child in node.children
+        sum += total(child)
+    return sum
+
+var root = Node(value: 1, children: [])
+root.children.push(Node(value: 2, children: []))
+root.children.push(root)
+print total(root)
+
+# Records in maps, and a record that is replaced.
+var people = {"a": ada}
+people["a"].name = "Map"
+print people["a"].name
+print ada.name
+people["b"] = b
+print people.len()
+b = make(9)
+print b.name
+print people["b"].name
+
+# A value and its field in one write.
+var c = make(1)
+c.name = c.name
+print c.name

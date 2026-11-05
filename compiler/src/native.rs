@@ -52,7 +52,9 @@ pub fn run(
 
 fn clif(ty: Ty) -> Type {
     match ty {
-        Ty::Int | Ty::Byte | Ty::Text | Ty::List(_) | Ty::Map(..) | Ty::Set(_) => types::I64,
+        Ty::Int | Ty::Byte | Ty::Text | Ty::List(_) | Ty::Map(..) | Ty::Set(_) | Ty::Data(..) => {
+            types::I64
+        }
         Ty::Float => types::F64,
         Ty::Bool | Ty::None => types::I8,
         Ty::Error => unreachable!("errors stop before the backend"),
@@ -89,6 +91,8 @@ struct Runtime {
     map_next: FuncId,
     map_key: FuncId,
     set_from: FuncId,
+    record_new: FuncId,
+    record_set: FuncId,
     int_text: FuncId,
     float_text: FuncId,
     bool_text: FuncId,
@@ -145,6 +149,8 @@ fn compile(
     builder.symbol("lucid_map_next", lucid_rt::lucid_map_next as *const u8);
     builder.symbol("lucid_map_key", lucid_rt::lucid_map_key as *const u8);
     builder.symbol("lucid_set_from", lucid_rt::lucid_set_from as *const u8);
+    builder.symbol("lucid_record_new", lucid_rt::lucid_record_new as *const u8);
+    builder.symbol("lucid_record_set", lucid_rt::lucid_record_set as *const u8);
     builder.symbol("lucid_int_text", lucid_rt::lucid_int_text as *const u8);
     builder.symbol("lucid_float_text", lucid_rt::lucid_float_text as *const u8);
     builder.symbol("lucid_bool_text", lucid_rt::lucid_bool_text as *const u8);
@@ -192,6 +198,8 @@ fn compile(
         map_next: import("lucid_map_next", &two, &int),
         map_key: import("lucid_map_key", &two, &int),
         set_from: import("lucid_set_from", &value, &value),
+        record_new: import("lucid_record_new", &[int[0], int[0], int[0]], &value),
+        record_set: import("lucid_record_set", &with_two, &value),
         int_text: import("lucid_int_text", &int, &value),
         float_text: import("lucid_float_text", &float, &value),
         bool_text: import("lucid_bool_text", &byte, &value),
@@ -589,6 +597,7 @@ impl Lower<'_, '_> {
             Update::ListSwap => runtime.list_swap,
             Update::MapSet => runtime.map_set,
             Update::MapRemove => runtime.map_remove,
+            Update::FieldSet => runtime.record_set,
         };
         let result = self.call(task, &values).expect("it returns the new value");
         if matches!(op, Update::ListSet | Update::ListSwap) {
@@ -622,6 +631,25 @@ impl Lower<'_, '_> {
             map = set.expect("it returns a map");
         }
         map
+    }
+
+    /// Every value runs before the record exists, so that no field sees it.
+    fn new_record(&mut self, tag: usize, counted: usize, fields: &[(usize, Expr)]) -> Value {
+        let values: Vec<(usize, Value)> =
+            fields.iter().map(|(slot, value)| (*slot, self.slot(value))).collect();
+        let tag = self.body.ins().iconst(types::I64, tag as i64);
+        let len = self.body.ins().iconst(types::I64, fields.len() as i64);
+        let held = self.body.ins().iconst(types::I64, counted as i64);
+        let record = self.call(self.runtime.record_new, &[tag, len, held]);
+        let record = record.expect("it returns a record");
+        for (slot, value) in values {
+            if slot < counted {
+                self.call(self.runtime.retain, &[value]);
+            }
+            let flags = MemFlagsData::trusted();
+            self.body.ins().store(flags, value, record, slot_offset(slot));
+        }
+        record
     }
 
     fn load_slot(&mut self, address: Value, offset: i32, ty: Ty) -> Value {
@@ -777,6 +805,16 @@ impl Lower<'_, '_> {
                 let key = self.call(self.runtime.map_key, &[map, position]);
                 self.read_slot(key.expect("it returns a key"), expr.ty)
             }
+            ExprKind::New { tag, counted, fields } => self.new_record(*tag, *counted, fields),
+            ExprKind::Field(value, slot) => {
+                let value = self.expr(value);
+                self.load_slot(value, slot_offset(*slot), expr.ty)
+            }
+            ExprKind::Tag(value) => {
+                let value = self.expr(value);
+                let flags = MemFlagsData::trusted();
+                self.body.ins().load(types::I64, flags, value, lucid_rt::TAG_OFFSET)
+            }
             ExprKind::Temp(local, value) => {
                 let value = self.expr(value);
                 self.store(*local, value);
@@ -912,6 +950,11 @@ impl Lower<'_, '_> {
         let corrected = self.body.ins().iadd(r, b);
         self.body.ins().select(round, corrected, r)
     }
+}
+
+fn slot_offset(slot: usize) -> i32 {
+    let offset = slot * size_of::<i64>() + lucid_rt::RECORD_SLOTS_OFFSET as usize;
+    i32::try_from(offset).expect("the source fits in memory")
 }
 
 fn int_cc(op: BinaryOp) -> Option<IntCC> {

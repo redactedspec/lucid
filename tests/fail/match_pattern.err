@@ -1,0 +1,20 @@
+match_pattern.lcd:8:9: error E0318: `Shape` has no variant `Circl`
+  note: its variants are Circle, Rect, Point, and `_` matches the rest
+match_pattern.lcd:11:9: error E0318: `Shape` has no variant `Pont`
+  note: its variants are Circle, Rect, Point, and `_` matches the rest
+match_pattern.lcd:14:9: error E0318: `Rect` has 2 fields
+  note: bind all 2 in order, and use `_` to skip one
+match_pattern.lcd:15:9: error E0318: `Circle` has 1 field
+  note: bind all 1 in order, and use `_` to skip one
+match_pattern.lcd:16:9: error E0318: `Point` has no fields
+  note: write `Point`, with no `()`
+match_pattern.lcd:17:9: error E0317: this arm can never run: earlier arms cover everything
+match_pattern.lcd:17:9: error E0318: `Rect` has 2 fields
+  note: bind all 2 in order, and use `_` to skip one
+match_pattern.lcd:19:9: error E0318: `int` is not a `choice`
+match_pattern.lcd:22:9: error E0318: a text pattern cannot hold `{}`
+match_pattern.lcd:25:9: error E0303: this pattern needs `int`, found `text`
+match_pattern.lcd:28:14: error E0318: `Point` cannot be bound here
+  note: it names a type or variant, and patterns do not nest, so use another name
+match_pattern.lcd:31:9: error E0318: `Point` cannot be bound here
+  note: it names a type or variant, and patterns do not nest, so use another name

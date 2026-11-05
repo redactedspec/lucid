@@ -1,0 +1,6 @@
+match_unreachable.lcd:8:9: error E0317: this arm can never run: an earlier arm has `Point`
+match_unreachable.lcd:12:9: error E0317: this arm can never run: earlier arms cover everything
+match_unreachable.lcd:16:9: error E0317: this arm can never run: earlier arms cover everything
+match_unreachable.lcd:19:9: error E0317: this arm can never run: an earlier arm has it
+match_unreachable.lcd:21:9: error E0317: this arm can never run: earlier arms cover everything
+match_unreachable.lcd:25:9: error E0317: this arm can never run: earlier arms cover everything

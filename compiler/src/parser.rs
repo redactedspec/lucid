@@ -636,15 +636,23 @@ impl Parser {
                         }
                     }
                     self.expect(")")?;
-                    PatternKind::Variant { name: name.text, bindings }
+                    PatternKind::Variant { name, bindings }
                 } else {
-                    PatternKind::Name(name.text)
+                    PatternKind::Name(name)
                 }
             }
             TokenKind::Int(_) | TokenKind::Float(_) | TokenKind::Text(_) => {
                 PatternKind::Literal(self.primary()?)
             }
             TokenKind::Sym("true" | "false") => PatternKind::Literal(self.primary()?),
+            TokenKind::Sym("-") => {
+                let Some(kind) = self.negative_literal() else {
+                    return self.expected("a pattern");
+                };
+                self.advance();
+                self.advance();
+                PatternKind::Literal(Expr { kind, span: self.since(start) })
+            }
             TokenKind::Sym("none") => {
                 self.advance();
                 PatternKind::None

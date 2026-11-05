@@ -1,0 +1,2 @@
+match_value_arm.lcd:3:10: error E0303: this arm needs `int`, found `text`
+match_value_arm.lcd:5:10: error E0303: this `match` needs a value, and `print` gives none

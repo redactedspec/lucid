@@ -1,0 +1,23 @@
+# Releasing this chain must not use the stack once per link.
+choice Chain
+    End
+    Link(next: Chain)
+
+var chain = End
+for i in 0..1000000
+    chain = Link(next: chain)
+
+task length(chain: Chain) -> int
+    var n = 0
+    var at = chain
+    var more = true
+    while more
+        match at
+            End ->
+                more = false
+            Link(next) ->
+                at = next
+                n += 1
+    return n
+
+print length(chain)

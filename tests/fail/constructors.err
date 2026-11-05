@@ -1,0 +1,22 @@
+constructors.lcd:9:9: error E0307: `User` is missing field `name`
+constructors.lcd:9:14: error E0307: `User` needs named arguments
+  note: write `field: value`
+constructors.lcd:9:21: error E0307: `User` needs named arguments
+  note: write `field: value`
+constructors.lcd:10:9: error E0307: `User` is missing field `name`
+constructors.lcd:11:25: error E0307: `name` is given twice
+constructors.lcd:12:20: error E0303: this field needs `text`, found `int`
+constructors.lcd:13:25: error E0307: `User` has no field `size`
+constructors.lcd:14:9: error E0307: `User` needs its fields
+  note: write `User(field: value)`
+constructors.lcd:15:9: error E0307: `Circle` needs its fields
+  note: write `Circle(field: value)`
+constructors.lcd:16:9: error E0307: `Point` has no fields
+  note: write `Point`, with no `()`
+constructors.lcd:17:14: error E0303: `text` has no field `size`
+constructors.lcd:18:9: error E0303: `User` has no field `height`
+constructors.lcd:20:9: error E0303: `Shape` is a `choice`, so it has no fields
+  note: use `match` to reach the fields of a variant
+constructors.lcd:22:9: error E0303: `int` has no field `size`
+constructors.lcd:24:1: error E0305: `k` cannot change
+  note: only a name declared with `var` can change

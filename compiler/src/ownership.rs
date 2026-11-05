@@ -57,6 +57,9 @@ fn expr(locals: &mut Vec<Ty>, value: &mut Expr) {
         ExprKind::Call(_, values) | ExprKind::Join(values) | ExprKind::ListOf(values) => {
             values.iter_mut().for_each(|value| expr(locals, value));
         }
+        ExprKind::New { fields, .. } => {
+            fields.iter_mut().for_each(|(_, value)| expr(locals, value));
+        }
         ExprKind::MapOf(entries) => {
             for (key, value) in entries {
                 expr(locals, key);
@@ -73,6 +76,8 @@ fn expr(locals: &mut Vec<Ty>, value: &mut Expr) {
         | ExprKind::TextByteLen(inner)
         | ExprKind::TextBytes(inner)
         | ExprKind::SetOf(inner)
+        | ExprKind::Field(inner, _)
+        | ExprKind::Tag(inner)
         | ExprKind::Len(inner) => expr(locals, inner),
         ExprKind::Binary(_, left, right)
         | ExprKind::TextCharAt(left, right)
@@ -104,6 +109,7 @@ fn expr(locals: &mut Vec<Ty>, value: &mut Expr) {
             | ExprKind::ListOf(_)
             | ExprKind::MapOf(_)
             | ExprKind::SetOf(_)
+            | ExprKind::New { .. }
     );
     if new && value.ty.is_counted() {
         locals.push(value.ty);

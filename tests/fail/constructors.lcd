@@ -1,0 +1,24 @@
+type User
+    name: text
+    age: int = 0
+
+choice Shape
+    Circle(radius: float)
+    Point
+
+let a = User("Ada", 1)
+let b = User(age: 1)
+let c = User(name: "a", name: "b")
+let d = User(name: 1)
+let e = User(name: "a", size: 1)
+let f = User
+let g = Circle
+let h = Point()
+print d.name.size
+print e.height
+let i = Circle(radius: 1.0)
+print i.radius
+let n = 1
+print n.size
+let k = User(name: "a")
+k.age = 1

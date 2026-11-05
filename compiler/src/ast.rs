@@ -287,9 +287,9 @@ pub enum PatternKind {
     None,
     Literal(Expr),
     /// A variant with no parentheses, or a name that binds the value.
-    Name(String),
+    Name(Name),
     Variant {
-        name: String,
+        name: Name,
         bindings: Vec<Name>,
     },
     Typed {

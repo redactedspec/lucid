@@ -1,0 +1,22 @@
+type Pair[A, B]
+    left: A
+    right: B
+
+public type Open
+    a: int
+
+choice Box[T]
+    Full(value: T)
+
+type Plain
+    a: int
+
+let p = Plain(a: 1)
+print p
+print "{p}"
+print p == p
+let m: map[Plain, int] = {}
+print p in [p]
+match 1
+    none -> print "x"
+    n: int -> print "y"

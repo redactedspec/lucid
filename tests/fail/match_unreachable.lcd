@@ -1,0 +1,25 @@
+choice Shape
+    Circle(radius: float)
+    Point
+
+task f(s: Shape, n: int, b: bool)
+    match s
+        Point -> print "a"
+        Point -> print "b"
+        _ -> print "c"
+    match s
+        _ -> print "a"
+        Point -> print "b"
+    match s
+        Point -> print "a"
+        Circle(_) -> print "b"
+        _ -> print "c"
+    match n
+        1 -> print "a"
+        0x1 -> print "b"
+        x -> print "c"
+        _ -> print "d"
+    match b
+        true -> print "a"
+        false -> print "b"
+        _ -> print "c"

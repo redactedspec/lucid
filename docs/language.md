@@ -227,13 +227,19 @@ let ada = User(name: "Ada", age: 36)
 print ada.name
 ```
 
-Copying is by value: `var b = a` then changing `b` never affects `a`.
+Arguments may come in any order, and run in the order written. A field with no default must be given. A default is a literal.
 
-An alias uses `=`:
+Copying is by value: `var b = a` then changing `b` never affects `a`. A field of a `var` can change, as in `b.age += 1` or `team.lead.name = "Ada"`. Each index in such a path runs once, before the value.
+
+An alias uses `=`. It is another name for the type, not a new type:
 
 ```lucid
 type UserId = int
 ```
+
+Types may refer to each other in any order. A type that always holds another value of itself has no finite value, and is error E0315. So `next: Node` needs a list, or a `choice` with a variant that ends the chain.
+
+Planned: printing a value and `==` on one wait for the derived `Show` and `Equal`. A value as a key waits for `Hash`.
 
 ## Methods
 
@@ -269,7 +275,19 @@ task area(self: Shape) -> float
         Point -> 0.0
 ```
 
-`match` must cover every case. It is a compiler error otherwise. `_` matches anything.
+A variant with fields is built like a `type`, with named arguments, as in `Circle(radius: 2.0)`. A variant with no fields is written with no parentheses, as in `Point`. A value of a `choice` has no fields of its own: `match` reaches them.
+
+Types, choices, variants, and tasks share one namespace, so two choices cannot use the same variant name.
+
+`match` must cover every case, and an arm that can never run is an error. Arms are tried in order. `_` matches anything.
+
+- **Variant:** `Rect(w, h)` binds every field, in the order written in the `choice`. `_` skips one. A variant with no fields is `Point`. On a `choice`, a name alone must be one of its variants, so a misspelled variant is an error and not a name that catches everything.
+- **Literal:** an `int` or `float`, with or without a leading `-`, a `text`, or a `bool`. A text pattern cannot hold `{}`. To cover `int` or `text`, end with `_` or a name.
+- **Name:** on any other type, `n -> print n` matches anything and binds the value.
+
+Patterns do not nest. A name bound by a pattern cannot be a type or variant name, so `Cons(h, Nil)` is an error and not a test of the tail.
+
+The subject runs once. An arm may assign the variable it came from, and its names keep the values they bound. As a statement, an arm can be an expression, `print`, `return`, or a block, and its value is dropped. As the value of `let`, `var`, or `return`, each arm is one expression of one type, or a `return`.
 
 ## Union types and optionals
 

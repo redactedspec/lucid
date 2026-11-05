@@ -1,0 +1,6 @@
+let a = match 1
+    1 -> 2
+    _ -> "x"
+let b = match 1
+    1 -> print "x"
+    _ -> 2

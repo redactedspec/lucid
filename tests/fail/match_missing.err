@@ -1,0 +1,8 @@
+match_missing.lcd:8:9: error E0316: this `match` does not cover every `Shape`
+  note: add an arm for `Circle`, `Square`
+match_missing.lcd:10:9: error E0316: this `match` does not cover every `int`
+  note: add an arm for `_`
+match_missing.lcd:12:9: error E0316: this `match` does not cover every `bool`
+  note: add an arm for `false`
+match_missing.lcd:14:9: error E0316: this `match` does not cover every `text`
+  note: add an arm for `_`

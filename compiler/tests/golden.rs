@@ -140,6 +140,32 @@ fn many_text_branches_compile() {
     assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
 }
 
+/// Generated, since the program is too long to keep in `tests/fail/`.
+#[test]
+fn long_alias_chain_is_rejected() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let aliases: String = (0..200)
+        .map(|n| {
+            format!(
+                "type A{n} = A{}
+",
+                n + 1
+            )
+        })
+        .collect();
+    fs::write(
+        dir.join("aliases.lcd"),
+        format!(
+            "{aliases}type A200 = int
+"
+        ),
+    )
+    .expect("cannot write test file");
+    let output = lucid(dir, &["run", "aliases.lcd"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(text(&output.stderr).contains("error E0205: aliases are nested too deep"));
+}
+
 #[test]
 fn bad_usage_exits_2() {
     assert_eq!(lucid(&repo(), &[]).status.code(), Some(2));

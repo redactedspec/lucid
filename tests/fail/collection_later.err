@@ -1,12 +1,12 @@
-collection_later.lcd:3:7: error E0901: showing a collection parses, but cannot run yet
+collection_later.lcd:3:7: error E0901: showing `list[int]` parses, but cannot run yet
   note: see docs/roadmap.md for the milestone that adds it
-collection_later.lcd:4:9: error E0901: showing a collection parses, but cannot run yet
+collection_later.lcd:4:9: error E0901: showing `list[int]` parses, but cannot run yet
   note: see docs/roadmap.md for the milestone that adds it
-collection_later.lcd:5:7: error E0901: `==` on a collection parses, but cannot run yet
+collection_later.lcd:5:7: error E0901: `==` on `list[int]` parses, but cannot run yet
   note: see docs/roadmap.md for the milestone that adds it
 collection_later.lcd:6:7: error E0901: a list slice parses, but cannot run yet
   note: see docs/roadmap.md for the milestone that adds it
-collection_later.lcd:7:8: error E0901: a collection as a key parses, but cannot run yet
+collection_later.lcd:7:8: error E0901: `list[int]` as a key parses, but cannot run yet
   note: see docs/roadmap.md for the milestone that adds it
 collection_later.lcd:9:17: error E0901: `for change` on a list parses, but cannot run yet
   note: see docs/roadmap.md for the milestone that adds it
@@ -18,5 +18,5 @@ collection_later.lcd:15:14: error E0901: a range outside `for` parses, but canno
   note: see docs/roadmap.md for the milestone that adds it
 collection_later.lcd:16:7: error E0901: arithmetic on `byte` parses, but cannot run yet
   note: see docs/roadmap.md for the milestone that adds it
-collection_later.lcd:17:14: error E0901: `in` on a list of collections parses, but cannot run yet
+collection_later.lcd:17:14: error E0901: `in` on a list of `list[int]` parses, but cannot run yet
   note: see docs/roadmap.md for the milestone that adds it

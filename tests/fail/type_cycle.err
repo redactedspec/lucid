@@ -1,0 +1,7 @@
+type_cycle.lcd:2:15: error E0315: alias `A` is defined by itself
+type_cycle.lcd:3:6: error E0315: `Loop` has no finite value
+  note: building it needs a type that holds itself: add a variant with no such field, or hold the value in a list
+type_cycle.lcd:5:8: error E0315: `Ring` has no finite value
+  note: building it needs a type that holds itself: add a variant with no such field, or hold the value in a list
+type_cycle.lcd:7:6: error E0315: `Other` has no finite value
+  note: building it needs a type that holds itself: add a variant with no such field, or hold the value in a list

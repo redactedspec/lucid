@@ -107,7 +107,7 @@ arm         = pattern "->" ( expression NEWLINE | print_stmt | return_stmt | NEW
 pattern     = "_" | "none" | literal
             | NAME [ "(" [ NAME { "," NAME } ] ")" ]
             | NAME ":" type ;
-literal     = INT | FLOAT | TEXT | "true" | "false" ;
+literal     = [ "-" ] ( INT | FLOAT ) | TEXT | "true" | "false" ;
 
 return_stmt = "return" ( NEWLINE | value ) ;
 print_stmt  = "print" expression NEWLINE ;
@@ -170,5 +170,6 @@ entry       = expression ":" expression ;
 - **`is` target:** it is a single `type_term`, so `or` after it stays boolean: `x is text or y > 3`.
 - **`try` scope:** `try` covers the whole postfix chain. `try read(p).trim()` calls `.trim()` first, on the union, and fails type checking. Write `(try read(p)).trim()`.
 - **Negative numbers:** in `unary`, a `-` before a number with no postfix after it joins the literal, which does not change the value. It lets `-9223372036854775808` fit. Parentheses keep them apart, so `-(1)` negates a literal.
+- **Name patterns:** the grammar has one form for `Point` and `n`. The checker decides from the type of the subject: on a `choice` a name must be a variant, and on any other type it binds the value.
 - **Generic calls:** `f[int](x)` parses as an index followed by a call. The resolver rewrites it to a generic instantiation once it knows `f` is a task.
 - **Lambdas:** recognize with one token of lookahead past `NAME`, or by scanning to the matching `)` and checking for `=>`.

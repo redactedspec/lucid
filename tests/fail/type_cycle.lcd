@@ -1,0 +1,13 @@
+type A = B
+type B = list[A]
+type Loop
+    next: Loop
+choice Ring
+    One(a: Other)
+type Other
+    b: Ring
+choice Fine
+    Stop
+    Go(next: Fine)
+type Also
+    items: list[Also]
