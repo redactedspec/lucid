@@ -20,11 +20,21 @@ The lexer produces `NEWLINE`, `INDENT`, and `DEDENT` tokens.
 NAME     = (letter | "_") { letter | digit | "_" } ;   (* not a keyword *)
 INT      = digit { digit | "_" } | "0x" hex { hex | "_" } | "0b" bin { bin | "_" } ;
 FLOAT    = digit { digit | "_" } "." digit { digit | "_" } [ exponent ] ;
-TEXT     = '"' { char | "{" expression "}" | "{{" | "}}" } '"'
-         | '"""' multi-line form '"""' ;
+exponent = ( "e" | "E" ) [ "+" | "-" ] digit { digit | "_" } ;
+TEXT     = '"' { char | escape | "{" expression "}" | "{{" | "}}" } '"'
+         | '"""' NEWLINE-terminated multi-line form '"""' ;
+escape   = "\n" | "\t" | "\r" | "\\" | '\"' ;
 ```
 
-A `FLOAT` needs digits on both sides of the point, so `0..10` lexes as a range.
+`letter` is an ASCII letter and `digit` is an ASCII digit. Names are ASCII only. Text and comments may hold any UTF-8. Outside text, any other character is an error.
+
+A `FLOAT` needs digits on both sides of the point, so `0..10` lexes as a range. A number directly followed by a letter or `_` is an error, so `1e5` is rejected. Write `1.0e5`.
+
+A file may start with a byte order mark, which is ignored. `\r\n` counts as one newline, and a multi-line `TEXT` holds `\n` for it.
+
+In a `char`, `"`, `{`, `}`, and `\` must be written with an escape or doubled, and a line break ends the text with an error. An `{expression}` inside text follows the same bracket rule as `()`, so it may contain text of its own.
+
+In the multi-line form, the opening `"""` must end its line. That line break is not part of the value. Inside, `"` is a normal character. Common indentation is the smallest indentation of the non-blank lines and of the line holding the closing `"""`. It is removed from every line. If only spaces come before the closing `"""`, that last line and the line break before it are also dropped.
 
 ## Declarations
 

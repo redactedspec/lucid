@@ -33,7 +33,7 @@ Every diagnostic has this shape:
 
 ```json
 {
-  "code": "E0204",
+  "code": "E0301",
   "severity": "error",
   "message": "name `totl` is not defined",
   "file": "src/cart.lcd",
@@ -56,7 +56,24 @@ Rules:
 - Codes never change meaning once released.
 - The compiler reports all errors it can find in one run, not just the first.
 - Each error says what to do next, where a likely fix exists.
-- Output order is deterministic.
+- Output order is deterministic: by source position.
+- `column` counts Unicode characters, from 1. `end_column` is exclusive.
+
+### Error codes
+
+The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and types, `E09xx` features not built yet. Every code has a golden test in `tests/fail/`.
+
+| Code | Meaning |
+| --- | --- |
+| E0101 | Tab in indentation |
+| E0102 | Indentation width is wrong |
+| E0103 | Unexpected character |
+| E0104 | Text is not closed |
+| E0105 | Unknown escape |
+| E0106 | Single `}` in text |
+| E0107 | Malformed number |
+| E0108 | Text after an opening `"""` |
+| E0205 | Nesting is too deep (limit 128) |
 
 ## Agent onboarding
 

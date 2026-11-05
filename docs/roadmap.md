@@ -11,8 +11,8 @@ Documents and example programs.
 Build a thin end-to-end path first. Depth comes later.
 
 - [ ] Cargo workspace with `compiler/` and `runtime/`
-- [ ] Diagnostics with codes and `--json`
-- [ ] Lexer with layout tokens, for the full grammar
+- [x] Diagnostics with codes and `--json`
+- [x] Lexer with layout tokens, for the full grammar
 - [ ] Parser for the full grammar, with error recovery
 - [ ] Cranelift JIT backend
 - [ ] `print` of text, `lucid run`, `lucid check`

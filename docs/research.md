@@ -21,6 +21,7 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | Agent-friendliness | Weak. Biggest gap | Snippet | Test with agents from M3 |
 | Indentation syntax helps agents | No evidence | None | Owner preference. Measure |
 | No `async`, lightweight tasks in browser | Now feasible through JSPI | Snippet | Decide at M7 |
+| ASCII names, text escapes | Judgment call from existing practice | None | Revisit before 1.0 |
 
 ## Memory
 
@@ -151,6 +152,15 @@ Models have seen billions of lines of Python and none of Lucid. "Syntax Without 
 So "agent-friendly" is a hypothesis. Clean design does not make up for missing training data. Lucid must close the gap through familiar forms, a compact guide, and strong diagnostics, and it must measure the result.
 
 Sources: [Nogueira et al.](https://arxiv.org/abs/2608.00661), [Wu et al.](https://arxiv.org/pdf/2607.22807), [Scaling Laws for Code](https://arxiv.org/pdf/2512.13472), [Grammar Prompting](https://arxiv.org/pdf/2305.19234), [Syntax Without Semantics](https://arxiv.org/html/2605.15607v1).
+
+## Lexical choices
+
+Decisions 21 and 22. Evidence here is weak: these are small choices taken from existing practice, and none was tested. Level: **None**. The sources below are named from memory and were not read for this project.
+
+- **ASCII names.** Unicode identifiers allow confusable names and direction tricks in source. "Trojan Source" (Boucher and Anderson, 2021) describes the attack, and Unicode UAX #31 and #39 describe mitigations. Rust stayed ASCII-only until it had confusable lints.
+- **Multi-line text.** Swift multi-line strings use the closing delimiter to set indentation. Lucid removes common indentation as Python's `textwrap.dedent` does, and takes only the blank closing-line rule from Swift.
+
+Sources: [Trojan Source](https://trojansource.codes/), [UAX #31](https://www.unicode.org/reports/tr31/), [Swift strings](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/stringsandcharacters/).
 
 ## Open research
 

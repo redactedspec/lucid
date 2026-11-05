@@ -18,6 +18,7 @@ print "Hello, world!"
 - A statement ends at the end of its line.
 - To continue over several lines, wrap the expression in `()`, `[]`, or `{}`. Newlines inside brackets are ignored. There is no other continuation rule.
 - Comments start with `#`. Doc comments start with `##`.
+- Names use ASCII letters, digits, and `_`. Text and comments may hold any Unicode.
 
 ## Variables
 
@@ -63,6 +64,8 @@ let block = """
     Common indentation is removed.
     """
 ```
+
+Escapes are `\n`, `\t`, `\r`, `\`, and `\"`. Interpolated expressions may contain text of their own. In `"""` text, the first line break, the common indentation, and a final line holding only the closing quotes are all removed. So `block` above has two lines and no trailing line break.
 
 Length, slicing, and iteration work on Unicode characters by default. `.bytes()` gives raw bytes.
 
