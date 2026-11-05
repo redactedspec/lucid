@@ -8,6 +8,26 @@ Instructions for any agent or human changing this repository.
 - `docs/decisions.md` records why. Check it before reopening a settled choice.
 - `docs/roadmap.md` says what to build next. Work on the current milestone only.
 
+## Documentation
+
+Docs must never go stale. Every commit that changes behavior, code, plans, or decisions updates all affected docs in that same commit. Before each commit, check every file below against the change. A task is not finished while any doc is out of date.
+
+| Change | Update |
+| --- | --- |
+| Syntax or semantics | `docs/language.md`, `docs/grammar.md`, `examples/` |
+| Memory or ownership behavior | `docs/memory-model.md` |
+| Safety guarantees or permissions | `docs/security.md` |
+| Diagnostics, tools, or agent workflow | `docs/agents.md` |
+| Standard library or web support | `docs/stdlib-and-web.md` |
+| Compiler structure, commands, dependencies, or toolchain | `docs/compiler.md`, this file |
+| Goals, targets, or trade-offs | `docs/vision.md` |
+| Milestone progress or scope | `docs/roadmap.md` |
+| A decision made or reversed | `docs/decisions.md` |
+| New evidence or benchmark results | `docs/research.md` |
+| Project status, or a doc added or removed | `README.md` |
+
+Docs describe what is true now. Mark planned items as planned, and remove claims that stop being true.
+
 ## Rules
 
 - Claude builds Lucid. The owner directs and decides.
