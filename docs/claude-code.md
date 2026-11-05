@@ -14,9 +14,21 @@ How Claude Code is used to build Lucid. Based on the official docs, reviewed 202
 | After a non-trivial change | `code-review` (up to `xhigh`), `simplify` |
 | Runtime, `unsafe`, or permission code | `security-review` |
 | End of a milestone | `ponytail-audit`, `ponytail-debt` |
-| Question needing many sources | `deep-research` (starts subagents, so big questions only) |
+| Question needing many sources | Own searches first. `deep-research` starts subagents, so it needs owner approval |
 
 `code-review` at `max` level runs only on request.
+
+## Plan limits
+
+The owner has the Claude Pro plan and no API credit. All work draws on Pro limits.
+
+- **No API-billed tooling.** Nothing in Lucid may need an API key, including the agent trial and benchmark. Run those as normal Claude Code sessions.
+- **`/code-review ultra`:** 3 free runs per account, one time only. They do not refresh. A stopped or failed run still counts. After that it needs usage credits, typically $5 to $25 per review. Save the free runs for the ownership pass at M4, the runtime and permissions at M5, and the 1.0 review.
+- **Local `/code-review`:** counts toward normal usage, so it is the default review. Use `low` or `medium` on small changes.
+- **Fable and 1M context:** may need usage credits. Do not select them without asking.
+- **Subagents:** use few. Each one spends plan usage and starts with no context. Prefer direct tools for small jobs.
+- **Workflows and agent teams:** not used. Their limits on Pro are not documented in the pages read.
+- **Limit reached:** commit finished work, then stop and report. Do not switch to anything that bills credits.
 
 ## Commands only the owner can run
 
@@ -31,7 +43,7 @@ Claude cannot run built-in commands. It asks when one is needed.
 | `/usage`, `/context` | See what is using tokens |
 | `/effort`, `/model` | Change effort or model |
 | `/goal <condition>` | Keep working until a milestone exit criterion is met |
-| `/code-review ultra` | Deep multi-agent cloud review, billed. Run before each milestone closes |
+| `/code-review ultra` | Deep multi-agent cloud review. Only 3 free runs ever. See "Plan limits" |
 | Shift+Tab | Plan mode, for changes to the language or architecture |
 
 ## Working rules
@@ -84,4 +96,7 @@ Read in part. Long pages were partly summarized by the fetch tool, so check the 
 - [Common workflows](https://code.claude.com/docs/en/common-workflows)
 - [Costs](https://code.claude.com/docs/en/costs)
 - [Settings](https://code.claude.com/docs/en/settings)
+- [Ultrareview](https://code.claude.com/docs/en/ultrareview.md)
+- [Feature availability](https://code.claude.com/docs/en/feature-availability.md)
+- [Model configuration](https://code.claude.com/docs/en/model-config.md)
 - [Full index](https://code.claude.com/docs/llms.txt)
