@@ -36,6 +36,7 @@ Decide each one by the milestone shown.
 | Question | Default if undecided | Decide by |
 | --- | --- | --- |
 | Does `/` returning `float` for integers surprise agents? | Keep, matching Python. | M2 |
+| How are generic arguments that are not expressions written? `f[int](x)` parses as an index, but `f[int?](x)` is a syntax error. | Parse index contents as a type when an expression fails. | M3 |
 | Is `T?` inside a map a problem? `map[text, int?].get` flattens to `int?`, which loses "key missing" versus "value none". | Accept, and offer `.has(key)`. | M3 |
 | Should `change` receivers be marked at dot calls? | No marker, and require `var`. | M3 |
 | Add an LLVM backend for release builds? | Only if benchmarks demand it. | M4 |
