@@ -1,0 +1,76 @@
+# `.get` and `.pop` give `T?`.
+let primes = [2, 3, 5]
+print primes.get(0) is int
+print primes.get(3) is none
+print primes.get(-1) is none
+
+let at = primes.get(1)
+if at is int
+    print at + 1
+
+let ages = {"Ada": 36}
+print ages.get("Ada") is none
+print ages.get("Linus") is none
+
+# A `V?` value flattens, and `in` tells the two cases apart.
+let maybe: map[text, int?] = {"a": none}
+print maybe.get("a") is none
+print maybe.get("b") is none
+print "a" in maybe
+
+# Keys and lists that run once.
+task names() -> list[text]
+    print "names"
+    return ["x"]
+
+task key() -> text
+    print "key"
+    return "Ada"
+
+print names().get(0) is text
+print ages.get(key()) is int
+
+# Text and heap values survive their list.
+var words = ["a", "b"]
+let last = words.pop()
+if last is text
+    print last
+print words.len()
+var more = words
+more.push("c")
+let popped = more.pop()
+print popped is text
+print words.len()
+words.pop()
+let nothing = words.pop()
+print nothing is none
+
+var stack = [1, 2]
+var top = stack.pop()
+while top is int
+    print top
+    top = stack.pop()
+
+task take_last(items: list[int]) -> int?
+    var copy = items
+    return copy.pop()
+
+print take_last([9]) is int
+print take_last([]) is none
+
+# Through a path, and a union element.
+var grid = [[1, 2], [3]]
+let cell = grid[0].pop()
+print cell is int
+print grid[0].len()
+
+var holes: list[int?] = [none, 1]
+let hole = holes.pop()
+print hole is int
+let other = holes.pop()
+print other is none
+print holes is empty
+
+var wide: list[int] = [1]
+let widened: int or text or none = wide.pop()
+print widened is int

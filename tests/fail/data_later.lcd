@@ -17,6 +17,3 @@ print "{p}"
 print p == p
 let m: map[Plain, int] = {}
 print p in [p]
-match 1
-    none -> print "x"
-    n: int -> print "y"

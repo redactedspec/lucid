@@ -1,0 +1,28 @@
+union_narrowing.lcd:9:19: error E0303: `+` needs one type on both sides, found `int?` and `int`
+  note: test a union with `is`, as in `x is none`
+union_narrowing.lcd:16:19: error E0303: `+` needs one type on both sides, found `int?` and `int`
+  note: test a union with `is`, as in `x is none`
+union_narrowing.lcd:25:15: error E0303: `+` needs one type on both sides, found `int?` and `int`
+  note: test a union with `is`, as in `x is none`
+union_narrowing.lcd:32:11: error E0303: `+` needs one type on both sides, found `int?` and `int`
+  note: test a union with `is`, as in `x is none`
+union_narrowing.lcd:41:15: error E0303: `+` needs one type on both sides, found `int?` and `int`
+  note: test a union with `is`, as in `x is none`
+union_narrowing.lcd:49:11: error E0303: `+` needs one type on both sides, found `int?` and `int`
+  note: test a union with `is`, as in `x is none`
+union_narrowing.lcd:54:11: error E0303: `+` needs one type on both sides, found `int?` and `int`
+  note: test a union with `is`, as in `x is none`
+union_narrowing.lcd:61:11: error E0303: `+` needs one type on both sides, found `int?` and `int`
+  note: test a union with `is`, as in `x is none`
+union_narrowing.lcd:65:15: error E0303: `+` needs one type on both sides, found `int?` and `int`
+  note: test a union with `is`, as in `x is none`
+union_narrowing.lcd:67:15: error E0303: `+` needs one type on both sides, found `int?` and `int`
+  note: test a union with `is`, as in `x is none`
+union_narrowing.lcd:71:25: error E0303: `Node?` has no field `value`
+  note: test it first, as in `if x is not none`. Only a name narrows, so name a field or call with `let`
+union_narrowing.lcd:76:11: error E0303: `+` needs one type on both sides, found `int?` and `int`
+  note: test a union with `is`, as in `x is none`
+union_narrowing.lcd:81:11: error E0303: `+` needs one type on both sides, found `int?` and `int`
+  note: test a union with `is`, as in `x is none`
+union_narrowing.lcd:85:9: error E0305: `start` cannot change
+  note: only a name declared with `var` can change

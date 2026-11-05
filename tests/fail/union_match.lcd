@@ -1,0 +1,50 @@
+choice Shape
+    Circle(radius: float)
+    Point
+
+task missing(x: int or text or none)
+    match x
+        n: int -> print n
+
+task repeat(x: int?)
+    match x
+        none -> print "a"
+        none -> print "b"
+        n: int -> print n
+
+task covered(x: int?)
+    match x
+        n: int -> print n
+        none -> print "b"
+        y -> print "c"
+
+task wide(x: int or text or none)
+    match x
+        a: int or text -> print "a"
+        b: int -> print "b"
+        none -> print "c"
+
+task foreign(x: int?)
+    match x
+        t: text -> print t
+        _ -> print "x"
+
+task plain(x: int)
+    match x
+        none -> print "a"
+        n: int -> print n
+
+task variant(x: Shape?)
+    match x
+        Circle(radius) -> print radius
+        _ -> print "x"
+
+task literal(x: int?)
+    match x
+        1 -> print "one"
+        _ -> print "x"
+
+task bound(x: Shape?)
+    match x
+        Point: Shape -> print "a"
+        none -> print "b"

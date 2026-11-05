@@ -23,6 +23,7 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | No `async`, lightweight tasks in browser | Now feasible through JSPI | Snippet | Decide at M7 |
 | ASCII names, text escapes | Judgment call from existing practice | None | Revisit before 1.0 |
 | Division, argument order | Judgment call from existing practice | None | Agent trial at M3 |
+| Union narrowing by control flow | Follows TypeScript and Kotlin, tightened for memory safety | Read | Agent trial at M3 |
 | Text slices, no character type | Judgment call from existing practice | None | Agent trial at M3 |
 | Compact ordered map, SipHash with random keys | Supported by Python and Rust practice | Snippet | Benchmark at M4 |
 
@@ -204,6 +205,17 @@ Sources: [PEP 238](https://peps.python.org/pep-0238/), [Python expressions](http
 - **Compact layout.** CPython's `dictobject.c` describes a table of indices alongside an entries array that is mostly append only, so iterating the entries gives insertion order. Level: Snippet, from source comments.
 
 Sources: [PEP 456](https://peps.python.org/pep-0456/), [Rust HashMap docs change](https://github.com/rust-lang/rust/pull/35371), [CPython dictobject.c](https://chromium.googlesource.com/external/github.com/python/cpython/+/e92ac0a741b125f1cffe8c07b054d1dea7b0a05a/Objects/dictobject.c).
+
+## Narrowing
+
+Decisions 59 and 60, with `.get` in decision 62. Level: **Read**, for the TypeScript and Kotlin parts below, and **Snippet** for Python. The TypeScript page was read for its first 40,000 characters only, and the end of it, past narrowing by discriminated unions, was seen only as a summary.
+
+- **TypeScript.** Early returns narrow: the handbook says the compiler sees the rest of the body is unreachable for one type, and so removes that type. Assignment narrows too, checked against the declared type. Property paths such as `container.value` narrow as well.
+- **Kotlin.** A local `var` smart casts "if the variable is not modified between the check and its usage", and a mutable property never does, "because the variable can be modified at any time by other code". Lucid takes this rule, since a Kotlin smart cast and a Lucid narrowed read both depend on the same proof.
+- **What differs.** A wrong type in TypeScript is erased and stays memory safe. A narrowed read in Lucid has no run-time test, so Lucid takes the stricter rule. Lucid's fields cannot change behind a reader, so a field could narrow in a later version with a proof, and allowing it then breaks nothing.
+- **Python.** `dict.get` returns `None` for a missing key, and never raises `KeyError`. Summary text, so check the wording.
+
+Sources: [TypeScript narrowing](https://www.typescriptlang.org/docs/handbook/2/narrowing.html), [Kotlin type checks and casts](https://kotlinlang.org/docs/typecasts.html), [Python built-in types](https://docs.python.org/3/library/stdtypes.html).
 
 ## Open research
 

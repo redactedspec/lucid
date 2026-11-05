@@ -52,9 +52,14 @@ pub fn run(
 
 fn clif(ty: Ty) -> Type {
     match ty {
-        Ty::Int | Ty::Byte | Ty::Text | Ty::List(_) | Ty::Map(..) | Ty::Set(_) | Ty::Data(..) => {
-            types::I64
-        }
+        Ty::Int
+        | Ty::Byte
+        | Ty::Text
+        | Ty::List(_)
+        | Ty::Map(..)
+        | Ty::Set(_)
+        | Ty::Data(..)
+        | Ty::Union(_) => types::I64,
         Ty::Float => types::F64,
         Ty::Bool | Ty::None => types::I8,
         Ty::Error => unreachable!("errors stop before the backend"),
@@ -82,6 +87,7 @@ struct Runtime {
     list_new: FuncId,
     list_push: FuncId,
     list_set: FuncId,
+    list_pop: FuncId,
     list_swap: FuncId,
     list_has: FuncId,
     map_new: FuncId,
@@ -140,6 +146,7 @@ fn compile(
     builder.symbol("lucid_list_new", lucid_rt::lucid_list_new as *const u8);
     builder.symbol("lucid_list_push", lucid_rt::lucid_list_push as *const u8);
     builder.symbol("lucid_list_set", lucid_rt::lucid_list_set as *const u8);
+    builder.symbol("lucid_list_pop", lucid_rt::lucid_list_pop as *const u8);
     builder.symbol("lucid_list_swap", lucid_rt::lucid_list_swap as *const u8);
     builder.symbol("lucid_list_has", lucid_rt::lucid_list_has as *const u8);
     builder.symbol("lucid_map_new", lucid_rt::lucid_map_new as *const u8);
@@ -189,6 +196,7 @@ fn compile(
         list_new: import("lucid_list_new", &[int[0], byte[0]], &value),
         list_push: import("lucid_list_push", &two, &value),
         list_set: import("lucid_list_set", &with_two, &value),
+        list_pop: import("lucid_list_pop", &value, &value),
         list_swap: import("lucid_list_swap", &with_two, &value),
         list_has: import("lucid_list_has", &two, &[AbiParam::new(types::I8)]),
         map_new: import("lucid_map_new", &[byte[0], byte[0]], &value),
@@ -598,6 +606,7 @@ impl Lower<'_, '_> {
             Update::MapSet => runtime.map_set,
             Update::MapRemove => runtime.map_remove,
             Update::FieldSet => runtime.record_set,
+            Update::ListPop => runtime.list_pop,
         };
         let result = self.call(task, &values).expect("it returns the new value");
         if matches!(op, Update::ListSet | Update::ListSwap) {
@@ -814,6 +823,21 @@ impl Lower<'_, '_> {
                 let value = self.expr(value);
                 let flags = MemFlagsData::trusted();
                 self.body.ins().load(types::I64, flags, value, lucid_rt::TAG_OFFSET)
+            }
+            ExprKind::TagIn(value, tags) => {
+                let value = self.expr(value);
+                let flags = MemFlagsData::trusted();
+                let tag = self.body.ins().load(types::I64, flags, value, lucid_rt::TAG_OFFSET);
+                let mut found = self.body.ins().iconst(types::I8, 0);
+                for &wanted in tags {
+                    let same = self.body.ins().icmp_imm_s(IntCC::Equal, tag, wanted as i64);
+                    found = self.body.ins().bor(found, same);
+                }
+                found
+            }
+            ExprKind::Seq(setup, value) => {
+                self.stmts(setup);
+                self.expr(value)
             }
             ExprKind::Temp(local, value) => {
                 let value = self.expr(value);

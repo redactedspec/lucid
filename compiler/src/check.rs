@@ -19,10 +19,12 @@ const BUILT_IN_TYPES: [&str; 8] = ["int", "float", "bool", "byte", "text", "list
 /// The same limit as nesting in the parser, for a chain of aliases.
 const MAX_ALIASES: usize = 128;
 
-/// Dot calls that change their receiver, so they only work as statements.
-const CHANGING_CALLS: [&str; 4] = ["push", "swap", "add", "remove"];
+/// Dot calls that change their receiver, so they only work as statements, or
+/// for `pop`, as the whole value of one.
+const CHANGING_CALLS: [&str; 5] = ["push", "swap", "add", "remove", "pop"];
 
 const JOIN_TEXT: &str = "join text with interpolation: \"{a}{b}\"";
+const TEST_UNION: &str = "test it first, as in `if x is not none`. Only a name narrows, so name a field or call with `let`";
 
 /// Checks a file. A program using an unbuilt feature gets only E0901, because
 /// names and types that feature would supply make any other error unreliable.
@@ -100,6 +102,9 @@ type WrittenField<'a> = (&'a ast::Name, Option<&'a ast::Type>, Option<&'a ast::E
 struct Covered {
     /// An arm matches anything.
     all: bool,
+    /// An arm is already reported, so a gap may be its doing.
+    failed: bool,
+    /// The variants of a `choice`, or the type ids of a union.
     variants: HashSet<usize>,
     literals: HashSet<String>,
 }
@@ -107,8 +112,9 @@ struct Covered {
 /// What a task can see of a top-level `let` or `var`.
 enum Top<'a> {
     Var,
-    /// A `let` with a literal value, which is known before any statement runs.
-    Literal(&'a ast::Expr),
+    /// A `let` with a literal value, which is known before any statement runs,
+    /// and its annotation.
+    Literal(&'a ast::Expr, Option<&'a ast::Type>),
     Let,
 }
 
@@ -130,6 +136,10 @@ struct Checker<'a> {
     /// The return type, or `None` at top level.
     returns: Option<Ty>,
     loops: usize,
+    /// Every member of a union. A position here is the tag of that type.
+    type_ids: Vec<Ty>,
+    /// What tests have proved about locals, latest last. See `forget`.
+    narrowed: Vec<(Local, Ty)>,
 }
 
 fn poisoned(span: Span) -> Expr {
@@ -138,7 +148,7 @@ fn poisoned(span: Span) -> Expr {
 
 fn is_literal(expr: &ast::Expr) -> bool {
     match &expr.kind {
-        Ast::Int(_) | Ast::Float(_) | Ast::Bool(_) => true,
+        Ast::Int(_) | Ast::Float(_) | Ast::Bool(_) | Ast::None => true,
         Ast::Text(parts) => parts.iter().all(|part| matches!(part, TextPart::Literal(_))),
         _ => false,
     }
@@ -165,16 +175,40 @@ impl Place {
     }
 }
 
-/// True if control never reaches the end of `stmts`.
-fn ends(stmts: &[Stmt]) -> bool {
+/// True if control never reaches the end of `stmts`. With `jumps`, leaving
+/// through `break` or `continue` counts.
+fn ends(stmts: &[Stmt], jumps: bool) -> bool {
     stmts.iter().any(|stmt| match stmt {
         Stmt::Return(_) | Stmt::Placeholder(_) => true,
-        Stmt::Block(stmts) => ends(stmts),
+        Stmt::Break | Stmt::Continue => jumps,
+        Stmt::Block(stmts) => ends(stmts, jumps),
         Stmt::If { branches, otherwise } => {
-            branches.iter().all(|(_, then)| ends(then)) && ends(otherwise)
+            branches.iter().all(|(_, then)| ends(then, jumps)) && ends(otherwise, jumps)
         }
         _ => false,
     })
+}
+
+/// A union value as a narrower type: the same record for a smaller union, or
+/// else what its slot holds.
+fn view(value: Expr, ty: Ty) -> Expr {
+    if ty == value.ty || matches!(ty, Ty::Union(_) | Ty::Error) {
+        return Expr { ty, ..value };
+    }
+    let span = value.span;
+    Expr { kind: ExprKind::Field(value.into(), 0), ty, span }
+}
+
+/// True if reading `value` twice costs nothing and changes nothing.
+fn repeatable(value: &Expr) -> bool {
+    match &value.kind {
+        ExprKind::Local(_) | ExprKind::Int(_) | ExprKind::Bool(_) => true,
+        ExprKind::Field(inner, _) => repeatable(inner),
+        ExprKind::ListGet(base, key) | ExprKind::MapGet(base, key) => {
+            repeatable(base) && repeatable(key)
+        }
+        _ => false,
+    }
 }
 
 fn want_name(want: Option<Ty>) -> String {
@@ -233,6 +267,162 @@ impl<'a> Checker<'a> {
         None
     }
 
+    /// The tag of a member of a union.
+    fn type_id(&self, ty: Ty) -> usize {
+        self.type_ids.iter().position(|&known| known == ty).expect("a union lists its members")
+    }
+
+    /// Flattens and orders members into one type. One member is that member.
+    fn union(&mut self, members: impl IntoIterator<Item = Ty>) -> Ty {
+        let mut flat = Vec::new();
+        for member in members {
+            if member == Ty::Error {
+                return Ty::Error;
+            }
+            for &ty in member.members() {
+                if !flat.contains(&ty) {
+                    flat.push(ty);
+                }
+                if !self.type_ids.contains(&ty) {
+                    self.type_ids.push(ty);
+                }
+            }
+        }
+        flat.sort_by_key(|&ty| self.type_id(ty));
+        match flat.as_slice() {
+            [] => Ty::Error,
+            &[one] => one,
+            _ => Ty::Union(flat.leak()),
+        }
+    }
+
+    /// Makes `value` a `want`, if `want` is a union that accepts it. Any other
+    /// value comes back as it was, for `expect` to report.
+    fn widen(&self, value: Expr, want: Ty) -> Expr {
+        let Ty::Union(members) = want else { return value };
+        if value.ty.members().iter().any(|member| !members.contains(member)) {
+            return value;
+        }
+        if matches!(value.ty, Ty::Union(_)) {
+            return Expr { ty: want, ..value };
+        }
+        let (tag, counted, span) =
+            (self.type_id(value.ty), usize::from(value.ty.is_counted()), value.span);
+        Expr { kind: ExprKind::New { tag, counted, fields: vec![(0, value)] }, ty: want, span }
+    }
+
+    /// Splits a union by a test for `want`: what a true test leaves, then what
+    /// a false one leaves. `None` if the answer never depends on the value.
+    fn split(&mut self, have: Ty, want: Ty) -> Option<(Ty, Ty)> {
+        if !matches!(have, Ty::Union(_))
+            || want.members().iter().any(|member| !have.members().contains(member))
+        {
+            return None;
+        }
+        let rest: Vec<Ty> =
+            have.members().iter().copied().filter(|ty| !want.members().contains(ty)).collect();
+        (!rest.is_empty()).then(|| (want, self.union(rest)))
+    }
+
+    /// The one member of an expected union that a literal can build, as with
+    /// `list[int]?` for `[]`. Any other expected type comes back as it was.
+    fn literal_want(&self, want: Option<Ty>, fits: fn(&Ty) -> bool) -> Option<Ty> {
+        let Some(Ty::Union(members)) = want else { return want };
+        match members.iter().filter(|member| fits(member)).collect::<Vec<_>>().as_slice() {
+            [one] => Some(**one),
+            _ => want,
+        }
+    }
+
+    /// The type that this local holds here.
+    fn current(&self, local: Local) -> Ty {
+        let found = self.narrowed.iter().rev().find(|(narrowed, _)| *narrowed == local);
+        found.map_or(self.locals[local], |&(_, ty)| ty)
+    }
+
+    /// Ends what tests proved about a local that was assigned. Entries stay on
+    /// the stack, so that a block can still cut it back to its own length. So
+    /// an assignment on any path ends the narrowing on all that follow.
+    fn forget(&mut self, local: Local) {
+        let declared = self.locals[local];
+        for entry in self.narrowed.iter_mut().filter(|(narrowed, _)| *narrowed == local) {
+            entry.1 = declared;
+        }
+    }
+
+    /// Runs before a loop: its body runs again after its own assignments.
+    ///
+    /// When `change` parameters arrive, passing a local must also `forget` it.
+    fn forget_assigned(&mut self, stmts: &'a [ast::Stmt]) {
+        for stmt in stmts {
+            match &stmt.kind {
+                StmtKind::Assign { target: ast::Expr { kind: Ast::Name(name), .. }, .. } => {
+                    if let Some(local) = self.lookup(name) {
+                        self.forget(local);
+                    }
+                }
+                StmtKind::If { branches, otherwise } => {
+                    for (_, then) in branches {
+                        self.forget_assigned(then);
+                    }
+                    self.forget_assigned(otherwise.as_deref().unwrap_or_default());
+                }
+                StmtKind::While { body, .. } | StmtKind::For { body, .. } => {
+                    self.forget_assigned(body);
+                }
+                StmtKind::Expr(ast::Expr { kind: Ast::Match { arms, .. }, .. }) => {
+                    for arm in arms {
+                        if let ast::ArmBody::Block(body) = &arm.body {
+                            self.forget_assigned(body);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// What is true of names when `condition` gives `truth`. Only a plain name
+    /// narrows, since nothing else is sure to hold the same value when read
+    /// again. See decision 60.
+    fn facts(&mut self, condition: &'a ast::Expr, truth: bool) -> Vec<(Local, Ty)> {
+        match &condition.kind {
+            Ast::Unary(UnaryOp::Not, inner) => self.facts(inner, !truth),
+            Ast::Binary(op, left, right)
+                if *op == if truth { BinaryOp::And } else { BinaryOp::Or } =>
+            {
+                // The right side runs knowing the left, so it splits what is left.
+                let mut facts = self.facts(left, truth);
+                let start = self.narrowed.len();
+                self.narrowed.extend(facts.iter().copied());
+                let more = self.facts(right, truth);
+                self.narrowed.truncate(start);
+                facts.extend(more);
+                facts
+            }
+            Ast::Is { value, negated, target } => {
+                let Ast::Name(name) = &value.kind else { return Vec::new() };
+                let Some(local) = self.lookup(name) else { return Vec::new() };
+                let reported = self.diags.len();
+                let want = self.is_target(target);
+                self.diags.truncate(reported);
+                let split = want.and_then(|want| self.split(self.current(local), want));
+                let Some((found, rest)) = split else { return Vec::new() };
+                vec![(local, if truth != *negated { found } else { rest })]
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// The type that an `is` tests, or `None` for `empty`.
+    fn is_target(&mut self, target: &'a ast::IsTarget) -> Option<Ty> {
+        match target {
+            ast::IsTarget::None => Some(Ty::None),
+            ast::IsTarget::Empty => None,
+            ast::IsTarget::Type(ty) => Some(self.ty(ty)),
+        }
+    }
+
     /// Reports E0303 unless `value` has type `want`.
     fn expect(&mut self, value: &Expr, want: Ty, what: &str) {
         if value.ty == want || value.ty == Ty::Error || want == Ty::Error {
@@ -250,6 +440,14 @@ impl<'a> Checker<'a> {
     fn ty(&mut self, ty: &'a ast::Type) -> Ty {
         let name = match &ty.kind {
             TypeKind::None => return Ty::None,
+            TypeKind::Union(terms) => {
+                let members: Vec<Ty> = terms.iter().map(|term| self.ty(term)).collect();
+                return self.union(members);
+            }
+            TypeKind::Optional(inner) => {
+                let inner = self.ty(inner);
+                return self.union([inner, Ty::None]);
+            }
             TypeKind::Named { path, args } => match (path.as_slice(), args.as_slice()) {
                 ([name], args) if matches!(name.text.as_str(), "list" | "map" | "set") => {
                     return self.collection_type(&name.text, args, ty.span);
@@ -477,8 +675,14 @@ impl<'a> Checker<'a> {
     /// Reports a type with no finite value. Recursion must pass through a
     /// variant that can avoid it, or a collection that can be empty.
     fn check_finite(&mut self) {
+        fn holds(ty: Ty, finite: &[bool]) -> bool {
+            match ty {
+                Ty::Data(_, id) => finite[id],
+                Ty::Union(members) => members.iter().any(|&member| holds(member, finite)),
+                _ => true,
+            }
+        }
         let mut finite = vec![false; self.datas.len()];
-        let holds = |ty: Ty, finite: &[bool]| !matches!(ty, Ty::Data(_, id) if !finite[id]);
         let mut changed = true;
         while changed {
             changed = false;
@@ -497,7 +701,7 @@ impl<'a> Checker<'a> {
             let name = self.datas[id].name;
             let message = format!("`{}` has no finite value", name.text);
             let note = "building it needs a type that holds itself: add a variant with no such \
-                        field, or hold the value in a list";
+                        field, or hold the value in a list or a union such as `T?`";
             self.report(Diagnostic::new("E0315", message, name.span).note(note));
         }
     }
@@ -521,10 +725,10 @@ impl<'a> Checker<'a> {
             self.signatures.push(signature);
         }
         for stmt in &file.stmts {
-            if let StmtKind::Let { mutable, name, value, .. } = &stmt.kind {
+            if let StmtKind::Let { mutable, name, ty, value } = &stmt.kind {
                 let top = match (*mutable, is_literal(value)) {
                     (true, _) => Top::Var,
-                    (false, true) => Top::Literal(value),
+                    (false, true) => Top::Literal(value, ty.as_ref()),
                     (false, false) => Top::Let,
                 };
                 self.top.insert(&name.text, top);
@@ -564,7 +768,7 @@ impl<'a> Checker<'a> {
         if !is_literal(value) {
             return self.fail("E0313", "a default must be a literal".into(), value.span);
         }
-        let value = self.expr(value);
+        let value = self.expected(value, Some(ty));
         self.expect(&value, ty, "this default");
         value
     }
@@ -587,7 +791,7 @@ impl<'a> Checker<'a> {
         self.scopes.push(scope);
         let body = self.stmts(body);
         self.scopes.pop();
-        if returns != Ty::None && returns != Ty::Error && !ends(&body) {
+        if returns != Ty::None && returns != Ty::Error && !ends(&body, false) {
             let name = &def.sig.name;
             let message = format!("`{}` must return `{}` on every path", name.text, returns.name());
             self.fail("E0309", message, name.span);
@@ -636,7 +840,10 @@ impl<'a> Checker<'a> {
     }
 
     fn stmts(&mut self, stmts: &'a [ast::Stmt]) -> Vec<Stmt> {
-        stmts.iter().filter_map(|stmt| self.stmt(stmt)).collect()
+        let start = self.narrowed.len();
+        let stmts = stmts.iter().filter_map(|stmt| self.stmt(stmt)).collect();
+        self.narrowed.truncate(start);
+        stmts
     }
 
     fn condition(&mut self, value: &'a ast::Expr, what: &str) -> Expr {
@@ -656,15 +863,11 @@ impl<'a> Checker<'a> {
             }
             StmtKind::Let { mutable, name, ty, value } => {
                 let want = ty.as_ref().map(|ty| self.ty(ty));
-                if let Ast::Match { subject, arms } = &value.kind {
-                    let (matched, result) = self.matching(subject, arms, Some(want));
-                    let ty = self.locals[result];
-                    let read = self.read(result, value.span);
-                    let mut stmts = vec![matched, Stmt::Set(self.bind(name, ty, *mutable), read)];
-                    if ty.is_counted() {
-                        stmts.push(Stmt::Clear(result));
-                    }
-                    return Some(Stmt::Block(stmts));
+                if let Some((held, result)) = self.statement_value(value, want) {
+                    let ty = want.unwrap_or(self.locals[result]);
+                    let read = self.held_value(result, ty, "this annotation", value.span);
+                    let set = Stmt::Set(self.bind(name, ty, *mutable), read);
+                    return Some(self.with_held(vec![held, set], result));
                 }
                 let value = self.expected(value, want);
                 let ty = want.unwrap_or(value.ty);
@@ -672,20 +875,18 @@ impl<'a> Checker<'a> {
                 Stmt::Set(self.bind(name, ty, *mutable), value)
             }
             StmtKind::Assign { target, op, value } => return self.assign(target, *op, value, span),
-            StmtKind::If { branches, otherwise } => {
-                let branches = branches
-                    .iter()
-                    .map(|(condition, then)| (self.condition(condition, "`if`"), self.block(then)))
-                    .collect();
-                let otherwise = otherwise.as_ref().map_or(Vec::new(), |body| self.block(body));
-                Stmt::If { branches, otherwise }
-            }
+            StmtKind::If { branches, otherwise } => self.if_stmt(branches, otherwise.as_deref()),
             StmtKind::While { condition, body } => {
-                let condition = self.condition(condition, "`while`");
+                self.forget_assigned(body);
+                let start = self.narrowed.len();
+                let test = self.condition(condition, "`while`");
+                let facts = self.facts(condition, true);
+                self.narrowed.extend(facts);
                 self.loops += 1;
                 let body = self.block(body);
                 self.loops -= 1;
-                Stmt::While { condition, body }
+                self.narrowed.truncate(start);
+                Stmt::While { condition: test, body }
             }
             StmtKind::For { change, name, iterable, body } => {
                 self.for_loop(*change, name, iterable, body)
@@ -694,12 +895,17 @@ impl<'a> Checker<'a> {
                 let none = Expr { kind: ExprKind::None, ty: Ty::None, span };
                 let mut matched = None;
                 let value = match value {
-                    Some(ast::Expr { kind: Ast::Match { subject, arms }, span }) => {
-                        let (stmt, result) = self.matching(subject, arms, Some(self.returns));
-                        matched = Some(stmt);
-                        self.read(result, *span)
-                    }
-                    Some(value) => self.expected(value, self.returns),
+                    Some(value) => match self.statement_value(value, self.returns) {
+                        Some((stmt, result)) => {
+                            matched = Some(stmt);
+                            let read = self.read(result, value.span);
+                            match self.returns {
+                                Some(want) => self.widen(read, want),
+                                None => read,
+                            }
+                        }
+                        None => self.expected(value, self.returns),
+                    },
                     None => none,
                 };
                 match self.returns {
@@ -739,6 +945,62 @@ impl<'a> Checker<'a> {
             StmtKind::Expect(_) => return self.later("`expect`", span),
             StmtKind::Unsafe(_) => return self.later("`unsafe`", span),
         })
+    }
+
+    /// Later branches, and any code after an `if` whose branches all leave,
+    /// know that the earlier conditions were false.
+    fn if_stmt(
+        &mut self,
+        branches: &'a [(ast::Expr, Vec<ast::Stmt>)],
+        otherwise: Option<&'a [ast::Stmt]>,
+    ) -> Stmt {
+        let start = self.narrowed.len();
+        let mut lowered = Vec::with_capacity(branches.len());
+        for (condition, then) in branches {
+            let test = self.condition(condition, "`if`");
+            let (found, rest) = (self.facts(condition, true), self.facts(condition, false));
+            let outer = self.narrowed.len();
+            self.narrowed.extend(found);
+            let then = self.block(then);
+            self.narrowed.truncate(outer);
+            self.narrowed.extend(rest);
+            lowered.push((test, then));
+        }
+        let otherwise = otherwise.map_or(Vec::new(), |body| self.block(body));
+        if !lowered.iter().all(|(_, then)| ends(then, true)) {
+            self.narrowed.truncate(start);
+        }
+        Stmt::If { branches: lowered, otherwise }
+    }
+
+    /// Lowers a value that needs its own statements first, which only the
+    /// whole value of a statement can have: a `match`, or a `pop`, which must
+    /// not change a list while the same statement borrows from it. Gives those
+    /// statements, and the local that holds the value.
+    fn statement_value(&mut self, value: &'a ast::Expr, want: Option<Ty>) -> Option<(Stmt, Local)> {
+        match &value.kind {
+            Ast::Match { subject, arms } => Some(self.matching(subject, arms, Some(want))),
+            Ast::Call { callee, args } => match &callee.kind {
+                Ast::Field { base, name } if name.text == "pop" && self.is_collection(base) => {
+                    Some(self.pop(base, args, value.span))
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Reads the local from `statement_value` as a `want`.
+    fn held_value(&mut self, result: Local, want: Ty, what: &str, span: Span) -> Expr {
+        let read = self.widen(self.read(result, span), want);
+        self.expect(&read, want, what);
+        read
+    }
+
+    /// Runs `stmts`, then lets go of the local from `statement_value`.
+    fn with_held(&self, mut stmts: Vec<Stmt>, result: Local) -> Stmt {
+        stmts.extend(self.locals[result].is_counted().then_some(Stmt::Clear(result)));
+        Stmt::Block(stmts)
     }
 
     fn expr_stmt(&mut self, value: &'a ast::Expr, span: Span) -> Option<Stmt> {
@@ -809,7 +1071,7 @@ impl<'a> Checker<'a> {
             lowered.push((test, body));
         }
         let missing = self.missing(ty, &covered);
-        if !missing.is_empty() && ty != Ty::Error {
+        if !missing.is_empty() && ty != Ty::Error && !covered.failed {
             let (message, note) = (
                 format!("this `match` does not cover every `{}`", ty.name()),
                 format!("add an arm for {}", missing.join(", ")),
@@ -835,6 +1097,12 @@ impl<'a> Checker<'a> {
     fn missing(&self, ty: Ty, covered: &Covered) -> Vec<String> {
         if covered.all {
             return Vec::new();
+        }
+        if matches!(ty, Ty::Union(_)) {
+            return (ty.members().iter())
+                .filter(|&&member| !self.covers(ty, member, covered))
+                .map(|member| format!("`{}`", member.name()))
+                .collect();
         }
         match self.choice_of(ty) {
             Some(id) => (self.datas[id].variants.iter().enumerate())
@@ -888,27 +1156,78 @@ impl<'a> Checker<'a> {
                 (None, Vec::new())
             }
             ast::PatternKind::None => {
-                self.unsupported("a `none` pattern", span);
-                (None, Vec::new())
+                self.member_pattern(Ty::None, None, holder, ty, covered, span)
             }
-            ast::PatternKind::Typed { .. } => {
-                self.unsupported("a typed pattern", span);
-                (None, Vec::new())
+            ast::PatternKind::Typed { name, ty: written } => {
+                let target = self.ty(written);
+                self.member_pattern(target, Some(name), holder, ty, covered, span)
             }
             ast::PatternKind::Literal(value) => (self.literal(value, holder, ty, covered), vec![]),
             ast::PatternKind::Name(name) if self.choice_of(ty).is_some() => {
                 self.variant_pattern(name, None, holder, ty, covered)
             }
             ast::PatternKind::Name(name) => {
+                let left: Vec<Ty> = (ty.members().iter().copied())
+                    .filter(|&member| !self.covers(ty, member, covered))
+                    .collect();
                 covered.all = true;
                 self.check_binding(name);
-                let local = self.bind(name, ty, false);
-                (None, vec![Stmt::Set(local, self.read(holder, span))])
+                let bound = self.union(left);
+                let local = self.bind(name, bound, false);
+                (None, vec![Stmt::Set(local, view(self.read(holder, span), bound))])
             }
             ast::PatternKind::Variant { name, bindings } => {
                 self.variant_pattern(name, Some(bindings), holder, ty, covered)
             }
         }
+    }
+
+    /// True if an arm has taken this member of a union.
+    fn covers(&self, ty: Ty, member: Ty, covered: &Covered) -> bool {
+        matches!(ty, Ty::Union(_)) && covered.variants.contains(&self.type_id(member))
+    }
+
+    /// A pattern on the type a union holds: `none`, or `name: type`.
+    fn member_pattern(
+        &mut self,
+        target: Ty,
+        name: Option<&'a ast::Name>,
+        holder: Local,
+        ty: Ty,
+        covered: &mut Covered,
+        span: Span,
+    ) -> (Option<Expr>, Vec<Stmt>) {
+        let fits = matches!(ty, Ty::Union(_))
+            && target.members().iter().all(|member| ty.members().contains(member));
+        covered.failed |= !fits;
+        if !fits && ty != Ty::Error && target != Ty::Error {
+            let (have, want) = (ty.name(), target.name());
+            self.fail(
+                "E0318",
+                match ty {
+                    Ty::Union(_) => format!("`{have}` never holds `{want}`"),
+                    _ => format!("`{have}` is not a union, so `{want}` is nothing to test"),
+                },
+                span,
+            );
+        }
+        if let Some(name) = name {
+            self.check_binding(name);
+        }
+        let local = name.map(|name| self.bind(name, if fits { target } else { Ty::Error }, false));
+        if !fits {
+            return (None, Vec::new());
+        }
+        let ids: Vec<usize> = target.members().iter().map(|&member| self.type_id(member)).collect();
+        let fresh = ids.iter().filter(|id| !covered.variants.contains(id)).count();
+        covered.variants.extend(ids.iter().copied());
+        if fresh == 0 && !self.missing(ty, covered).is_empty() {
+            let message = format!("this arm can never run: earlier arms have `{}`", target.name());
+            self.fail("E0317", message, span);
+        }
+        let bound = local.map(|local| Stmt::Set(local, view(self.read(holder, span), target)));
+        let kind = ExprKind::TagIn(self.read(holder, span).into(), ids);
+        (Some(Expr { kind, ty: Ty::Bool, span }), bound.into_iter().collect())
     }
 
     /// A variant or type name in a binding would read as a test, and catch
@@ -936,6 +1255,7 @@ impl<'a> Checker<'a> {
         let value = self.expr(value);
         self.expect(&value, ty, "this pattern");
         if value.ty != ty {
+            covered.failed = true;
             return None;
         }
         let key = match &value.kind {
@@ -969,8 +1289,14 @@ impl<'a> Checker<'a> {
             Some(id) => self.variant_index(id, name).map(|variant| (id, variant)),
             None => {
                 if ty != Ty::Error {
+                    covered.failed = true;
                     let message = format!("`{}` is not a `choice`", ty.name());
-                    self.fail("E0318", message, span);
+                    let diag = Diagnostic::new("E0318", message, span);
+                    self.report(if matches!(ty, Ty::Union(_)) {
+                        diag.note("match what the union holds, as in `s: Shape`")
+                    } else {
+                        diag
+                    });
                 }
                 None
             }
@@ -1035,10 +1361,21 @@ impl<'a> Checker<'a> {
         };
         let ty = self.locals[local];
         let value = match compound(op) {
-            Some(op) => self.binary(op, target, value, span),
-            None => self.expected(value, Some(ty)),
+            Some(op) => {
+                let value = self.binary(op, target, value, span);
+                self.widen(value, ty)
+            }
+            None => {
+                if let Some((held, result)) = self.statement_value(value, Some(ty)) {
+                    let read = self.held_value(result, ty, "this assignment", span);
+                    self.forget(local);
+                    return Some(self.with_held(vec![held, Stmt::Set(local, read)], result));
+                }
+                self.expected(value, Some(ty))
+            }
         };
         self.expect(&value, ty, "this assignment");
+        self.forget(local);
         Some(Stmt::Set(local, value))
     }
 
@@ -1049,14 +1386,15 @@ impl<'a> Checker<'a> {
             self.fail("E0305", format!("`{name}` cannot change"), span);
             return None;
         }
-        let place = self.name(name, span);
-        if place.ty == Ty::Error {
-            return None;
-        }
-        let ExprKind::Local(local) = place.kind else {
-            self.fail("E0305", format!("`{name}` cannot change"), span);
+        let Some(local) = self.lookup(name) else {
+            if self.name(name, span).ty != Ty::Error {
+                self.fail("E0305", format!("`{name}` cannot change"), span);
+            }
             return None;
         };
+        if self.locals[local] == Ty::Error {
+            return None;
+        }
         if !self.mutable[local] {
             let diag = Diagnostic::new("E0305", format!("`{name}` cannot change"), span);
             self.report(diag.note("only a name declared with `var` can change"));
@@ -1074,7 +1412,16 @@ impl<'a> Checker<'a> {
         match &target.kind {
             Ast::Name(name) => {
                 let local = self.variable(name, target.span)?;
-                Some(Place { local, setup: Vec::new(), take: Vec::new(), finish: Vec::new() })
+                let place =
+                    Place { local, setup: Vec::new(), take: Vec::new(), finish: Vec::new() };
+                let (ty, span) = (self.current(local), target.span);
+                if ty == self.locals[local] || matches!(ty, Ty::Union(_)) {
+                    return Some(place);
+                }
+                // A narrowed union: what it holds is a field of its record.
+                let read = self.slot_of(local, 0, ty, span);
+                let key = Expr { kind: ExprKind::Int(0), ty: Ty::Int, span };
+                Some(self.step(place, key, read))
             }
             Ast::Index { base, indices } => {
                 let mut place = self.place(base)?;
@@ -1140,7 +1487,7 @@ impl<'a> Checker<'a> {
     fn write(&self, local: Local, key: Expr, value: Expr, span: Span) -> Stmt {
         let op = match self.locals[local] {
             Ty::List(_) => Update::ListSet,
-            Ty::Data(..) => Update::FieldSet,
+            Ty::Data(..) | Ty::Union(_) => Update::FieldSet,
             _ => Update::MapSet,
         };
         Stmt::Update { local, op, args: vec![key, value], span }
@@ -1223,6 +1570,12 @@ impl<'a> Checker<'a> {
                 let message = format!("`{}` is a `choice`, so it has no fields", ty.name());
                 let diag = Diagnostic::new("E0303", message, name.span);
                 self.report(diag.note("use `match` to reach the fields of a variant"));
+                return None;
+            }
+            Ty::Union(_) => {
+                let message = format!("`{}` has no field `{}`", ty.name(), name.text);
+                let diag = Diagnostic::new("E0303", message, name.span);
+                self.report(diag.note(TEST_UNION));
                 return None;
             }
             _ => usize::MAX,
@@ -1317,6 +1670,10 @@ impl<'a> Checker<'a> {
         args: &'a [ast::Arg],
         span: Span,
     ) -> Option<Stmt> {
+        if name.text == "pop" {
+            let (stmt, result) = self.pop(base, args, span);
+            return Some(self.with_held(vec![stmt], result));
+        }
         let mut place = self.place(base)?;
         let local = place.local;
         let ty = self.locals[local];
@@ -1351,6 +1708,39 @@ impl<'a> Checker<'a> {
         Some(place.stmts(Stmt::Update { local, op, args: values, span }))
     }
 
+    /// Reads the last value, and drops it, or gives `none` for an empty list.
+    /// Gives a statement and the local that holds the value.
+    fn pop(&mut self, base: &'a ast::Expr, args: &'a [ast::Arg], span: Span) -> (Stmt, Local) {
+        let nothing = Stmt::Block(Vec::new());
+        let Some(place) = self.place(base) else {
+            return (nothing, self.new_local(Ty::Error, false));
+        };
+        let local = place.local;
+        let Ty::List(item) = self.locals[local] else {
+            let ty = self.locals[local].name();
+            self.fail("E0303", format!("`pop` does not work on `{ty}`"), span);
+            return (nothing, self.new_local(Ty::Error, false));
+        };
+        if !args.is_empty() {
+            self.fail("E0307", "`pop` takes no arguments".into(), span);
+        }
+        let ty = self.union([*item, Ty::None]);
+        let result = self.new_local(ty, false);
+        let int = |value| Expr { kind: ExprKind::Int(value), ty: Ty::Int, span };
+        let list = Box::new(self.read(local, span));
+        let len = Expr { kind: ExprKind::Len(list.clone()), ty: Ty::Int, span };
+        let any = self.binary_values(BinaryOp::Gt, len.clone(), int(0), span);
+        let last = self.binary_values(BinaryOp::Sub, len, int(1), span);
+        let value = Expr { kind: ExprKind::ListGet(list, last.into()), ty: *item, span };
+        let found = vec![
+            Stmt::Set(result, self.widen(value, ty)),
+            Stmt::Update { local, op: Update::ListPop, args: Vec::new(), span },
+        ];
+        let none = Expr { kind: ExprKind::None, ty: Ty::None, span };
+        let otherwise = vec![Stmt::Set(result, self.widen(none, ty))];
+        (place.stmts(Stmt::If { branches: vec![(any, found)], otherwise }), result)
+    }
+
     fn range(&mut self, start: &'a ast::Expr, end: &'a ast::Expr) -> (Expr, Expr) {
         let start = self.expr(start);
         let end = self.expr(end);
@@ -1366,6 +1756,7 @@ impl<'a> Checker<'a> {
         ty: Ty,
         body: &'a [ast::Stmt],
     ) -> (Local, Vec<Stmt>) {
+        self.forget_assigned(body);
         self.scopes.push(HashMap::new());
         let local = self.bind(name, ty, false);
         self.loops += 1;
@@ -1469,14 +1860,15 @@ impl<'a> Checker<'a> {
 
     fn name(&mut self, name: &str, span: Span) -> Expr {
         if let Some(local) = self.lookup(name) {
-            return Expr { kind: ExprKind::Local(local), ty: self.locals[local], span };
+            return view(self.read(local, span), self.current(local));
         }
         if self.returns.is_some() {
             match self.top.get(name) {
-                Some(&Top::Literal(value)) => {
+                Some(&Top::Literal(value, ty)) => {
                     // Its own statement reports any error.
                     let reported = self.diags.len();
-                    let value = self.expr(value);
+                    let want = ty.map(|ty| self.ty(ty));
+                    let value = self.expected(value, want);
                     self.diags.truncate(reported);
                     return Expr { span, ..value };
                 }
@@ -1535,19 +1927,34 @@ impl<'a> Checker<'a> {
     }
 
     /// Lowers `expr`. `want` is the type that the context needs, if known,
-    /// which is how an empty list or map gets its type.
+    /// which is how an empty list or map gets its type, and how a value
+    /// becomes a union.
     fn expected(&mut self, expr: &'a ast::Expr, want: Option<Ty>) -> Expr {
+        let value = self.lower(expr, want);
+        match want {
+            Some(want) => self.widen(value, want),
+            None => value,
+        }
+    }
+
+    fn lower(&mut self, expr: &'a ast::Expr, want: Option<Ty>) -> Expr {
         let span = expr.span;
         match &expr.kind {
             Ast::List(items) => self.list(items, want, span),
             Ast::Map(entries) => self.map(entries, want, span),
             Ast::If { condition, then, otherwise } => {
-                let condition = self.condition(condition, "`if`");
+                let test = self.condition(condition, "`if`");
+                let start = self.narrowed.len();
+                let (found, rest) = (self.facts(condition, true), self.facts(condition, false));
+                self.narrowed.extend(found);
                 let then = self.expected(then, want);
+                self.narrowed.truncate(start);
+                self.narrowed.extend(rest);
                 let otherwise = self.expected(otherwise, want.or(Some(then.ty)));
+                self.narrowed.truncate(start);
                 self.expect(&otherwise, then.ty, "`else`, to match `then`,");
                 let ty = then.ty;
-                let kind = ExprKind::If(condition.into(), then.into(), otherwise.into());
+                let kind = ExprKind::If(test.into(), then.into(), otherwise.into());
                 Expr { kind, ty, span }
             }
             Ast::Call { callee, args } => match &callee.kind {
@@ -1567,6 +1974,7 @@ impl<'a> Checker<'a> {
     }
 
     fn set_call(&mut self, args: &'a [ast::Arg], want: Option<Ty>, span: Span) -> Expr {
+        let want = self.literal_want(want, |ty| matches!(ty, Ty::Set(_)));
         let [ast::Arg { name: None, change: false, value }] = args else {
             return self.fail("E0307", "`set` takes one list".into(), span);
         };
@@ -1612,6 +2020,7 @@ impl<'a> Checker<'a> {
     }
 
     fn list(&mut self, items: &'a [ast::Expr], want: Option<Ty>, span: Span) -> Expr {
+        let want = self.literal_want(want, |ty| matches!(ty, Ty::List(_)));
         let mut item = match want {
             Some(Ty::List(item)) => Some(*item),
             _ => None,
@@ -1631,6 +2040,7 @@ impl<'a> Checker<'a> {
     }
 
     fn map(&mut self, entries: &'a [(ast::Expr, ast::Expr)], want: Option<Ty>, span: Span) -> Expr {
+        let want = self.literal_want(want, |ty| matches!(ty, Ty::Map(..)));
         let (mut key_ty, mut value_ty) = match want {
             Some(Ty::Map(key, value)) => (Some(*key), Some(*value)),
             _ => (None, None),
@@ -1672,7 +2082,9 @@ impl<'a> Checker<'a> {
             Ast::If { .. } | Ast::List(_) | Ast::Map(_) => return self.expected(expr, None),
             Ast::Call { callee, args } => return self.call(callee, args, span),
             Ast::Text(parts) => return self.text(parts, span),
-            Ast::Is { .. } => return self.unsupported("`is`", span),
+            Ast::Is { value, negated, target } => {
+                return self.is_test(value, *negated, target, span);
+            }
             Ast::Lambda { .. } => return self.unsupported("a lambda", span),
             Ast::Index { base, indices } => return self.index(base, indices, span),
             Ast::Field { base, name } => {
@@ -1763,11 +2175,128 @@ impl<'a> Checker<'a> {
                 self.fail("E0303", "text cannot change".into(), span);
                 None
             }
+            (Ty::Union(_), _) => {
+                let message = format!("`{}` has no index", ty.name());
+                self.report(Diagnostic::new("E0303", message, span).note(TEST_UNION));
+                None
+            }
             _ => {
                 self.unsupported("indexing", span);
                 None
             }
         }
+    }
+
+    fn is_test(
+        &mut self,
+        value: &'a ast::Expr,
+        negated: bool,
+        target: &'a ast::IsTarget,
+        span: Span,
+    ) -> Expr {
+        let value = self.expr(value);
+        let test = match self.is_target(target) {
+            None => self.is_empty(value, span),
+            Some(want) if want == Ty::Error || value.ty == Ty::Error => poisoned(span),
+            Some(want) => {
+                if self.split(value.ty, want).is_none() {
+                    let foreign = matches!(value.ty, Ty::Union(_))
+                        && want.members().iter().any(|member| !value.ty.members().contains(member));
+                    let (want, ty) = (want.name(), value.ty.name());
+                    let message = if foreign {
+                        format!("`{ty}` never holds `{want}`")
+                    } else {
+                        format!("`is {want}` gives one answer for every `{ty}`")
+                    };
+                    let note = "`is` tests what a union holds, and `==` tests equality";
+                    return self.report(Diagnostic::new("E0303", message, span).note(note));
+                }
+                let ids = want.members().iter().map(|&member| self.type_id(member)).collect();
+                Expr { kind: ExprKind::TagIn(value.into(), ids), ty: Ty::Bool, span }
+            }
+        };
+        if negated && test.ty != Ty::Error {
+            return Expr { kind: ExprKind::Not(test.into()), ty: Ty::Bool, span };
+        }
+        test
+    }
+
+    fn is_empty(&mut self, value: Expr, span: Span) -> Expr {
+        match value.ty {
+            Ty::Error => poisoned(span),
+            Ty::Text => Expr { kind: ExprKind::TextIsEmpty(value.into()), ty: Ty::Bool, span },
+            ty if ty.is_collection() => {
+                let int = |kind| Box::new(Expr { kind, ty: Ty::Int, span });
+                let len = int(ExprKind::Len(value.into()));
+                let kind = ExprKind::Binary(BinaryOp::Eq, len, int(ExprKind::Int(0)));
+                Expr { kind, ty: Ty::Bool, span }
+            }
+            ty => self.no_dot_call("is_empty", ty, span),
+        }
+    }
+
+    fn no_dot_call(&mut self, name: &str, ty: Ty, span: Span) -> Expr {
+        let diag =
+            Diagnostic::new("E0303", format!("`{name}` does not work on `{}`", ty.name()), span);
+        self.report(if matches!(ty, Ty::Union(_)) { diag.note(TEST_UNION) } else { diag })
+    }
+
+    /// `x.get(i)` on a list, or `x.get(key)` on a map. A map's value may hold
+    /// `none` itself, and `V?` then is `V`, as decision 39 says.
+    fn get(&mut self, base: &'a ast::Expr, args: &'a [ast::Arg], span: Span) -> Expr {
+        let value = self.expr(base);
+        let (key_ty, item) = match value.ty {
+            Ty::Error => return poisoned(span),
+            Ty::List(item) => (Ty::Int, *item),
+            Ty::Map(key, item) => (*key, *item),
+            Ty::Data(..) => return self.unsupported("this dot call", span),
+            ty => return self.no_dot_call("get", ty, span),
+        };
+        let [ast::Arg { name: None, change: false, value: key }] = args else {
+            return self.fail("E0307", "`get` takes 1 positional argument".into(), span);
+        };
+        let key = self.expected(key, Some(key_ty));
+        self.expect(&key, key_ty, "this argument");
+        if key.ty != key_ty {
+            return poisoned(span);
+        }
+        let ty = self.union([item, Ty::None]);
+        let mut setup = Vec::new();
+        let (value, key) = (self.repeated(value, &mut setup), self.repeated(key, &mut setup));
+        let test = if matches!(value.ty, Ty::List(_)) {
+            let zero = Expr { kind: ExprKind::Int(0), ty: Ty::Int, span };
+            let len = Expr { kind: ExprKind::Len(value.clone().into()), ty: Ty::Int, span };
+            let above = self.binary_values(BinaryOp::Ge, key.clone(), zero, span);
+            let below = self.binary_values(BinaryOp::Lt, key.clone(), len, span);
+            self.binary_values(BinaryOp::And, above, below, span)
+        } else {
+            let kind = ExprKind::MapHas(key.clone().into(), value.clone().into());
+            Expr { kind, ty: Ty::Bool, span }
+        };
+        let kind = match value.ty {
+            Ty::List(_) => ExprKind::ListGet(value.into(), key.into()),
+            _ => ExprKind::MapGet(value.into(), key.into()),
+        };
+        let found = self.widen(Expr { kind, ty: item, span }, ty);
+        let missing = self.widen(Expr { kind: ExprKind::None, ty: Ty::None, span }, ty);
+        let kind = ExprKind::If(test.into(), found.into(), missing.into());
+        let read = Expr { kind, ty, span };
+        if setup.is_empty() {
+            return read;
+        }
+        Expr { kind: ExprKind::Seq(setup, read.into()), ty, span }
+    }
+
+    /// Makes a value safe to read twice. A plain read stays as it is: a hidden
+    /// local keeps a count until it is overwritten, so the next write to that
+    /// list would copy.
+    fn repeated(&mut self, value: Expr, setup: &mut Vec<Stmt>) -> Expr {
+        if repeatable(&value) {
+            return value;
+        }
+        let (span, local) = (value.span, self.new_local(value.ty, false));
+        setup.push(Stmt::Set(local, value));
+        self.read(local, span)
     }
 
     /// Reports a value that `print` and interpolation cannot show yet.
@@ -1847,6 +2376,15 @@ impl<'a> Checker<'a> {
             BinaryOp::Range | BinaryOp::RangeInclusive => {
                 return self.unsupported("a range outside `for`", span);
             }
+            BinaryOp::And | BinaryOp::Or => {
+                let first = self.expr(left);
+                let start = self.narrowed.len();
+                let facts = self.facts(left, op == BinaryOp::And);
+                self.narrowed.extend(facts);
+                let right = self.expr(right);
+                self.narrowed.truncate(start);
+                return self.binary_values(op, first, right, span);
+            }
             _ => {}
         }
         let left = self.expr(left);
@@ -1912,7 +2450,13 @@ impl<'a> Checker<'a> {
         if left.ty != right.ty {
             let (a, b) = (left.ty.name(), right.ty.name());
             let message = format!("`{name}` needs one type on both sides, found `{a}` and `{b}`");
-            let note = if left.ty == Ty::Text || right.ty == Ty::Text {
+            let note = if left.ty == Ty::None
+                || right.ty == Ty::None
+                || matches!(left.ty, Ty::Union(_))
+                || matches!(right.ty, Ty::Union(_))
+            {
+                "test a union with `is`, as in `x is none`"
+            } else if left.ty == Ty::Text || right.ty == Ty::Text {
                 JOIN_TEXT
             } else {
                 "conversions are explicit: use `.to_float()` or `.to_int()`"
@@ -1968,14 +2512,25 @@ impl<'a> Checker<'a> {
                 let value = self.expr(base);
                 match value.ty {
                     Ty::Error => poisoned(span),
+                    Ty::List(_) if name.text == "pop" => {
+                        let message = "`pop` changes its list, so it must be a whole statement, \
+                                       or all of the value of `let`, `var`, `return`, or an \
+                                       assignment to a name";
+                        self.fail("E0303", message.into(), span)
+                    }
+                    ty if name.text == "pop" && !matches!(ty, Ty::Data(..)) => {
+                        self.no_dot_call("pop", ty, span)
+                    }
                     ty if ty.is_collection() => {
                         let message =
                             format!("`{}` gives no value, so it must be a statement", name.text);
                         self.fail("E0303", message, span)
                     }
+                    ty @ Ty::Union(_) => self.no_dot_call(&name.text, ty, span),
                     _ => self.unsupported("this dot call", span),
                 }
             }
+            Ast::Field { base, name } if name.text == "get" => self.get(base, args, span),
             Ast::Field { base, name } if args.is_empty() => {
                 let value = self.expr(base);
                 match (value.ty, name.text.as_str()) {
@@ -1989,9 +2544,6 @@ impl<'a> Checker<'a> {
                     (Ty::Text, "len") => {
                         Expr { kind: ExprKind::TextLen(value.into()), ty: Ty::Int, span }
                     }
-                    (Ty::Text, "is_empty") => {
-                        Expr { kind: ExprKind::TextIsEmpty(value.into()), ty: Ty::Bool, span }
-                    }
                     (Ty::Text, "bytes") => {
                         let ty = Ty::List(&Ty::Byte);
                         Expr { kind: ExprKind::TextBytes(value.into()), ty, span }
@@ -2000,15 +2552,9 @@ impl<'a> Checker<'a> {
                     (ty, "len") if ty.is_collection() => {
                         Expr { kind: ExprKind::Len(value.into()), ty: Ty::Int, span }
                     }
-                    (ty, "is_empty") if ty.is_collection() => {
-                        let int = |kind| Box::new(Expr { kind, ty: Ty::Int, span });
-                        let len = int(ExprKind::Len(value.into()));
-                        let kind = ExprKind::Binary(BinaryOp::Eq, len, int(ExprKind::Int(0)));
-                        Expr { kind, ty: Ty::Bool, span }
-                    }
-                    (ty, "to_float" | "to_int" | "len" | "is_empty" | "bytes") => {
-                        let message = format!("`{}` does not work on `{}`", name.text, ty.name());
-                        self.fail("E0303", message, span)
+                    (_, "is_empty") => self.is_empty(value, span),
+                    (ty, "to_float" | "to_int" | "len" | "bytes") => {
+                        self.no_dot_call(&name.text, ty, span)
                     }
                     _ => self.unsupported("this dot call", span),
                 }

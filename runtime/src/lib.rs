@@ -588,6 +588,28 @@ pub unsafe extern "C" fn lucid_list_set(list: *mut List, index: i64, value: i64)
     }
 }
 
+/// Drops the last value, and returns the list that replaces `list`.
+///
+/// # Safety
+///
+/// `list` must point to a live list that this caller gives one count of, and
+/// it must not be empty.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_list_pop(list: *mut List) -> *mut List {
+    // SAFETY: the caller guarantees a live list with a last value, and
+    // `unique_list` keeps that. A caller that wants the value retains it first.
+    unsafe {
+        let counted = is_counted(list);
+        let list = unique_list(list, (*list).cap);
+        let last = (*list).len - 1;
+        (*list).len = last;
+        if counted {
+            release_slot(list.add(1).cast::<i64>().add(last).read());
+        }
+        list
+    }
+}
+
 /// Exchanges two values, and returns the list that replaces `list`. Returns
 /// null if an index is out of bounds, and compiled code then traps.
 ///
@@ -1143,6 +1165,26 @@ mod tests {
             lucid_release(copy.cast());
             lucid_release(list.cast());
             assert_eq!((*text).head.count, 1);
+            lucid_release(text.cast());
+        }
+    }
+
+    #[test]
+    fn pop_releases_the_value_and_keeps_a_shared_list() {
+        let _serial = serial();
+        // SAFETY: each pointer is live for as long as this test holds a count.
+        unsafe {
+            let text = text_from(b"x");
+            let list = lucid_list_push(lucid_list_new(0, true), text as i64);
+            lucid_retain(list.cast());
+            let popped = lucid_list_pop(list);
+            assert_ne!(popped, list);
+            assert_eq!(((*list).len, (*popped).len, (*text).head.count), (1, 0, 2));
+            lucid_release(list.cast());
+            let list = lucid_list_push(popped, text as i64);
+            let popped = lucid_list_pop(list);
+            assert_eq!((popped, (*text).head.count), (list, 1));
+            lucid_release(popped.cast());
             lucid_release(text.cast());
         }
     }

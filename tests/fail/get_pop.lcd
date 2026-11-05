@@ -1,0 +1,28 @@
+var items = [1]
+var ages = {"a": 1}
+var seen = set([1])
+let a = items.get("a")
+let b = ages.get(1)
+let c = seen.get(1)
+let d = "text".get(0)
+let e = items.get()
+let f = items.get(a: 1)
+let g = 1 + items.pop()
+print items.pop() is none
+let h = items.pop(1)
+ages.pop()
+seen.pop()
+let i = ages.pop()
+let j = [1].pop()
+let k: text = items.pop()
+let l: int? = 1
+l.pop()
+print ages.pop()
+"abc".pop()
+let m = 3.get(0)
+match l
+    1 -> print "one"
+    none -> print "none"
+match l
+    n: Unknown -> print "n"
+    none -> print "none"

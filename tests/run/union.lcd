@@ -1,0 +1,223 @@
+# Unions: building, testing, narrowing, and matching.
+type User
+    name: text
+    age: int = 0
+    boss: User? = none
+
+choice Oops
+    Missing(path: text)
+    Denied
+
+task find(name: text) -> User?
+    if name == "Ada"
+        return User(name: "Ada", age: 36)
+    return none
+
+task describe(value: int or text or none) -> text
+    return match value
+        none -> "nothing"
+        n: int -> "int {n}"
+        t: text -> "text {t}"
+
+task load(ok: bool) -> int or Oops
+    if ok
+        return 7
+    return Missing(path: "a.toml")
+
+task chain_length(start: User?) -> int
+    var at = start
+    var count = 0
+    while at is not none
+        count += 1
+        at = at.boss
+    return count
+
+task guard(value: text?) -> int
+    if value is none
+        return 0
+    return value.len()
+
+task default(limit: int? = none, label: text? = "x") -> text
+    if limit is none
+        return "no limit, {label is none}"
+    return "limit {limit}"
+
+let top: int? = 5
+
+task read_top() -> bool
+    return top is int
+
+let user = find("Ada")
+if user is not none
+    print user.name
+if find("Bob") is none
+    print "no Bob"
+
+print describe(1)
+print describe("one")
+print describe(none)
+
+# A wider union keeps the value.
+let narrow: int? = 3
+let wide: int or text or none = narrow
+print describe(wide)
+
+match load(false)
+    n: int -> print n
+    e: Oops ->
+        match e
+            Missing(path) -> print path
+            Denied -> print "denied"
+
+match load(true)
+    n: int -> print n
+    e: Oops -> print "error"
+
+# Spellings of a union are one type.
+let flat: (int or text) or int = 1
+let other: text or int = flat
+print other is int
+
+# `is` tests one member, or several.
+print wide is (int or text)
+print wide is int?
+print wide is not text
+
+# Conditions narrow through `and`, `or`, `not`, and `then`.
+let name: text? = "Grace"
+print name is not none and name.len() == 5
+print name is none or name.len() == 5
+print if name is none then 0 else name.len()
+print if not (name is none) then name.len() else 0
+if not (name is text)
+    print "none"
+else
+    print name.len()
+
+# An `else if` knows that earlier tests failed.
+task kind(x: int or text or float) -> text
+    if x is int
+        return "int {x + 1}"
+    else if x is text
+        return "text {x.len()}"
+    else
+        return "float {x * 2.0}"
+
+print kind(1)
+print kind("ab")
+print kind(1.5)
+
+# Assignment ends narrowing, and a union local can hold any member.
+var slot: int or text = 1
+if slot is int
+    print slot + 1
+    slot = "now text"
+print slot is text
+
+var count: int? = 1
+if count is int
+    count += 1
+    print count is int
+
+# A name narrowed by a `match` binding, and the rest of a union.
+task rest(value: int or text or none) -> text
+    return match value
+        none -> "nothing"
+        other -> if other is int then "{other}" else other
+
+print rest(none)
+print rest(2)
+print rest("t")
+
+# Recursive types end through a union.
+let root = User(name: "a", boss: User(name: "b", boss: User(name: "c")))
+print chain_length(root)
+print guard(none)
+print guard("four")
+print default()
+print default(limit: 3)
+print default(label: none)
+print read_top()
+
+# Writes go through a narrowed name, and stay value semantics.
+var person = find("Ada")
+let saved = person
+if person is not none
+    person.age += 1
+    person.name = "Ada L"
+    print person.age
+if saved is not none
+    print saved.age
+    print saved.name
+
+var tags: list[text]? = ["a"]
+if tags is not none
+    tags.push("b")
+    tags[0] = "z"
+    print tags.len()
+    print tags[0]
+
+# Fields, lists, and maps hold unions.
+let mixed: list[int?] = [1, none, 3]
+var total = 0
+for item in mixed
+    if item is int
+        total += item
+print total
+
+var ages: map[text, int?] = {"a": 1, "b": none}
+ages["c"] = 3
+print ages["b"] is none
+print ages["c"] is int
+
+# A value of a loop body stops being narrow before the loop repeats.
+var seen: int? = 1
+var rounds = 0
+while rounds < 2
+    if seen is int
+        print seen
+    seen = none
+    rounds += 1
+
+# `is empty` tests text and collections.
+print "" is empty
+print "a" is not empty
+print [1] is empty
+let no_entries: map[text, int] = {}
+print no_entries is empty
+
+# `break` and `continue` also leave a block.
+for candidate in mixed
+    if candidate is none
+        continue
+    print candidate + 1
+for candidate in mixed
+    if candidate is int
+        print candidate
+    if candidate is none
+        break
+    print candidate
+
+# Tests build on each other, in both directions.
+task both(x: int or text or none) -> int
+    if x is not none and x is not text
+        return x + 1
+    if x is none or x is int
+        return 0
+    return x.len()
+
+print both(1)
+print both(none)
+print both("abc")
+
+# An empty literal finds its type inside a union.
+var some: list[int]? = []
+var lookup: map[text, int]? = {}
+var unique: set[int]? = set([])
+var nested: list[int?]? = [1, none]
+print some is not none
+if lookup is not none
+    print lookup is empty
+print unique is none
+if nested is not none
+    print nested.len()

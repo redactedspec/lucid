@@ -20,6 +20,11 @@ pub enum Ty {
     /// A `type` or `choice`, by its name and its index in the checker's table.
     /// A counted record, whatever its fields. See "Runtime" in docs/compiler.md.
     Data(&'static str, usize),
+    /// `A or B`: a counted record whose one slot holds the value, and whose tag
+    /// is the value's type id. Members are flat, and in type id order, so two
+    /// spellings of a union are equal. Tags mean the same in every union, so a
+    /// value keeps its record when it moves to a wider or narrower union.
+    Union(&'static [Ty]),
     /// Already reported. Hides follow-on errors, and never reaches a backend.
     Error,
 }
@@ -43,6 +48,18 @@ impl Ty {
             Ty::Map(key, value) => format!("map[{}, {}]", key.name(), value.name()),
             Ty::Set(item) => format!("set[{}]", item.name()),
             Ty::Data(name, _) => name.into(),
+            Ty::Union(members) => {
+                let mut names: Vec<String> =
+                    members.iter().filter(|&&ty| ty != Ty::None).map(|ty| ty.name()).collect();
+                if names.len() == members.len() {
+                    return names.join(" or ");
+                }
+                if let [one] = names.as_slice() {
+                    return format!("{one}?");
+                }
+                names.push("none".into());
+                names.join(" or ")
+            }
             Ty::Error => "unknown".into(),
         }
     }
@@ -54,11 +71,19 @@ impl Ty {
     /// True for a value made of other values. Comparing, showing, and hashing
     /// one waits for derived traits.
     pub fn is_compound(self) -> bool {
-        self.is_collection() || matches!(self, Ty::Data(..))
+        self.is_collection() || matches!(self, Ty::Data(..) | Ty::Union(_))
     }
 
     pub fn is_collection(self) -> bool {
         matches!(self, Ty::List(_) | Ty::Map(..) | Ty::Set(_))
+    }
+
+    /// The members of a union, or the type itself.
+    pub fn members(&self) -> &[Ty] {
+        match self {
+            Ty::Union(members) => members,
+            ty => std::slice::from_ref(ty),
+        }
     }
 
     /// True for a value that the runtime can hash and compare as a key.
@@ -99,6 +124,7 @@ pub struct Task {
     pub span: Span,
 }
 
+#[derive(Clone)]
 pub enum Stmt {
     Set(Local, Expr),
     /// Changes the list, map, set, or record in this local, which may then move.
@@ -154,6 +180,8 @@ pub enum Update {
     MapRemove,
     /// Slot, value.
     FieldSet,
+    /// Nothing. Drops the last value of a list that is not empty.
+    ListPop,
 }
 
 #[derive(Clone)]
@@ -233,6 +261,10 @@ pub enum ExprKind {
     Field(Box<Expr>, usize),
     /// The variant of a record.
     Tag(Box<Expr>),
+    /// True if a union's tag is one of these.
+    TagIn(Box<Expr>, Vec<usize>),
+    /// Runs these statements, which only `Set` hidden locals, then gives a value.
+    Seq(Vec<Stmt>, Box<Expr>),
     /// Evaluates a new value, and stores its count in this local, whose old
     /// value is released. Added by `ownership.rs`.
     Temp(Local, Box<Expr>),

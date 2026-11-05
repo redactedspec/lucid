@@ -167,9 +167,10 @@ entry       = expression ":" expression ;
 
 - **Leading `if`:** a statement that starts with `if` is always an `if_stmt`, so `if a then b else c` alone on a line is an error. One form does this job, and `if_expr` is for values.
 - **`then` branch:** it uses `logic_or`, not `expression`, so the `else` in `if a then b else c` is never read as a fallback.
-- **`is` target:** it is a single `type_term`, so `or` after it stays boolean: `x is text or y > 3`.
+- **`is` target:** it is a single `type_term`, so `or` after it stays boolean: `x is text or y > 3`. `none` and `empty` are taken first, so `x is none?` is an error.
+- **`_` in patterns:** `_` alone is the wildcard, and it skips a field in a variant pattern. It is not a name in `NAME ":" type`, so `_: int` is an error.
 - **`try` scope:** `try` covers the whole postfix chain. `try read(p).trim()` calls `.trim()` first, on the union, and fails type checking. Write `(try read(p)).trim()`.
 - **Negative numbers:** in `unary`, a `-` before a number with no postfix after it joins the literal, which does not change the value. It lets `-9223372036854775808` fit. Parentheses keep them apart, so `-(1)` negates a literal.
-- **Name patterns:** the grammar has one form for `Point` and `n`. The checker decides from the type of the subject: on a `choice` a name must be a variant, and on any other type it binds the value.
+- **Name patterns:** the grammar has one form for `Point` and `n`. The checker decides from the type of the subject: on a `choice` a name must be a variant, and on any other type it binds the value. On a union it binds what earlier arms left.
 - **Generic calls:** `f[int](x)` parses as an index followed by a call. The resolver rewrites it to a generic instantiation once it knows `f` is a task.
 - **Lambdas:** recognize with one token of lookahead past `NAME`, or by scanning to the matching `)` and checking for `=>`.

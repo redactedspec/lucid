@@ -14,7 +14,7 @@ Safe Lucid code cannot produce:
 | Silent integer overflow | Traps in all builds |
 | Stack overflow past the stack's end | A check on entry to each task traps first |
 | Ignored errors | Unused errors do not compile |
-| Unchecked casts | No unchecked casts. Union narrowing is checked |
+| Unchecked casts | No unchecked casts. The compiler proves each narrowing, and a tag test made it true: assignment and loops end what a test proved |
 
 A trap ends the program. It is a controlled stop, not undefined behavior. A trap can still be a denial-of-service risk, so servers need a containment design (see open questions in `decisions.md`).
 

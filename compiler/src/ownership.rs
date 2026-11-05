@@ -78,6 +78,7 @@ fn expr(locals: &mut Vec<Ty>, value: &mut Expr) {
         | ExprKind::SetOf(inner)
         | ExprKind::Field(inner, _)
         | ExprKind::Tag(inner)
+        | ExprKind::TagIn(inner, _)
         | ExprKind::Len(inner) => expr(locals, inner),
         ExprKind::Binary(_, left, right)
         | ExprKind::TextCharAt(left, right)
@@ -94,6 +95,10 @@ fn expr(locals: &mut Vec<Ty>, value: &mut Expr) {
             expr(locals, first);
             expr(locals, second);
             expr(locals, third);
+        }
+        ExprKind::Seq(setup, inner) => {
+            stmts(locals, setup);
+            expr(locals, inner);
         }
         ExprKind::Temp(..) => unreachable!("only this pass adds a `Temp`"),
     }

@@ -12,7 +12,7 @@ for person in people
     print greet(person)
 ```
 
-**Status:** early. The lexer and parser cover the full grammar. `lucid run` runs numbers, booleans, text, lists, maps, sets, `type`, `choice`, `match`, control flow, and recursive tasks, with type checking, overflow traps, and reference counting. M2 is done, and M3 is in progress. Progress is in [docs/roadmap.md](docs/roadmap.md).
+**Status:** early. The lexer and parser cover the full grammar. `lucid run` runs numbers, booleans, text, lists, maps, sets, `type`, `choice`, `match`, unions with narrowing, control flow, and recursive tasks, with type checking, overflow traps, and reference counting. M2 is done, and M3 is in progress. Progress is in [docs/roadmap.md](docs/roadmap.md).
 
 ## Docs
 

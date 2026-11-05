@@ -102,7 +102,7 @@ The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and 
 | E0315 | Alias is defined by itself, or a type holds itself with no way to end |
 | E0316 | `match` does not cover every case |
 | E0317 | `match` arm can never run |
-| E0318 | Pattern does not fit its value: unknown variant, wrong number of names, a bound type or variant name, or `{}` in text |
+| E0318 | Pattern does not fit its value: unknown variant, wrong number of names, a bound type or variant name, `{}` in text, or a type that the value never holds |
 | E0901 | Parses, but cannot run at this milestone |
 | E0902 | Task frame is too large for the stack check: over 512 KiB, or half the stack for top-level code |
 

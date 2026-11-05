@@ -1,0 +1,85 @@
+type Node
+    value: int
+    next: Node?
+
+task loops(start: int?)
+    var x = start
+    if x is int
+        while true
+            print x + 1
+            x = none
+
+task for_loops(start: int?)
+    var x = start
+    if x is int
+        for i in 0..2
+            print x + 1
+            if i == 1
+                x = none
+
+task branches(start: int?, flag: bool)
+    var x = start
+    if x is int
+        if flag
+            x = none
+        print x + 1
+
+task assigned(start: int?)
+    var x = start
+    if x is none
+        return
+    x = none
+    print x + 1
+
+task in_match(start: int?, flag: bool)
+    var x = start
+    if x is int
+        match flag
+            true ->
+                x = none
+            false -> print "no"
+        print x + 1
+
+task in_else(start: int?, flag: bool)
+    var x = start
+    if x is none
+        return
+    else
+        x = none
+    print x + 1
+
+task no_leave(start: int?, flag: bool)
+    if start is none
+        print "none"
+    print start + 1
+
+task partly(start: int?, flag: bool)
+    if start is none
+        return
+    else if flag
+        print "flag"
+    print start + 1
+
+task either(a: int?, b: int?)
+    if a is none or b is none
+        print a + 1
+    if a is int or b is int
+        print a + 1
+
+task field(node: Node)
+    if node.next is not none
+        print node.next.value
+
+task after_loop(start: int?)
+    while start is none
+        break
+    print start + 1
+
+task after_if(start: int?)
+    if start is int
+        print start
+    print start + 1
+
+task not_var(start: int?)
+    if start is int
+        start = 1

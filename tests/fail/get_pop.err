@@ -1,0 +1,22 @@
+get_pop.lcd:4:19: error E0303: this argument needs `int`, found `text`
+get_pop.lcd:5:18: error E0303: this argument needs `text`, found `int`
+get_pop.lcd:6:9: error E0303: `get` does not work on `set[int]`
+get_pop.lcd:7:9: error E0303: `get` does not work on `text`
+get_pop.lcd:8:9: error E0307: `get` takes 1 positional argument
+get_pop.lcd:9:9: error E0307: `get` takes 1 positional argument
+get_pop.lcd:10:13: error E0303: `pop` changes its list, so it must be a whole statement, or all of the value of `let`, `var`, `return`, or an assignment to a name
+get_pop.lcd:11:7: error E0303: `pop` changes its list, so it must be a whole statement, or all of the value of `let`, `var`, `return`, or an assignment to a name
+get_pop.lcd:12:9: error E0307: `pop` takes no arguments
+get_pop.lcd:13:1: error E0303: `pop` does not work on `map[text, int]`
+get_pop.lcd:14:1: error E0303: `pop` does not work on `set[int]`
+get_pop.lcd:15:9: error E0303: `pop` does not work on `map[text, int]`
+get_pop.lcd:16:9: error E0305: this value cannot change
+  note: only a name declared with `var` can change
+get_pop.lcd:17:15: error E0303: this annotation needs `text`, found `int?`
+get_pop.lcd:19:1: error E0303: `pop` does not work on `int?`
+  note: test it first, as in `if x is not none`. Only a name narrows, so name a field or call with `let`
+get_pop.lcd:20:7: error E0303: `pop` does not work on `map[text, int]`
+get_pop.lcd:21:1: error E0303: `pop` does not work on `text`
+get_pop.lcd:22:9: error E0303: `get` does not work on `int`
+get_pop.lcd:24:5: error E0303: this pattern needs `int?`, found `int`
+get_pop.lcd:27:8: error E0302: type `Unknown` is not defined

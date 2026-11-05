@@ -1,0 +1,7 @@
+let a: int? = 1
+print a
+print "{a}"
+print a == a
+let b: map[int?, int] = {}
+let c: set[int?] = set([])
+print 1 in [a]
