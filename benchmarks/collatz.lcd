@@ -1,0 +1,14 @@
+# Arithmetic in a tight loop, where overflow checks cost the most.
+var longest = 0
+for start in 1..3000000
+    var n = start
+    var steps = 0
+    while n != 1
+        if n % 2 == 0
+            n = n // 2
+        else
+            n = 3 * n + 1
+        steps += 1
+    if steps > longest
+        longest = steps
+print longest

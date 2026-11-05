@@ -16,12 +16,13 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | Mutable value semantics | Supported as research, little production proof | Snippet | Prototype at M3 |
 | Exclusivity checks | Supported, static checks alone are not enough | Snippet | Rule added: no top-level `var` in tasks |
 | Cranelift for speed | Partly supported. 2x target is at risk | Read | Keep LLVM option open |
-| Overflow traps in release | Costly but defensible | Snippet | Measure at M2 |
+| Overflow traps in release | Measured: 2% to 10% on `fib`, about 95% on a pure arithmetic loop | Read | Keep. Revisit with M4 benchmarks |
 | Permissions | Supported, but first design had holes | Snippet | `security.md` fixed |
 | Agent-friendliness | Weak. Biggest gap | Snippet | Test with agents from M3 |
 | Indentation syntax helps agents | No evidence | None | Owner preference. Measure |
 | No `async`, lightweight tasks in browser | Now feasible through JSPI | Snippet | Decide at M7 |
 | ASCII names, text escapes | Judgment call from existing practice | None | Revisit before 1.0 |
+| Division, argument order | Judgment call from existing practice | None | Agent trial at M3 |
 
 ## Memory
 
@@ -102,6 +103,21 @@ Level: **Snippet**.
 
 Sources: [Regehr](https://blog.regehr.org/archives/1384), [Luu](https://danluu.com/integer-overflow/).
 
+### First Lucid benchmarks (M2)
+
+Level: **Read** (own measurement). `sh benchmarks/run.sh`, best of 5 wall-clock runs, 2026-11-05, on the development machine. Lucid includes JIT compile time. The Rust programs are `rustc -O`, so they have no overflow checks.
+
+| Program | Rust | Lucid | Lucid, no overflow checks |
+| --- | --- | --- | --- |
+| `fib(40)` | 234 to 265 ms | 443 to 465 ms | 411 to 431 ms |
+| `collatz` | 336 to 341 ms | 1568 to 1702 ms | 1489 to 1640 ms |
+| `sum` | folded away | 1097 ms | 563 ms |
+
+- `fib(40)` is 1.75x to 1.9x of Rust, so the M2 exit passes, with little margin. Every call also pays a stack check.
+- `sum` is the worst case by design, with only checked arithmetic in a loop. Checks almost double its time.
+- `collatz` is 4.6x to 5x of Rust. Overflow checks are not the cause, since removing them changes little and the runs overlap. Lucid runs a real division for `% 2` and `// 2`, and LLVM uses shifts. Cranelift does not do this, and it is an M4 target.
+- `lucid run` of hello world took 6.7 ms, against the 100 ms target.
+
 ### WebAssembly stack switching
 
 Level: **Snippet**.
@@ -162,13 +178,21 @@ Decisions 21 and 22. Evidence here is weak: these are small choices taken from e
 
 Sources: [Trojan Source](https://trojansource.codes/), [UAX #31](https://www.unicode.org/reports/tr31/), [Swift strings](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/stringsandcharacters/).
 
+## Division and calls
+
+Decisions 23, 24, and 26. Evidence is weak: these follow existing practice and none was tested. Level: **None**. The sources below are named from memory and were not read for this project.
+
+- **Division.** Python 3 has `/` yielding a float and `//` flooring (PEP 238), and its `%` takes the sign of the divisor. This pairing keeps the division identity, while C-style truncation does not suit a language with floor division.
+- **Argument order.** Swift requires labeled arguments in declared order. Python allows any order, and it evaluates in the order written.
+
+Sources: [PEP 238](https://peps.python.org/pep-0238/), [Python expressions](https://docs.python.org/3/reference/expressions.html), [Swift functions](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/functions/).
+
 ## Open research
 
 | Topic | Needed by |
 | --- | --- |
 | Read Racordon et al. and the Hylo language tour in full | M3 |
 | Agent trial with a new language and only a guide | M3 |
-| Overflow check cost under Cranelift | M2 |
 | Reference counting cost in imperative code | M4 |
 | Foreign calls with lightweight tasks | M7 |
 | Status of WebAssembly stack switching | M7 |
