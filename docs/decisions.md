@@ -36,6 +36,10 @@ Add new entries at the end of the list. To reverse a decision, add a new entry t
 | 28 | 2026-11-05 | A trap message holds its source position, and each site's text is static data | One runtime entry point, and no cost on the hot path. Research favored a shared cold path. A stack trace comes later. |
 | 29 | 2026-11-05 | Accept the M2 exit with `fib(40)` at 2.02x to 2.09x of Rust release. The 2x target in `vision.md` stays, and M4 judges it on the benchmark suite | Owner's choice. Evidence is in `research.md`: Rust itself pays 1.56x to 1.92x for the same checks, and Lucid is 1.20x to 1.26x of checked Rust on `fib`. This accepts one exit, not a lower target. `collatz` at 2.47x of checked Rust stays an M4 item. |
 | 30 | 2026-11-05 | `-` joins a number with no postfix after it, in the parser. A default must be a literal (E0313) | The checker could not tell `-(x)` from `-x`, which let an out-of-range literal through. A literal default has no evaluation order to explain. Judgment calls with no outside evidence. |
+| 31 | 2026-11-05 | Interpolation is the only way to join text. `+` does not work on `text` | Rules in `AGENTS.md`: a second way needs a strong reason. Adding `+` later breaks nothing. Judgment call, and the M3 agent trial tests whether agents reach for `+`. E0303 points to interpolation. |
+| 32 | 2026-11-05 | `.len()` and `.is_empty()` are the names for text length and emptiness | The spec fixed `x.is_empty()` and left length unnamed. `len` is the short form that Python and Rust share. |
+| 33 | 2026-11-05 | Naive counting uses task-level ownership: an expression borrows, a local or hidden local owns, and a task releases all its locals on return | No block tracking is needed for `break`, `continue`, or `return`, and hidden locals work inside `if` values and `and`. Trade-off: a value can outlive its block until M4. Judgment call. Decision 2 and `memory-model.md` already chose naive counting first. |
+| 34 | 2026-11-05 | The leak and double-free checks are the debug profile of `lucid_rt` | Every golden test gets them with no flag, and a release build pays nothing. |
 
 ## Open questions
 

@@ -5,7 +5,8 @@ use crate::diag::{Diagnostic, Lines, Span};
 use crate::mir::{Expr, ExprKind, Local, Program, Stmt, Task, Ty};
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
-    AbiParam, Block, FuncRef, GlobalValue, InstBuilder, Signature, TrapCode, Type, Value, types,
+    AbiParam, Block, FuncRef, GlobalValue, InstBuilder, Signature, StackSlotData, StackSlotKind,
+    TrapCode, Type, Value, types,
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
@@ -21,8 +22,8 @@ const CHECK_OVERFLOW: bool = !cfg!(feature = "bench-unchecked");
 const STACK_MARGIN: usize = 1024 * 1024;
 
 /// The stack check runs after the prologue, so a frame must fit in the margin.
-/// A value takes at most 8 bytes of frame. Half the margin stays spare.
-const MAX_VALUES: usize = STACK_MARGIN / 16;
+/// Half the margin stays spare, for runtime calls.
+const MAX_FRAME: usize = STACK_MARGIN / 2;
 
 /// Marks the end of paths that cannot continue, such as after `lucid_trap`.
 const UNREACHABLE: TrapCode = TrapCode::unwrap_user(1);
@@ -39,17 +40,18 @@ pub fn run(
     // ponytail: a limit in the code fits one JIT thread. `lucid build` and
     // `spawn` need a per-thread limit that the runtime sets up.
     let stack_limit = (&raw const here) as usize - (stack_bytes - STACK_MARGIN);
-    let entry = compile(program, path, src, stack_limit)?;
+    let entry = compile(program, path, src, stack_limit, stack_bytes / 2)?;
     // SAFETY: `compile` built `entry` with no parameters and a one-byte `none`
     // result. Its module is leaked, so the code stays mapped.
     let entry = unsafe { std::mem::transmute::<*const u8, extern "C" fn() -> u8>(entry) };
     entry();
+    lucid_rt::lucid_check_leaks();
     Ok(())
 }
 
 fn clif(ty: Ty) -> Type {
     match ty {
-        Ty::Int => types::I64,
+        Ty::Int | Ty::Text => types::I64,
         Ty::Float => types::F64,
         Ty::Bool | Ty::None => types::I8,
         Ty::Error => unreachable!("errors stop before the backend"),
@@ -62,6 +64,17 @@ struct Runtime {
     print_float: FuncId,
     print_bool: FuncId,
     trap: FuncId,
+    retain: FuncId,
+    release: FuncId,
+    text_new: FuncId,
+    text_join: FuncId,
+    text_print: FuncId,
+    text_compare: FuncId,
+    text_len: FuncId,
+    text_is_empty: FuncId,
+    int_text: FuncId,
+    float_text: FuncId,
+    bool_text: FuncId,
 }
 
 fn signature_of(module: &JITModule, task: &Task) -> Signature {
@@ -77,6 +90,7 @@ fn compile(
     path: &str,
     src: &str,
     stack_limit: usize,
+    max_main_frame: usize,
 ) -> Result<*const u8, Vec<Diagnostic>> {
     let flags = [
         ("opt_level", "speed"),
@@ -90,21 +104,47 @@ fn compile(
     builder.symbol("lucid_print_float", lucid_rt::lucid_print_float as *const u8);
     builder.symbol("lucid_print_bool", lucid_rt::lucid_print_bool as *const u8);
     builder.symbol("lucid_trap", lucid_rt::lucid_trap as *const u8);
+    builder.symbol("lucid_retain", lucid_rt::lucid_retain as *const u8);
+    builder.symbol("lucid_release", lucid_rt::lucid_release as *const u8);
+    builder.symbol("lucid_text_new", lucid_rt::lucid_text_new as *const u8);
+    builder.symbol("lucid_text_join", lucid_rt::lucid_text_join as *const u8);
+    builder.symbol("lucid_text_print", lucid_rt::lucid_text_print as *const u8);
+    builder.symbol("lucid_text_compare", lucid_rt::lucid_text_compare as *const u8);
+    builder.symbol("lucid_text_len", lucid_rt::lucid_text_len as *const u8);
+    builder.symbol("lucid_text_is_empty", lucid_rt::lucid_text_is_empty as *const u8);
+    builder.symbol("lucid_int_text", lucid_rt::lucid_int_text as *const u8);
+    builder.symbol("lucid_float_text", lucid_rt::lucid_float_text as *const u8);
+    builder.symbol("lucid_bool_text", lucid_rt::lucid_bool_text as *const u8);
     let mut module = JITModule::new(builder);
 
     let pointer = module.target_config().pointer_type();
-    let mut import = |name: &str, params: &[AbiParam]| {
+    let mut import = |name: &str, params: &[AbiParam], returns: &[AbiParam]| {
         let mut signature = module.make_signature();
         signature.params.extend_from_slice(params);
+        signature.returns.extend_from_slice(returns);
         module.declare_function(name, Linkage::Import, &signature).expect(CODEGEN)
     };
     let text = [AbiParam::new(pointer), AbiParam::new(types::I64)];
+    let (int, float) = ([AbiParam::new(types::I64)], [AbiParam::new(types::F64)]);
+    let (byte, value) = ([AbiParam::new(types::I8).uext()], [AbiParam::new(pointer)]);
+    let two = [value[0], value[0]];
     let runtime = Runtime {
-        print: import("lucid_print", &text),
-        print_int: import("lucid_print_int", &[AbiParam::new(types::I64)]),
-        print_float: import("lucid_print_float", &[AbiParam::new(types::F64)]),
-        print_bool: import("lucid_print_bool", &[AbiParam::new(types::I8).uext()]),
-        trap: import("lucid_trap", &text),
+        print: import("lucid_print", &text, &[]),
+        print_int: import("lucid_print_int", &int, &[]),
+        print_float: import("lucid_print_float", &float, &[]),
+        print_bool: import("lucid_print_bool", &byte, &[]),
+        trap: import("lucid_trap", &text, &[]),
+        retain: import("lucid_retain", &value, &[]),
+        release: import("lucid_release", &value, &[]),
+        text_new: import("lucid_text_new", &text, &value),
+        text_join: import("lucid_text_join", &text, &value),
+        text_print: import("lucid_text_print", &value, &[]),
+        text_compare: import("lucid_text_compare", &two, &int),
+        text_len: import("lucid_text_len", &value, &int),
+        text_is_empty: import("lucid_text_is_empty", &value, &[AbiParam::new(types::I8)]),
+        int_text: import("lucid_int_text", &int, &value),
+        float_text: import("lucid_float_text", &float, &value),
+        bool_text: import("lucid_bool_text", &byte, &value),
     };
 
     let mut ids = Vec::with_capacity(program.tasks.len());
@@ -127,13 +167,30 @@ fn compile(
         let data_id = module.declare_anonymous_data(false, false).expect(CODEGEN);
         let data = module.declare_data_in_func(data_id, body.func);
         let (vars, loops, funcs, text) = (Vec::new(), Vec::new(), HashMap::new(), Vec::new());
-        Lower { module, body, pointer, runtime, ids, vars, loops, funcs, data, text, path, lines }
-            .task(task, data_id, stack_limit);
-        if id != main && context.func.dfg.num_values() > MAX_VALUES {
+        let (owned, exit) = (Vec::new(), None);
+        Lower {
+            module,
+            body,
+            pointer,
+            runtime,
+            ids,
+            vars,
+            owned,
+            exit,
+            loops,
+            funcs,
+            data,
+            text,
+            path,
+            lines,
+        }
+        .task(task, data_id, stack_limit);
+        module.define_function(id, &mut context).expect(CODEGEN);
+        let code = context.compiled_code().expect(CODEGEN);
+        let frame = code.buffer.frame_layout().expect(CODEGEN).frame_to_fp_offset as usize;
+        if frame > if id == main { max_main_frame } else { MAX_FRAME } {
             let note = "split it into smaller tasks";
             diags.push(Diagnostic::new("E0902", "this task is too large", task.span).note(note));
-        } else {
-            module.define_function(id, &mut context).expect(CODEGEN);
         }
         module.clear_context(&mut context);
     }
@@ -154,6 +211,10 @@ struct Lower<'a, 'b> {
     runtime: &'a Runtime,
     ids: &'a [FuncId],
     vars: Vec<Variable>,
+    /// Counted locals that are not parameters, released on return.
+    owned: Vec<Variable>,
+    /// With `owned`, every return goes here, so each release appears once.
+    exit: Option<Block>,
     /// The `continue` and `break` targets of the open loops.
     loops: Vec<(Block, Block)>,
     funcs: HashMap<FuncId, FuncRef>,
@@ -175,6 +236,18 @@ impl Lower<'_, '_> {
             let value = self.body.block_params(entry)[local];
             self.body.def_var(self.vars[local], value);
         }
+        for local in task.params..task.locals.len() {
+            if task.locals[local].is_counted() {
+                let empty = self.body.ins().iconst(self.pointer, 0);
+                self.body.def_var(self.vars[local], empty);
+                self.owned.push(self.vars[local]);
+            }
+        }
+        if !self.owned.is_empty() {
+            let exit = self.body.create_block();
+            self.body.append_block_param(exit, clif(task.returns));
+            self.exit = Some(exit);
+        }
 
         let sp = self.body.ins().get_stack_pointer(self.pointer);
         let limit = self.body.ins().iconst(self.pointer, stack_limit as i64);
@@ -184,11 +257,21 @@ impl Lower<'_, '_> {
         if !self.stmts(&task.body) {
             if task.returns == Ty::None {
                 let none = self.none();
-                self.body.ins().return_(&[none]);
+                self.leave(none);
             } else {
                 // The checker proved that every path returns, so this block is dead.
                 self.body.ins().trap(UNREACHABLE);
             }
+        }
+        if let Some(exit) = self.exit {
+            self.body.seal_block(exit);
+            self.body.switch_to_block(exit);
+            for local in 0..self.owned.len() {
+                let held = self.body.use_var(self.owned[local]);
+                self.call(self.runtime.release, &[held]);
+            }
+            let value = self.body.block_params(exit)[0];
+            self.body.ins().return_(&[value]);
         }
         let target = self.module.target_config();
         self.body.finalize(target);
@@ -198,6 +281,25 @@ impl Lower<'_, '_> {
         let mut description = DataDescription::new();
         description.define(self.text.into_boxed_slice());
         self.module.define_data(data_id, &description).expect(CODEGEN);
+    }
+
+    /// Ends the task with `value`, which is already owned or is not counted.
+    fn leave(&mut self, value: Value) {
+        match self.exit {
+            Some(exit) => {
+                self.body.ins().jump(exit, &[value.into()]);
+            }
+            None => {
+                self.body.ins().return_(&[value]);
+            }
+        }
+    }
+
+    /// Replaces the value of a counted local with `value`, which it owns.
+    fn store(&mut self, local: Local, value: Value) {
+        let old = self.body.use_var(self.vars[local]);
+        self.call(self.runtime.release, &[old]);
+        self.body.def_var(self.vars[local], value);
     }
 
     fn none(&mut self) -> Value {
@@ -256,8 +358,14 @@ impl Lower<'_, '_> {
     fn stmt(&mut self, stmt: &Stmt) -> bool {
         match stmt {
             Stmt::Set(local, value) => {
+                let counted = value.ty.is_counted();
                 let value = self.expr(value);
-                self.body.def_var(self.vars[*local], value);
+                if counted {
+                    self.call(self.runtime.retain, &[value]);
+                    self.store(*local, value);
+                } else {
+                    self.body.def_var(self.vars[*local], value);
+                }
             }
             Stmt::If { branches, otherwise } => {
                 let done = self.body.create_block();
@@ -303,8 +411,12 @@ impl Lower<'_, '_> {
                 self.for_loop(*local, start, end, *inclusive, body);
             }
             Stmt::Return(value) => {
+                let counted = value.ty.is_counted();
                 let value = self.expr(value);
-                self.body.ins().return_(&[value]);
+                if counted {
+                    self.call(self.runtime.retain, &[value]);
+                }
+                self.leave(value);
                 return true;
             }
             Stmt::Break => {
@@ -380,6 +492,7 @@ impl Lower<'_, '_> {
             Ty::Int => self.call(self.runtime.print_int, &[value]),
             Ty::Float => self.call(self.runtime.print_float, &[value]),
             Ty::Bool => self.call(self.runtime.print_bool, &[value]),
+            Ty::Text => self.call(self.runtime.text_print, &[value]),
             Ty::None => {
                 self.print_text("none");
                 None
@@ -432,7 +545,55 @@ impl Lower<'_, '_> {
                 self.trap_if(outside, "float does not fit in `int`", expr.span);
                 self.body.ins().fcvt_to_sint(types::I64, value)
             }
+            ExprKind::Text(text) => {
+                let text = self.text(text);
+                self.call(self.runtime.text_new, &text).expect("it returns a text")
+            }
+            ExprKind::ToText(value) => self.text_of(value),
+            ExprKind::Join(parts) => self.join(parts),
+            ExprKind::TextLen(value) => {
+                let value = self.expr(value);
+                self.call(self.runtime.text_len, &[value]).expect("it returns an int")
+            }
+            ExprKind::TextIsEmpty(value) => {
+                let value = self.expr(value);
+                self.call(self.runtime.text_is_empty, &[value]).expect("it returns a bool")
+            }
+            ExprKind::Temp(local, value) => {
+                let value = self.expr(value);
+                self.store(*local, value);
+                value
+            }
         }
+    }
+
+    fn text_of(&mut self, expr: &Expr) -> Value {
+        let value = self.expr(expr);
+        let text = match expr.ty {
+            Ty::Int => self.call(self.runtime.int_text, &[value]),
+            Ty::Float => self.call(self.runtime.float_text, &[value]),
+            Ty::Bool => self.call(self.runtime.bool_text, &[value]),
+            Ty::None => {
+                let text = self.text("none");
+                self.call(self.runtime.text_new, &text)
+            }
+            _ => unreachable!("the checker converts only these types"),
+        };
+        text.expect("it returns a text")
+    }
+
+    /// The parts go in a stack slot, which E0902 counts as part of the frame.
+    fn join(&mut self, parts: &[Expr]) -> Value {
+        let size = u32::try_from(parts.len() * 8).expect("the source fits in memory");
+        let slot = StackSlotData::new(StackSlotKind::ExplicitSlot, size, 3);
+        let slot = self.body.create_sized_stack_slot(slot);
+        for (index, part) in parts.iter().enumerate() {
+            let value = self.expr(part);
+            self.body.ins().stack_store(self.pointer, value, slot, index as i32 * 8);
+        }
+        let address = self.body.ins().stack_addr(self.pointer, slot, 0);
+        let count = self.body.ins().iconst(types::I64, parts.len() as i64);
+        self.call(self.runtime.text_join, &[address, count]).expect("it returns a text")
     }
 
     fn if_value(&mut self, condition: &Expr, then: &Expr, otherwise: &Expr, ty: Type) -> Value {
@@ -458,6 +619,11 @@ impl Lower<'_, '_> {
         let float = left.ty == Ty::Float;
         let a = self.expr(left);
         let b = self.expr(right);
+        if left.ty == Ty::Text {
+            let cc = int_cc(op).expect("the checker allows only comparisons on text");
+            let order = self.call(self.runtime.text_compare, &[a, b]);
+            return self.body.ins().icmp_imm_s(cc, order.expect("it returns an int"), 0);
+        }
         if let Some(cc) = int_cc(op) {
             let ins = self.body.ins();
             return if float { ins.fcmp(float_cc(cc), a, b) } else { ins.icmp(cc, a, b) };

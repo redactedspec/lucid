@@ -7,6 +7,7 @@ mod diag;
 mod lexer;
 mod mir;
 mod native;
+mod ownership;
 mod parser;
 
 use diag::{Diagnostic, Span};
@@ -45,9 +46,10 @@ fn cli(args: &[String]) -> ExitCode {
     if diags.is_empty()
         && let Some(file) = &file
     {
-        let (program, errors) = check::check(file);
+        let (mut program, errors) = check::check(file);
         diags = errors;
         if run && diags.is_empty() {
+            ownership::run(&mut program);
             diags = native::run(&program, path, &src, STACK_BYTES).err().unwrap_or_default();
         } else if !run {
             // `check` reports errors in the program. An unbuilt feature is not one.

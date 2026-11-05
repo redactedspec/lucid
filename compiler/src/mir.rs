@@ -10,6 +10,8 @@ pub enum Ty {
     Float,
     Bool,
     None,
+    /// A counted heap value. See "Counting" below.
+    Text,
     /// Already reported. Hides follow-on errors, and never reaches a backend.
     Error,
 }
@@ -21,13 +23,24 @@ impl Ty {
             Ty::Float => "float",
             Ty::Bool => "bool",
             Ty::None => "none",
+            Ty::Text => "text",
             Ty::Error => "unknown",
         }
+    }
+
+    pub fn is_counted(self) -> bool {
+        self == Ty::Text
     }
 }
 
 /// An index into `Task::locals`. Parameters come first.
 pub type Local = usize;
+
+// Counting: a counted expression yields a borrowed reference, which stays valid
+// for its whole statement because a local or `Temp` owns it. Each counted local
+// owns one count, and starts empty. `Set` retains the new value and releases the
+// old one. A parameter is borrowed from the caller, and is never `Set`. `Return`
+// retains its value, then releases every counted local that is not a parameter.
 
 pub struct Program {
     pub tasks: Vec<Task>,
@@ -97,4 +110,16 @@ pub enum ExprKind {
     If(Box<Expr>, Box<Expr>, Box<Expr>),
     ToFloat(Box<Expr>),
     ToInt(Box<Expr>),
+    /// A new text.
+    Text(String),
+    /// A new text from an `int`, `float`, `bool`, or `none`.
+    ToText(Box<Expr>),
+    /// A new text from these text values, in order.
+    Join(Vec<Expr>),
+    /// The number of Unicode characters.
+    TextLen(Box<Expr>),
+    TextIsEmpty(Box<Expr>),
+    /// Evaluates a new value, and stores its count in this local, whose old
+    /// value is released. Added by `ownership.rs`.
+    Temp(Local, Box<Expr>),
 }

@@ -1,0 +1,2 @@
+text_add.lcd:1:7: error E0303: `+` needs a number, found `text`
+  note: join text with interpolation: "{a}{b}"

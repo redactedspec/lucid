@@ -35,20 +35,23 @@ Build a thin end-to-end path first. Depth comes later.
 
 ## M3: Data
 
-- [ ] `text`, interpolation, `list`, `map`, `set`
+- [x] `text` values, interpolation, comparison, `.len()`, `.is_empty()`
+- [ ] `text` slicing, iteration, `.bytes()`
+- [ ] `list`, `map`, `set`
 - [ ] `type`, `choice`, `match` with exhaustiveness
 - [ ] Unions, `T?`, narrowing, `is`
 - [ ] Generics with monomorphization, traits, derived traits
 - [ ] Sized numbers, wrapping math tasks, nested tasks, lambdas, task values, `self` and dot calls
 - [ ] Parameter modes and exclusivity checks
-- [ ] Naive reference counting, leak-checking debug runtime
+- [x] Naive reference counting, leak-checking debug runtime
 - [ ] Draft `docs/agent-guide.md`, and run a 10-task agent trial
 
 **Exit:** `examples/hello.lcd` runs. Golden tests cover every feature above, with no leaks under the debug runtime. Trial failures are recorded in `docs/research.md`.
 
 ## M4: Ownership performance
 
-- [ ] Last-use moves
+- [ ] Last-use moves, and block-level release of locals
+- [ ] Static text literals, with no allocation
 - [ ] Borrow elision of count operations
 - [ ] Reuse analysis, if measurements justify it
 - [ ] Shifts for division and remainder by a constant power of two

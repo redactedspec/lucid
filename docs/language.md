@@ -33,7 +33,7 @@ Every value must be initialized. Shadowing in the same scope is an error.
 
 Tasks cannot read or write a top-level `var`. Pass it as a parameter. This keeps exclusivity checks static.
 
-A task may read a top-level `let` whose value is a literal, with or without a leading `-`. Such a value exists before any statement runs, so a task never sees it uninitialized. Reading any other top-level `let` reports E0901, see the open questions in `decisions.md`.
+A task may read a top-level `let` whose value is a literal, with or without a leading `-`. A text with no interpolation is a literal. Such a value exists before any statement runs, so a task never sees it uninitialized. Reading any other top-level `let` reports E0901, see the open questions in `decisions.md`.
 
 ## Basic types
 
@@ -79,7 +79,11 @@ let block = """
 
 Escapes are `\n`, `\t`, `\r`, `\\`, and `\"`. Interpolated expressions may contain text of their own. In `"""` text, the first line break, the common indentation, and a final line holding only the closing quotes are all removed. So `block` above has two lines and no trailing line break.
 
-Length, slicing, and iteration work on Unicode characters by default. `.bytes()` gives raw bytes.
+Interpolated values may be `text`, `int`, `float`, `bool`, or `none`. They read as `print` shows them. Interpolation is the only way to join text, so `+` does not work on `text`.
+
+`==`, `!=`, `<`, `<=`, `>`, and `>=` work on `text`. Order is by Unicode code point.
+
+Length, slicing, and iteration work on Unicode characters by default. `.bytes()` gives raw bytes. `x.len()` is the number of characters, and `x.is_empty()` tests for none. Slicing, iteration, and `.bytes()` are planned for M3.
 
 ## Collections
 
@@ -262,7 +266,7 @@ match load("app.toml")
 - `x else y` gives `y` in place of the error.
 - An unused error is a compile error.
 
-A **trap** is an unrecoverable bug: out-of-bounds index, overflow, a zero divisor, a failed conversion, stack overflow, a reached `...`, failed `expect`, a `shared` access conflict, or a failed write to stdout. A trap prints its source position and exits with code 101, except that a failed write to stdout has no position. A stack trace is planned for M5. Traps cannot be caught.
+A **trap** is an unrecoverable bug: out-of-bounds index, overflow, a zero divisor, a failed conversion, stack overflow, a reached `...`, failed `expect`, a `shared` access conflict, running out of memory, or a failed write to stdout. A trap prints its source position and exits with code 101, except that running out of memory and a failed write to stdout have no position. A stack trace is planned for M5. Traps cannot be caught.
 
 ## Generics
 

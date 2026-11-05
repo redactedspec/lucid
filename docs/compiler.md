@@ -4,7 +4,7 @@ The compiler is written in Rust until M9, when its front end moves to Lucid (dec
 
 ## Status
 
-As of M2, `lucid run` compiles `int`, `float`, `bool`, and `none`, `let`, `var`, `if`, `while`, `for` over ranges, top-level tasks with recursion and defaults, and `print` of those values or of plain text. It reports E0901 for anything else. `check.rs` binds names, checks types, and lowers to MIR in one pass, because with no modules or generics those stages have nothing to do alone. It splits when they arrive. Ownership has nothing to do until M3 brings heap values.
+M3 is in progress. `lucid run` compiles `int`, `float`, `bool`, `none`, and `text`, interpolation, `let`, `var`, `if`, `while`, `for` over ranges, top-level tasks with recursion and defaults, and `print`. It reports E0901 for anything else. `check.rs` binds names, checks types, and lowers to MIR in one pass, because with no modules or generics those stages have nothing to do alone. It splits when they arrive. `ownership.rs` is the naive stage: it gives each new heap value an owner, and "Counting" in `mir.rs` states the rules that a backend follows.
 
 ## Pipeline
 
@@ -16,7 +16,7 @@ source text
   -> type checker   inference, narrowing, exhaustiveness (check.rs)
   -> monomorphizer  concrete tasks and types only (planned)
   -> MIR            simple, explicit, structured operations
-  -> ownership      moves, count operations, exclusivity, reuse (planned)
+  -> ownership      owners of new values (naive). Moves, exclusivity, reuse are planned
   -> backend        Cranelift (native, JIT) or wasm-encoder (web)
 ```
 
@@ -38,7 +38,7 @@ compiler/          Rust crate `lucid`: the CLI and compiler
         check.rs   names, types, lowering to MIR
         mono.rs        planned
         mir.rs     typed, structured operations
-        ownership.rs   planned
+        ownership.rs   owners of new heap values
         native.rs  Cranelift backend
         wasm.rs        planned: WebAssembly backend
     tests/golden.rs    runs everything in `tests/` and `examples/`
@@ -50,9 +50,15 @@ benchmarks/        Lucid and Rust versions of each program
 
 ## Runtime
 
-`lucid_rt` is small and has a C ABI. Today it provides printing and trap reporting. Allocation, reference counting, text and list primitives, and task scheduling are planned.
+`lucid_rt` is small and has a C ABI. Today it provides printing, trap reporting, allocation, reference counting, and text primitives. List primitives and task scheduling are planned.
 
-A trap site is a cold block that passes `lucid_trap` a message holding its source position. Every task checks the stack pointer on entry, after its prologue, so its frame must fit in the 1 MiB margin. E0902 rejects a task that might not fit. At M2 the limit is a constant in the code, because `lucid run` has one thread with a known stack. `lucid build` and `spawn` need a limit per thread.
+A task with counted locals has one exit block, which releases them, so code size does not grow with returns times locals. Every other task returns directly.
+
+A text is one allocation: a count, a byte length, then its UTF-8 bytes. Every text literal allocates when it runs, except directly under `print`.
+
+In a debug build of `lucid_rt`, which is what `cargo test` runs, a released value keeps its memory and is marked dead. So a double free, or a retain of a dead value, traps with `runtime bug`. `lucid run` also traps at exit if any value is still live.
+
+A trap site is a cold block that passes `lucid_trap` a message holding its source position. Every task checks the stack pointer on entry, after its prologue, so its frame must fit in the 1 MiB margin. E0902 reads the compiled frame size, and rejects a task over half the margin. At M2 the limit is a constant in the code, because `lucid run` has one thread with a known stack. `lucid build` and `spawn` need a limit per thread.
 
 - `lucid run` links it directly, since the JIT runs inside the compiler process.
 - `lucid build` embeds a prebuilt `lucid_rt` static library in the compiler and passes it to the system linker.
@@ -108,7 +114,7 @@ Exit codes: 0 for success, 1 for compile errors, 2 for bad usage, and 101 for a 
 - **Error code check:** `compiler/tests/golden.rs` fails if a code in the source has no golden test or is missing from `docs/agents.md`.
 - **Examples:** everything in `examples/` must parse. Later milestones raise this to compile.
 - **Ownership-off mode:** the whole suite runs with ownership optimizations disabled, and output must match.
-- **Memory checks:** a debug runtime counts allocations, and reports leaks and double frees for each test.
+- **Memory checks:** the debug runtime counts live values, so every golden test also fails on a leak or double free.
 - **Fuzzing:** add from M5. Parser and checker must never panic.
 
 ## Development machine

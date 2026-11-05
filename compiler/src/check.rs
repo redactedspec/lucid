@@ -7,10 +7,12 @@ use crate::mir::{Expr, ExprKind, Local, Program, Stmt, Task, Ty};
 use std::collections::HashMap;
 
 /// Names of the spec's built-in types that this milestone cannot represent.
-const LATER_TYPES: [&str; 15] = [
-    "text", "byte", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "list", "map",
-    "set", "pointer",
+const LATER_TYPES: [&str; 14] = [
+    "byte", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "list", "map", "set",
+    "pointer",
 ];
+
+const JOIN_TEXT: &str = "join text with interpolation: \"{a}{b}\"";
 
 /// Checks a file. A program using an unbuilt feature gets only E0901, because
 /// names and types that feature would supply make any other error unreliable.
@@ -48,10 +50,10 @@ struct Param<'a> {
 }
 
 /// What a task can see of a top-level `let` or `var`.
-enum Top {
+enum Top<'a> {
     Var,
     /// A `let` with a literal value, which is known before any statement runs.
-    Literal(Expr),
+    Literal(&'a ast::Expr),
     Let,
 }
 
@@ -60,7 +62,7 @@ struct Checker<'a> {
     diags: Vec<Diagnostic>,
     task_ids: HashMap<&'a str, usize>,
     signatures: Vec<Signature<'a>>,
-    top: HashMap<&'a str, Top>,
+    top: HashMap<&'a str, Top<'a>>,
     scopes: Vec<HashMap<&'a str, Local>>,
     locals: Vec<Ty>,
     mutable: Vec<bool>,
@@ -74,7 +76,11 @@ fn poisoned(span: Span) -> Expr {
 }
 
 fn is_literal(expr: &ast::Expr) -> bool {
-    matches!(expr.kind, Ast::Int(_) | Ast::Float(_) | Ast::Bool(_))
+    match &expr.kind {
+        Ast::Int(_) | Ast::Float(_) | Ast::Bool(_) => true,
+        Ast::Text(parts) => parts.iter().all(|part| matches!(part, TextPart::Literal(_))),
+        _ => false,
+    }
 }
 
 /// True if control never reaches the end of `stmts`.
@@ -157,6 +163,7 @@ impl<'a> Checker<'a> {
             "int" => Ty::Int,
             "float" => Ty::Float,
             "bool" => Ty::Bool,
+            "text" => Ty::Text,
             "" => self.unsupported("this type", ty.span).ty,
             name if LATER_TYPES.contains(&name) => {
                 self.unsupported(&format!("type `{name}`"), ty.span).ty
@@ -189,13 +196,7 @@ impl<'a> Checker<'a> {
             if let StmtKind::Let { mutable, name, value, .. } = &stmt.kind {
                 let top = match (*mutable, is_literal(value)) {
                     (true, _) => Top::Var,
-                    (false, true) => {
-                        // Its own statement reports any error, later.
-                        let reported = self.diags.len();
-                        let value = self.expr(value);
-                        self.diags.truncate(reported);
-                        Top::Literal(value)
-                    }
+                    (false, true) => Top::Literal(value),
                     (false, false) => Top::Let,
                 };
                 self.top.insert(&name.text, top);
@@ -362,7 +363,7 @@ impl<'a> Checker<'a> {
                 Ast::Text(parts) => match parts.as_slice() {
                     [] => Stmt::PrintText(String::new()),
                     [TextPart::Literal(text)] => Stmt::PrintText(text.clone()),
-                    _ => return self.later("text interpolation", value.span),
+                    _ => Stmt::Print(self.expr(value)),
                 },
                 _ => Stmt::Print(self.expr(value)),
             },
@@ -448,7 +449,9 @@ impl<'a> Checker<'a> {
             }
             _ => {
                 let value = self.expr(iterable);
-                if value.ty != Ty::Error {
+                if value.ty == Ty::Text {
+                    self.unsupported("a `for` over text", value.span);
+                } else if value.ty != Ty::Error {
                     let message = format!("`for` cannot loop over `{}`", value.ty.name());
                     self.fail("E0303", message, value.span);
                 }
@@ -472,7 +475,13 @@ impl<'a> Checker<'a> {
         }
         if self.returns.is_some() {
             match self.top.get(name) {
-                Some(Top::Literal(value)) => return Expr { span, ..value.clone() },
+                Some(&Top::Literal(value)) => {
+                    // Its own statement reports any error.
+                    let reported = self.diags.len();
+                    let value = self.expr(value);
+                    self.diags.truncate(reported);
+                    return Expr { span, ..value };
+                }
                 Some(Top::Var) => {
                     let message = format!("a task cannot use top-level `var` `{name}`");
                     let diag = Diagnostic::new("E0306", message, span);
@@ -539,7 +548,7 @@ impl<'a> Checker<'a> {
                 (ExprKind::If(condition.into(), then.into(), otherwise.into()), ty)
             }
             Ast::Call { callee, args } => return self.call(callee, args, span),
-            Ast::Text(_) => return self.unsupported("a text value", span),
+            Ast::Text(parts) => return self.text(parts, span),
             Ast::List(_) => return self.unsupported("a list", span),
             Ast::Map(_) => return self.unsupported("a map", span),
             Ast::Is { .. } => return self.unsupported("`is`", span),
@@ -550,6 +559,32 @@ impl<'a> Checker<'a> {
             Ast::SelfValue => return self.unsupported("`self`", span),
         };
         Expr { kind, ty, span }
+    }
+
+    fn text(&mut self, parts: &'a [TextPart], span: Span) -> Expr {
+        let mut values: Vec<Expr> = parts
+            .iter()
+            .map(|part| match part {
+                TextPart::Literal(text) => {
+                    Expr { kind: ExprKind::Text(text.clone()), ty: Ty::Text, span }
+                }
+                TextPart::Expr(value) => {
+                    let value = self.expr(value);
+                    match value.ty {
+                        Ty::Text | Ty::Error => value,
+                        _ => {
+                            let span = value.span;
+                            Expr { kind: ExprKind::ToText(value.into()), ty: Ty::Text, span }
+                        }
+                    }
+                }
+            })
+            .collect();
+        match values.len() {
+            0 => Expr { kind: ExprKind::Text(String::new()), ty: Ty::Text, span },
+            1 => values.remove(0),
+            _ => Expr { kind: ExprKind::Join(values), ty: Ty::Text, span },
+        }
     }
 
     fn unary(&mut self, op: UnaryOp, value: &'a ast::Expr, span: Span) -> Expr {
@@ -615,7 +650,11 @@ impl<'a> Checker<'a> {
         if left.ty != right.ty {
             let (a, b) = (left.ty.name(), right.ty.name());
             let message = format!("`{name}` needs one type on both sides, found `{a}` and `{b}`");
-            let note = "conversions are explicit: use `.to_float()` or `.to_int()`";
+            let note = if left.ty == Ty::Text || right.ty == Ty::Text {
+                JOIN_TEXT
+            } else {
+                "conversions are explicit: use `.to_float()` or `.to_int()`"
+            };
             return self.report(Diagnostic::new("E0303", message, span).note(note));
         }
         let ty = left.ty;
@@ -626,12 +665,18 @@ impl<'a> Checker<'a> {
             Ty::Int => true,
             Ty::Float => !int_only,
             Ty::Bool => equality,
+            Ty::Text => equality || order,
             _ => false,
         };
         if !valid {
             let needs = if int_only { "`int`" } else { "a number" };
             let message = format!("`{name}` needs {needs}, found `{}`", ty.name());
-            return self.fail("E0303", message, left.span);
+            let diag = Diagnostic::new("E0303", message, left.span);
+            return self.report(if ty == Ty::Text && op == BinaryOp::Add {
+                diag.note(JOIN_TEXT)
+            } else {
+                diag
+            });
         }
         let result = match op {
             _ if equality || order => Ty::Bool,
@@ -662,7 +707,13 @@ impl<'a> Checker<'a> {
                     (Ty::Float, "to_int") => {
                         Expr { kind: ExprKind::ToInt(value.into()), ty: Ty::Int, span }
                     }
-                    (ty, "to_float" | "to_int") => {
+                    (Ty::Text, "len") => {
+                        Expr { kind: ExprKind::TextLen(value.into()), ty: Ty::Int, span }
+                    }
+                    (Ty::Text, "is_empty") => {
+                        Expr { kind: ExprKind::TextIsEmpty(value.into()), ty: Ty::Bool, span }
+                    }
+                    (ty, "to_float" | "to_int" | "len" | "is_empty") => {
                         let message = format!("`{}` does not work on `{}`", name.text, ty.name());
                         self.fail("E0303", message, span)
                     }

@@ -118,14 +118,26 @@ fn missing_file_is_reported() {
 
 /// Generated, since the program is too long to keep in `tests/fail/`.
 #[test]
-fn huge_task_is_rejected() {
+fn huge_frame_is_rejected() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let body = "    n += 1\n".repeat(20_000);
-    let source = format!("task f()\n    var n = 0\n{body}\nf()\n");
-    fs::write(dir.join("huge.lcd"), source).expect("cannot write test file");
-    let output = lucid(dir, &["run", "huge.lcd"]);
+    let parts = "{a}".repeat(70_000);
+    let source = format!("task f(a: text)\n    print \"{parts}\"\nf(\"x\")\n");
+    fs::write(dir.join("huge_text.lcd"), source).expect("cannot write test file");
+    let output = lucid(dir, &["run", "huge_text.lcd"]);
     assert_eq!(output.status.code(), Some(1));
-    assert!(text(&output.stderr).starts_with("huge.lcd:1:1: error E0902:"));
+    assert!(text(&output.stderr).starts_with("huge_text.lcd:1:1: error E0902:"));
+}
+
+/// Each branch adds a hidden local and a merge block. E0902 must look at the
+/// real frame, and a task of this size must still compile.
+#[test]
+fn many_text_branches_compile() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let branches = "    if a == \"x\"\n        print \"y\"\n".repeat(300);
+    let source = format!("task f(a: text)\n{branches}f(\"x\")\n");
+    fs::write(dir.join("branches.lcd"), source).expect("cannot write test file");
+    let output = lucid(dir, &["run", "branches.lcd"]);
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
 }
 
 #[test]
@@ -177,7 +189,7 @@ fn failed_stdout_write_traps_without_a_position() {
 /// also be listed in docs/agents.md.
 #[test]
 fn every_error_code_is_tested_and_documented() {
-    // missing_file_is_reported and huge_task_is_rejected
+    // missing_file_is_reported and huge_frame_is_rejected
     let mut tested = String::from("E0001 E0902");
     for err in files(&repo().join("tests").join("fail"), "err") {
         tested += &text(&fs::read(err).expect("cannot read .err file"));

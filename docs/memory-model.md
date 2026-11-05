@@ -74,7 +74,7 @@ Variables, fields, and list elements in `change` paths are checked statically. O
 
 ## Destruction
 
-Values are destroyed deterministically when their last owner ends. A type that has `task close(change self: T)` from the `Close` trait has it called automatically at that moment. Files and sockets close without `defer` or `with`.
+Values are destroyed deterministically when their last owner ends. As of M3 a local's owner ends when the local is overwritten or the task returns, not at the end of its block. That must tighten before `Close` arrives at M5. A type that has `task close(change self: T)` from the `Close` trait has it called automatically at that moment. Files and sockets close without `defer` or `with`.
 
 ## Reference count performance
 
@@ -98,7 +98,7 @@ The published results for Perceus and Lean come from functional languages, with 
 
 This is the hardest part of the compiler, so it comes with a staged plan:
 
-1. **M3: naive.** Count every use. Correct and slow.
+1. **M3: naive.** Count every use. Correct and slow. Each new value goes to a hidden local, which holds it until overwritten or until the task returns. A store then counts again, so a value is rarely unique yet, and copy-on-write will copy more than it must.
 2. **M4: last-use moves and borrow elision.** Measure against Rust.
 3. **M4: reuse analysis.** Only after measurements justify it.
 

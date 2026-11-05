@@ -1,0 +1,72 @@
+# Text values, interpolation, comparison, and their counts.
+
+task greet(name: text, punctuation: text = "!") -> text
+    return "Hello, {name}{punctuation}"
+
+task pick(flag: bool, a: text, b: text) -> text
+    return if flag then a else b
+
+task nothing()
+    return
+
+task early(n: int) -> text
+    let first = "n is {n}"
+    if n > 1
+        let second = "{first}, big"
+        return second
+    return first
+
+let default_name = "world"
+
+task use_top() -> text
+    return "top {default_name}"
+
+let age = 41
+let name = "Ada"
+print "Hi {name}, you are {age + 1}"
+print greet("Linus")
+print greet(name, punctuation: "?")
+print "{1.5} {1000.0} {true} {nothing()} {"nested {age}"}"
+print "{{{age}}}"
+print ""
+print use_top()
+print early(1)
+print early(2)
+
+var line = ""
+for i in 0..3
+    line = "{line}{i},"
+print line
+
+var kept = name
+kept = "changed"
+print name
+print kept
+kept = kept
+print kept
+
+var n = 0
+while "{n}" != "3"
+    let turn = "turn {n}"
+    n += 1
+    if n == 2
+        continue
+    print turn
+    if n == 3
+        break
+
+print pick(true, "yes", "no")
+print pick(false, "yes", "no")
+print "abc" == "abc"
+print "abc" != "abd"
+print "abc" < "abd"
+print "b" >= "abc"
+print "é" > "z"
+print "héllo".len()
+print "".is_empty()
+print "x".is_empty()
+print "{greet("a")}" == greet("a")
+"unused value"
+greet("unused call")
+let annotated: text = if age > 1 then "big" else "small"
+print annotated
