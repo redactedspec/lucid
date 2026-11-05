@@ -79,7 +79,8 @@ cargo run -p lucid -- run examples/file.lcd   # the compiler
 cargo test                                    # unit and golden tests
 cargo clippy --all-targets                    # lints
 cargo fmt                                     # formatting
-sh benchmarks/run.sh                          # benchmarks, needs python
+sh benchmarks/run.sh                          # build, then 15 paired rounds, needs python
+sh benchmarks/run.sh fib                      # one program
 ```
 
 | Command | Behavior | State |

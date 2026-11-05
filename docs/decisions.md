@@ -34,6 +34,7 @@ Add new entries at the end of the list. To reverse a decision, add a new entry t
 | 26 | 2026-11-05 | Named arguments keep parameter order, defaults come last, and only a parameter with a default can be named | Evaluation order is then the order on the page, with no hidden reordering. Swift has the same order rule. One form for each call. |
 | 27 | 2026-11-05 | A task reads a top-level `let` only if its value is a literal | Top-level statements run in order, so a task called earlier could read an uninitialized value. That would break a guarantee in `security.md`. |
 | 28 | 2026-11-05 | A trap message holds its source position, and each site's text is static data | One runtime entry point, and no cost on the hot path. Research favored a shared cold path. A stack trace comes later. |
+| 29 | 2026-11-05 | Accept the M2 exit with `fib(40)` at 2.02x to 2.09x of Rust release. The 2x target in `vision.md` stays, and M4 judges it on the benchmark suite | Owner's choice. Evidence is in `research.md`: Rust itself pays 1.56x to 1.92x for the same checks, and Lucid is 1.20x to 1.26x of checked Rust on `fib`. This accepts one exit, not a lower target. `collatz` at 2.47x of checked Rust stays an M4 item. |
 
 ## Open questions
 
@@ -44,7 +45,6 @@ Decide each one by the milestone shown.
 | How are generic arguments that are not expressions written? `f[int](x)` parses as an index, but `f[int?](x)` is a syntax error. | Parse index contents as a type when an expression fails. | M3 |
 | Is `T?` inside a map a problem? `map[text, int?].get` flattens to `int?`, which loses "key missing" versus "value none". | Accept, and offer `.has(key)`. | M3 |
 | Should `change` receivers be marked at dot calls? | No marker, and require `var`. | M3 |
-| `fib(40)` is 2.06x of Rust release, over the M2 exit of 2x, and 1.23x of Rust with overflow checks. Accept the M2 exit, or measure the target against checked Rust? | Owner decides. M3 waits for this. | M2 |
 | Can a task read a top-level `let` that is not a literal? It needs a defined initialization order. | No: keep decision 27. | M5 |
 | Add an LLVM backend for release builds? | Only if benchmarks demand it. | M4 |
 | Literal types such as `"open" or "closed"` | Leave out of version 1. | M5 |

@@ -21,7 +21,7 @@ Build a thin end-to-end path first. Depth comes later.
 
 **Exit:** `lucid run` prints `Hello, world!`. All files in `examples/` parse, even though they do not yet run.
 
-## M2: Core language (exit awaits owner decision)
+## M2: Core language (done)
 
 - [x] `int`, `float`, `bool`, arithmetic with overflow traps
 - [x] `let`, `var`, `if`, `while`, `for` over ranges
@@ -31,7 +31,7 @@ Build a thin end-to-end path first. Depth comes later.
 
 **Exit:** FizzBuzz and recursive Fibonacci run. `fib(40)` is within 2x of Rust release.
 
-**State:** both programs run. `fib(40)` measured 2.06x, so the speed exit is missed. See `docs/research.md` and the open question in `docs/decisions.md`.
+**Result:** both programs run. `fib(40)` measured 2.02x to 2.09x, and the owner accepted this exit in decision 29.
 
 ## M3: Data
 
@@ -51,6 +51,7 @@ Build a thin end-to-end path first. Depth comes later.
 - [ ] Last-use moves
 - [ ] Borrow elision of count operations
 - [ ] Reuse analysis, if measurements justify it
+- [ ] Shifts for division and remainder by a constant power of two
 - [ ] `lucid check --costs`
 - [ ] Benchmark suite: n-body, binary trees, JSON parse, hash map, string building
 

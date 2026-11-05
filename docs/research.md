@@ -16,7 +16,7 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | Mutable value semantics | Supported as research, little production proof | Snippet | Prototype at M3 |
 | Exclusivity checks | Supported, static checks alone are not enough | Snippet | Rule added: no top-level `var` in tasks |
 | Cranelift for speed | Partly supported. 2x target is at risk | Read | Keep LLVM option open |
-| Overflow traps in release | Measured: about 17% on `fib`, about 80% on a pure arithmetic loop | Read | Keep. Revisit with M4 benchmarks |
+| Overflow traps in release | Measured: 1.17x to 1.78x in Lucid, 1.56x to 1.92x in Rust | Read | Keep. Revisit with M4 benchmarks |
 | Permissions | Supported, but first design had holes | Snippet | `security.md` fixed |
 | Agent-friendliness | Weak. Biggest gap | Snippet | Test with agents from M3 |
 | Indentation syntax helps agents | No evidence | None | Owner preference. Measure |
@@ -89,7 +89,7 @@ Level: **Read**.
 
 **For Lucid:** Cranelift is a sound choice for M1 to M4. The "within 2x of Rust" target has no margin on bad workloads. If M4 misses it, an LLVM release backend is the expected fix. Structured MIR keeps that open.
 
-Sources: [Cranelift README](https://github.com/bytecodealliance/wasmtime/blob/main/cranelift/README.md), [LWN](https://lwn.net/Articles/964735).
+Sources: [Cranelift README](https://github.com/bytecodealliance/wasmtime/blob/main/cranelift/README.md), [LWN](https://lwn.net/Articles/964735), [Rust RFC 560](https://rust-lang.github.io/rfcs/0560-integer-overflow.html).
 
 ### Integer overflow traps
 
@@ -101,22 +101,29 @@ Level: **Snippet**.
 
 **For Lucid:** expect a real cost. Keep traps on, because safety ranks first. Lucid may pay less than LLVM languages, since Cranelift does fewer loop optimizations, but that is a guess to measure at M2. Trap sites should share one cold reporting path, to avoid the diagnostic cost Luu saw.
 
-Sources: [Regehr](https://blog.regehr.org/archives/1384), [Luu](https://danluu.com/integer-overflow/).
+Sources: [Regehr](https://blog.regehr.org/archives/1384), [Luu](https://danluu.com/integer-overflow/). Regehr's figures and cause were read in full for decision 29. Luu's update says the register allocation problem is gone from clang 3.8 and gcc 5.
 
 ### First Lucid benchmarks (M2)
 
-Level: **Read** (own measurement). Best wall-clock times on the development machine, 2026-11-05, repeated by hand for `fib`. Each row of `sh benchmarks/run.sh` is a best of 5, and runs vary by about 10%. Lucid includes JIT compile time. The Rust programs are `rustc -O`, so they have no overflow checks.
+Level: **Read** (own measurement). `sh benchmarks/run.sh`, 2026-11-05, on the development machine: 15 paired rounds, so drift hits every build alike. Lucid includes JIT compile time. Rust is `rustc -O`, and "Rust checked" adds `-C overflow-checks=on`.
 
-| Program | Rust | Rust with overflow checks | Lucid | Lucid, no overflow checks |
-| --- | --- | --- | --- | --- |
-| `fib(40)` | 215 ms | 363 ms | 445 ms | 380 ms |
-| `collatz` | 335 ms | not run | 1588 ms | 1563 ms |
-| `sum` | folded away | not run | 1019 ms | 562 ms |
+| Program | Rust | Rust checked | Lucid | Lucid unchecked | Lucid / Rust | Lucid / Rust checked |
+| --- | --- | --- | --- | --- | --- | --- |
+| `fib(40)`, best ms | 222 | 366 | 463 | 396 | 2.09 | 1.26 |
+| `fib(40)`, median ms | 259 | 434 | 523 | 475 | 2.02 | 1.20 |
+| `collatz`, best ms | 335 | 642 | 1588 | 1767 | 4.74 | 2.47 |
+| `collatz`, median ms | 352 | 656 | 1742 | 1909 | 4.95 | 2.65 |
+| `sum`, best ms | 622 | 970 | 1045 | 588 | 1.68 | 1.08 |
+| `sum`, median ms | 737 | 1122 | 1229 | 652 | 1.67 | 1.10 |
 
-- `fib(40)` is 2.06x of Rust release in paired best-of-15 runs, which misses the M2 exit of 2x. Against Rust with the same safety, overflow checks on, it is 1.23x. Without overflow checks, Lucid is 1.77x.
-- Other calling conventions did not help: `SystemV`, `Tail`, and `Fast` all stayed at 457 to 473 ms. The generated code has no obvious waste. Each check is `seto`, `test`, and `jnz`, because Cranelift has no signed overflow branch.
-- `sum` is the worst case by design, with only checked arithmetic in a loop. Checks almost double its time.
-- `collatz` is about 4.7x of Rust. Overflow checks are not the cause. Lucid runs a real division for `% 2` and `// 2`, where LLVM uses shifts. Cranelift does not do this, and it is an M4 target.
+Limits: three small programs, one machine, and spread between runs of about 10% to 20%. Treat small differences as noise. In `collatz`, Lucid without checks measured slower than with them, and this is not explained.
+
+Findings:
+
+- **LLVM pays too.** Overflow checks cost Rust 1.56x to 1.92x on these programs. Lucid pays 1.17x on `fib` and 1.78x on `sum`. Regehr states that "most of the slowdown comes from integer overflow checks interfering with loop optimizations", and `fib` shows that effect: optimized Rust has one recursive call site in `fib`, because LLVM turns the other into a loop. With checks it keeps both. Rust release therefore sets a target that a checked language cannot reach through this route.
+- **`collatz` is a division gap.** Rust with `black_box` on the divisor, so that it must divide, took 2044 ms best and 2269 ms median, and 2266 ms and 2365 ms with checks. Lucid took 1567 ms and 1861 ms in the same rounds. So Rust's lead here comes from turning `% 2` and `// 2` into shifts. Lucid can do the same, see M4.
+- **The target was tight before overflow checks.** The Cranelift README puts generated code "~14% slower than WAVM (LLVM)", from a 2020 WebAssembly paper. Regehr reports 11.8% for checks on SPEC CINT 2006, with HMMER at about 40%. Rust RFC 560 keeps checks out of optimized builds so that "final code will not pay a performance penalty", and gives no measurement.
+- **Calling conventions did not help.** `SystemV`, `Tail`, and `Fast` stayed at 457 to 473 ms on `fib`. Each check is `seto`, `test`, and `jnz`, because Cranelift has no signed overflow branch.
 - `lucid run` of hello world took 6.7 ms, against the 100 ms target.
 
 ### WebAssembly stack switching
