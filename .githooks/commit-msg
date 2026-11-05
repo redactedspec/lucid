@@ -1,0 +1,31 @@
+#!/bin/sh
+# Enforces the Lucid commit rules. Test: sh .githooks/test-commit-msg.sh
+msg=$(grep -v '^#' "$1")
+subject=$(printf '%s\n' "$msg" | sed -n 1p)
+fail=0
+
+err() {
+    echo "commit-msg: $1" >&2
+    fail=1
+}
+
+types='feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert'
+printf '%s\n' "$subject" | grep -Eq "^($types)(\([a-z][a-z0-9-]*\))?!?: [a-z]" ||
+    err "subject must be: <type>(<scope>)!: lowercase description"
+
+[ "${#subject}" -le 50 ] || err "subject is ${#subject} characters, limit 50"
+
+case "$subject" in
+    *.) err "subject must not end with a period" ;;
+esac
+
+line2=$(printf '%s\n' "$msg" | sed -n 2p)
+[ -z "$line2" ] || err "second line must be blank"
+
+printf '%s\n' "$msg" | awk 'length($0) > 72 { found = 1 } END { exit !found }' &&
+    err "body lines must be at most 72 characters"
+
+printf '%s\n' "$msg" | grep -Eiq '^(co-authored-by|claude-session):|generated with' &&
+    err "attribution lines are not allowed"
+
+exit "$fail"
