@@ -21,7 +21,7 @@ Build a thin end-to-end path first. Depth comes later.
 
 **Exit:** `lucid run` prints `Hello, world!`. All files in `examples/` parse, even though they do not yet run.
 
-## M2: Core language (done)
+## M2: Core language (exit awaits owner decision)
 
 - [x] `int`, `float`, `bool`, arithmetic with overflow traps
 - [x] `let`, `var`, `if`, `while`, `for` over ranges
@@ -30,6 +30,8 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] First benchmarks, with and without overflow checks
 
 **Exit:** FizzBuzz and recursive Fibonacci run. `fib(40)` is within 2x of Rust release.
+
+**State:** both programs run. `fib(40)` measured 2.06x, so the speed exit is missed. See `docs/research.md` and the open question in `docs/decisions.md`.
 
 ## M3: Data
 

@@ -45,9 +45,23 @@ pub struct Task {
 
 pub enum Stmt {
     Set(Local, Expr),
-    If { condition: Expr, then: Vec<Stmt>, otherwise: Vec<Stmt> },
-    While { condition: Expr, body: Vec<Stmt> },
-    For { local: Local, start: Expr, end: Expr, inclusive: bool, body: Vec<Stmt> },
+    /// Branches stay in one flat list, so an `else if` chain of any length
+    /// costs no recursion. MAX_DEPTH does not limit its length.
+    If {
+        branches: Vec<(Expr, Vec<Stmt>)>,
+        otherwise: Vec<Stmt>,
+    },
+    While {
+        condition: Expr,
+        body: Vec<Stmt>,
+    },
+    For {
+        local: Local,
+        start: Expr,
+        end: Expr,
+        inclusive: bool,
+        body: Vec<Stmt>,
+    },
     Return(Expr),
     Break,
     Continue,

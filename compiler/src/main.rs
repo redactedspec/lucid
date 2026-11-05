@@ -48,7 +48,7 @@ fn cli(args: &[String]) -> ExitCode {
         let (program, errors) = check::check(file);
         diags = errors;
         if run && diags.is_empty() {
-            native::run(&program, path, &src, STACK_BYTES);
+            diags = native::run(&program, path, &src, STACK_BYTES).err().unwrap_or_default();
         } else if !run {
             // `check` reports errors in the program. An unbuilt feature is not one.
             diags.retain(|d| d.code != "E0901");

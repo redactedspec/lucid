@@ -31,10 +31,17 @@ pub extern "C" fn lucid_print_int(value: i64) {
     print_line(value);
 }
 
-/// Debug format is the shortest text that reads back as the same float.
+/// Debug format is the shortest text that reads back as the same float. It
+/// writes `1e21`, but a Lucid float literal needs digits around a point.
 #[unsafe(no_mangle)]
 pub extern "C" fn lucid_print_float(value: f64) {
-    print_line(format_args!("{value:?}"));
+    let text = format!("{value:?}");
+    match text.split_once('e') {
+        Some((digits, exponent)) if !digits.contains('.') => {
+            print_line(format_args!("{digits}.0e{exponent}"));
+        }
+        _ => print_line(text),
+    }
 }
 
 #[unsafe(no_mangle)]

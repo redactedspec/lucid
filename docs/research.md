@@ -16,7 +16,7 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | Mutable value semantics | Supported as research, little production proof | Snippet | Prototype at M3 |
 | Exclusivity checks | Supported, static checks alone are not enough | Snippet | Rule added: no top-level `var` in tasks |
 | Cranelift for speed | Partly supported. 2x target is at risk | Read | Keep LLVM option open |
-| Overflow traps in release | Measured: 2% to 10% on `fib`, about 95% on a pure arithmetic loop | Read | Keep. Revisit with M4 benchmarks |
+| Overflow traps in release | Measured: about 17% on `fib`, about 80% on a pure arithmetic loop | Read | Keep. Revisit with M4 benchmarks |
 | Permissions | Supported, but first design had holes | Snippet | `security.md` fixed |
 | Agent-friendliness | Weak. Biggest gap | Snippet | Test with agents from M3 |
 | Indentation syntax helps agents | No evidence | None | Owner preference. Measure |
@@ -105,17 +105,18 @@ Sources: [Regehr](https://blog.regehr.org/archives/1384), [Luu](https://danluu.c
 
 ### First Lucid benchmarks (M2)
 
-Level: **Read** (own measurement). `sh benchmarks/run.sh`, best of 5 wall-clock runs, 2026-11-05, on the development machine. Lucid includes JIT compile time. The Rust programs are `rustc -O`, so they have no overflow checks.
+Level: **Read** (own measurement). Best wall-clock times on the development machine, 2026-11-05, repeated by hand for `fib`. Each row of `sh benchmarks/run.sh` is a best of 5, and runs vary by about 10%. Lucid includes JIT compile time. The Rust programs are `rustc -O`, so they have no overflow checks.
 
-| Program | Rust | Lucid | Lucid, no overflow checks |
-| --- | --- | --- | --- |
-| `fib(40)` | 234 to 265 ms | 443 to 465 ms | 411 to 431 ms |
-| `collatz` | 336 to 341 ms | 1568 to 1702 ms | 1489 to 1640 ms |
-| `sum` | folded away | 1097 ms | 563 ms |
+| Program | Rust | Rust with overflow checks | Lucid | Lucid, no overflow checks |
+| --- | --- | --- | --- | --- |
+| `fib(40)` | 215 ms | 363 ms | 445 ms | 380 ms |
+| `collatz` | 335 ms | not run | 1588 ms | 1563 ms |
+| `sum` | folded away | not run | 1019 ms | 562 ms |
 
-- `fib(40)` is 1.75x to 1.9x of Rust, so the M2 exit passes, with little margin. Every call also pays a stack check.
+- `fib(40)` is 2.06x of Rust release in paired best-of-15 runs, which misses the M2 exit of 2x. Against Rust with the same safety, overflow checks on, it is 1.23x. Without overflow checks, Lucid is 1.77x.
+- Other calling conventions did not help: `SystemV`, `Tail`, and `Fast` all stayed at 457 to 473 ms. The generated code has no obvious waste. Each check is `seto`, `test`, and `jnz`, because Cranelift has no signed overflow branch.
 - `sum` is the worst case by design, with only checked arithmetic in a loop. Checks almost double its time.
-- `collatz` is 4.6x to 5x of Rust. Overflow checks are not the cause, since removing them changes little and the runs overlap. Lucid runs a real division for `% 2` and `// 2`, and LLVM uses shifts. Cranelift does not do this, and it is an M4 target.
+- `collatz` is about 4.7x of Rust. Overflow checks are not the cause. Lucid runs a real division for `% 2` and `// 2`, where LLVM uses shifts. Cranelift does not do this, and it is an M4 target.
 - `lucid run` of hello world took 6.7 ms, against the 100 ms target.
 
 ### WebAssembly stack switching

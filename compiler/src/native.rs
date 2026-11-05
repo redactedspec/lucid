@@ -1,39 +1,50 @@
 //! Cranelift backend. Lowers MIR to machine code, and runs it in this process.
 
 use crate::ast::BinaryOp;
-use crate::diag::{Lines, Span};
+use crate::diag::{Diagnostic, Lines, Span};
 use crate::mir::{Expr, ExprKind, Local, Program, Stmt, Task, Ty};
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
-    AbiParam, Block, InstBuilder, Signature, TrapCode, Type, Value, types,
+    AbiParam, Block, FuncRef, GlobalValue, InstBuilder, Signature, TrapCode, Type, Value, types,
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{DataDescription, FuncId, Linkage, Module, default_libcall_names};
+use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module, default_libcall_names};
+use std::collections::HashMap;
 
 const CODEGEN: &str = "code generation failed";
 
 /// False only in the benchmark build. See "Commands" in docs/compiler.md.
 const CHECK_OVERFLOW: bool = !cfg!(feature = "bench-unchecked");
 
-/// Stack kept free below the limit, for runtime calls and for one large frame.
+/// Stack kept free below the limit, for runtime calls and for one task's frame.
 const STACK_MARGIN: usize = 1024 * 1024;
+
+/// The stack check runs after the prologue, so a frame must fit in the margin.
+/// A value takes at most 8 bytes of frame. Half the margin stays spare.
+const MAX_VALUES: usize = STACK_MARGIN / 16;
 
 /// Marks the end of paths that cannot continue, such as after `lucid_trap`.
 const UNREACHABLE: TrapCode = TrapCode::unwrap_user(1);
 
 /// Compiles the program and runs it on this thread, whose stack is
 /// `stack_bytes` long. `path` and `src` place trap messages.
-pub fn run(program: &Program, path: &str, src: &str, stack_bytes: usize) {
+pub fn run(
+    program: &Program,
+    path: &str,
+    src: &str,
+    stack_bytes: usize,
+) -> Result<(), Vec<Diagnostic>> {
     let here = 0u8;
     // ponytail: a limit in the code fits one JIT thread. `lucid build` and
     // `spawn` need a per-thread limit that the runtime sets up.
     let stack_limit = (&raw const here) as usize - (stack_bytes - STACK_MARGIN);
-    let entry = compile(program, path, src, stack_limit);
+    let entry = compile(program, path, src, stack_limit)?;
     // SAFETY: `compile` built `entry` with no parameters and a one-byte `none`
     // result. Its module is leaked, so the code stays mapped.
     let entry = unsafe { std::mem::transmute::<*const u8, extern "C" fn() -> u8>(entry) };
     entry();
+    Ok(())
 }
 
 fn clif(ty: Ty) -> Type {
@@ -61,7 +72,12 @@ fn signature_of(module: &JITModule, task: &Task) -> Signature {
 }
 
 /// Panics on a failure: valid input reaching here makes that a compiler bug.
-fn compile(program: &Program, path: &str, src: &str, stack_limit: usize) -> *const u8 {
+fn compile(
+    program: &Program,
+    path: &str,
+    src: &str,
+    stack_limit: usize,
+) -> Result<*const u8, Vec<Diagnostic>> {
     let flags = [
         ("opt_level", "speed"),
         // Windows commits stack one page at a time, so large frames must probe.
@@ -100,6 +116,7 @@ fn compile(program: &Program, path: &str, src: &str, stack_limit: usize) -> *con
     let main = module.declare_anonymous_function(&signature).expect(CODEGEN);
 
     let lines = Lines::new(src);
+    let mut diags = Vec::new();
     let mut context = module.make_context();
     let mut builder_context = FunctionBuilderContext::new();
     let tasks = program.tasks.iter().zip(&ids).map(|(task, id)| (task, *id));
@@ -107,18 +124,27 @@ fn compile(program: &Program, path: &str, src: &str, stack_limit: usize) -> *con
         context.func.signature = signature_of(&module, task);
         let body = FunctionBuilder::new(&mut context.func, &mut builder_context);
         let (module, runtime, ids, lines) = (&mut module, &runtime, &ids, &lines);
-        let vars = Vec::new();
-        let loops = Vec::new();
-        Lower { module, body, pointer, runtime, ids, vars, loops, path, lines }
-            .task(task, stack_limit);
-        module.define_function(id, &mut context).expect(CODEGEN);
+        let data_id = module.declare_anonymous_data(false, false).expect(CODEGEN);
+        let data = module.declare_data_in_func(data_id, body.func);
+        let (vars, loops, funcs, text) = (Vec::new(), Vec::new(), HashMap::new(), Vec::new());
+        Lower { module, body, pointer, runtime, ids, vars, loops, funcs, data, text, path, lines }
+            .task(task, data_id, stack_limit);
+        if id != main && context.func.dfg.num_values() > MAX_VALUES {
+            let note = "split it into smaller tasks";
+            diags.push(Diagnostic::new("E0902", "this task is too large", task.span).note(note));
+        } else {
+            module.define_function(id, &mut context).expect(CODEGEN);
+        }
         module.clear_context(&mut context);
+    }
+    if !diags.is_empty() {
+        return Err(diags);
     }
     module.finalize_definitions().expect(CODEGEN);
     let entry = module.get_finalized_function(main);
     // Leaked on purpose: `entry` points into memory that the module owns.
     std::mem::forget(module);
-    entry
+    Ok(entry)
 }
 
 struct Lower<'a, 'b> {
@@ -130,12 +156,16 @@ struct Lower<'a, 'b> {
     vars: Vec<Variable>,
     /// The `continue` and `break` targets of the open loops.
     loops: Vec<(Block, Block)>,
+    funcs: HashMap<FuncId, FuncRef>,
+    /// All static text of this task, in one object: programs have many trap sites.
+    data: GlobalValue,
+    text: Vec<u8>,
     path: &'a str,
     lines: &'a Lines<'a>,
 }
 
 impl Lower<'_, '_> {
-    fn task(mut self, task: &Task, stack_limit: usize) {
+    fn task(mut self, task: &Task, data_id: DataId, stack_limit: usize) {
         let entry = self.body.create_block();
         self.body.append_block_params_for_function_params(entry);
         self.body.switch_to_block(entry);
@@ -160,9 +190,14 @@ impl Lower<'_, '_> {
                 self.body.ins().trap(UNREACHABLE);
             }
         }
-        self.body.seal_all_blocks();
         let target = self.module.target_config();
         self.body.finalize(target);
+
+        // The trailing byte keeps the data non-empty, so its pointer is always valid.
+        self.text.push(0);
+        let mut description = DataDescription::new();
+        description.define(self.text.into_boxed_slice());
+        self.module.define_data(data_id, &description).expect(CODEGEN);
     }
 
     fn none(&mut self) -> Value {
@@ -170,20 +205,23 @@ impl Lower<'_, '_> {
     }
 
     fn call(&mut self, id: FuncId, args: &[Value]) -> Option<Value> {
-        let func = self.module.declare_func_in_func(id, self.body.func);
+        let func = match self.funcs.get(&id) {
+            Some(&func) => func,
+            None => {
+                let func = self.module.declare_func_in_func(id, self.body.func);
+                *self.funcs.entry(id).or_insert(func)
+            }
+        };
         let call = self.body.ins().call(func, args);
         self.body.inst_results(call).first().copied()
     }
 
     /// Returns the address and length of `text`, kept in static data.
     fn text(&mut self, text: &str) -> [Value; 2] {
-        let data = self.module.declare_anonymous_data(false, false).expect(CODEGEN);
-        let mut description = DataDescription::new();
-        // The trailing byte keeps the data non-empty, so its pointer is always valid.
-        description.define([text.as_bytes(), &[0]].concat().into_boxed_slice());
-        self.module.define_data(data, &description).expect(CODEGEN);
-        let data = self.module.declare_data_in_func(data, self.body.func);
-        let address = self.body.ins().symbol_value(self.pointer, data);
+        let offset = self.text.len() as i64;
+        self.text.extend_from_slice(text.as_bytes());
+        let base = self.body.ins().symbol_value(self.pointer, self.data);
+        let address = self.body.ins().iadd_imm_s(base, offset);
         let len = self.body.ins().iconst(types::I64, text.len() as i64);
         [address, len]
     }
@@ -202,6 +240,8 @@ impl Lower<'_, '_> {
         let next = self.body.create_block();
         self.body.set_cold_block(trap);
         self.body.ins().brif(condition, trap, &[], next, &[]);
+        self.body.seal_block(trap);
+        self.body.seal_block(next);
         self.body.switch_to_block(trap);
         self.trap(message, span);
         self.body.switch_to_block(next);
@@ -219,18 +259,25 @@ impl Lower<'_, '_> {
                 let value = self.expr(value);
                 self.body.def_var(self.vars[*local], value);
             }
-            Stmt::If { condition, then, otherwise } => {
-                let condition = self.expr(condition);
-                let then_block = self.body.create_block();
-                let else_block = self.body.create_block();
+            Stmt::If { branches, otherwise } => {
                 let done = self.body.create_block();
-                self.body.ins().brif(condition, then_block, &[], else_block, &[]);
-                for (block, stmts) in [(then_block, then), (else_block, otherwise)] {
-                    self.body.switch_to_block(block);
-                    if !self.stmts(stmts) {
+                for (condition, then) in branches {
+                    let condition = self.expr(condition);
+                    let then_block = self.body.create_block();
+                    let next = self.body.create_block();
+                    self.body.ins().brif(condition, then_block, &[], next, &[]);
+                    self.body.seal_block(then_block);
+                    self.body.seal_block(next);
+                    self.body.switch_to_block(then_block);
+                    if !self.stmts(then) {
                         self.body.ins().jump(done, &[]);
                     }
+                    self.body.switch_to_block(next);
                 }
+                if !self.stmts(otherwise) {
+                    self.body.ins().jump(done, &[]);
+                }
+                self.body.seal_block(done);
                 self.body.switch_to_block(done);
             }
             Stmt::While { condition, body } => {
@@ -241,12 +288,15 @@ impl Lower<'_, '_> {
                 self.body.switch_to_block(head);
                 let condition = self.expr(condition);
                 self.body.ins().brif(condition, inside, &[], done, &[]);
+                self.body.seal_block(inside);
                 self.body.switch_to_block(inside);
                 self.loops.push((head, done));
                 if !self.stmts(body) {
                     self.body.ins().jump(head, &[]);
                 }
                 self.loops.pop();
+                self.body.seal_block(head);
+                self.body.seal_block(done);
                 self.body.switch_to_block(done);
             }
             Stmt::For { local, start, end, inclusive, body } => {
@@ -299,6 +349,7 @@ impl Lower<'_, '_> {
         let cc = if inclusive { IntCC::SignedLessThanOrEqual } else { IntCC::SignedLessThan };
         let enter = self.body.ins().icmp(cc, i, end);
         self.body.ins().brif(enter, inside, &[], done, &[]);
+        self.body.seal_block(inside);
 
         self.body.switch_to_block(inside);
         self.loops.push((step, done));
@@ -306,16 +357,20 @@ impl Lower<'_, '_> {
             self.body.ins().jump(step, &[]);
         }
         self.loops.pop();
+        self.body.seal_block(step);
 
         self.body.switch_to_block(step);
         let i = self.body.use_var(var);
         let last = self.body.ins().icmp(IntCC::Equal, i, end);
         self.body.ins().brif(last, done, &[], next, &[]);
+        self.body.seal_block(next);
 
         self.body.switch_to_block(next);
         let i = self.body.ins().iadd_imm_s(i, 1);
         self.body.def_var(var, i);
         self.body.ins().jump(head, &[]);
+        self.body.seal_block(head);
+        self.body.seal_block(done);
         self.body.switch_to_block(done);
     }
 
@@ -387,11 +442,14 @@ impl Lower<'_, '_> {
         let done = self.body.create_block();
         let result = self.body.append_block_param(done, ty);
         self.body.ins().brif(condition, then_block, &[], else_block, &[]);
+        self.body.seal_block(then_block);
+        self.body.seal_block(else_block);
         for (block, value) in [(then_block, then), (else_block, otherwise)] {
             self.body.switch_to_block(block);
             let value = self.expr(value);
             self.body.ins().jump(done, &[value.into()]);
         }
+        self.body.seal_block(done);
         self.body.switch_to_block(done);
         result
     }

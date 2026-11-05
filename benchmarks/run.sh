@@ -22,13 +22,21 @@ print(round(min(times) * 1000))
 ' "$@"
 }
 
+# `set -e` ignores a failure inside `echo $(...)`, so results go through a name.
+report() {
+    label=$1
+    shift
+    time=$(best "$@")
+    echo "$label $time"
+}
+
 for name in fib collatz; do
     rustc -O --edition 2024 -o "target/bench/$name$exe" "benchmarks/$name.rs"
-    echo "$name rust $(best "target/bench/$name$exe")"
-    echo "$name lucid $(best "target/release/lucid$exe" run "benchmarks/$name.lcd")"
-    echo "$name unchecked $(best "target/bench/lucid-unchecked$exe" run "benchmarks/$name.lcd")"
+    report "$name rust" "target/bench/$name$exe"
+    report "$name lucid" "target/release/lucid$exe" run "benchmarks/$name.lcd"
+    report "$name unchecked" "target/bench/lucid-unchecked$exe" run "benchmarks/$name.lcd"
 done
 
 # Rust folds this loop away, so only the cost of the checks is meaningful.
-echo "sum lucid $(best "target/release/lucid$exe" run benchmarks/sum.lcd)"
-echo "sum unchecked $(best "target/bench/lucid-unchecked$exe" run benchmarks/sum.lcd)"
+report "sum lucid" "target/release/lucid$exe" run benchmarks/sum.lcd
+report "sum unchecked" "target/bench/lucid-unchecked$exe" run benchmarks/sum.lcd

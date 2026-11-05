@@ -65,7 +65,7 @@ A parser error on a line that already has a lexer error is dropped, since it is 
 
 Type checking runs only on a file with no syntax errors. If a file uses a feature that is not built, `lucid run` reports only E0901, because that feature could supply the names and types that other errors depend on. For the same reason, `lucid check` then reports nothing beyond syntax errors.
 
-The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and types, `E09xx` features not built yet. Every code has a golden test in `tests/fail/`.
+The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and types, `E09xx` compiler limits and features not built yet. Every code has a golden test in `tests/fail/`, or a test in `compiler/tests/golden.rs`.
 
 | Code | Meaning |
 | --- | --- |
@@ -98,6 +98,7 @@ The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and 
 | E0311 | `break` or `continue` outside a loop |
 | E0312 | Number does not fit its type |
 | E0901 | Parses, but cannot run at this milestone |
+| E0902 | Task is too large for the stack check: over 65,536 values |
 
 ## Agent onboarding
 

@@ -64,7 +64,7 @@ Arithmetic and comparison need one type on both sides. `==` and `!=` also work o
 
 A number literal must fit its type. `-9223372036854775808` is the lowest `int` literal, because a leading `-` is part of the literal.
 
-`print` takes one value. A `float` prints as the shortest text that reads back as the same value, such as `3.0`, `0.1`, `1e21`, `inf`, or `NaN`. A `none` prints as `none`.
+`print` takes one value. A finite `float` prints as the shortest literal that reads back as the same value, such as `3.0`, `0.1`, or `1.0e21`. The others print as `inf`, `-inf`, and `NaN`. A `none` prints as `none`.
 
 ## Text
 
@@ -262,7 +262,7 @@ match load("app.toml")
 - `x else y` gives `y` in place of the error.
 - An unused error is a compile error.
 
-A **trap** is an unrecoverable bug: out-of-bounds index, overflow, a zero divisor, a failed conversion, stack overflow, a reached `...`, failed `expect`, or a `shared` access conflict. A trap prints its source position and exits with code 101. A stack trace is planned for M5. Traps cannot be caught.
+A **trap** is an unrecoverable bug: out-of-bounds index, overflow, a zero divisor, a failed conversion, stack overflow, a reached `...`, failed `expect`, a `shared` access conflict, or a failed write to stdout. A trap prints its source position and exits with code 101, except that a failed write to stdout has no position. A stack trace is planned for M5. Traps cannot be caught.
 
 ## Generics
 

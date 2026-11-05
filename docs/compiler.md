@@ -52,7 +52,7 @@ benchmarks/        Lucid and Rust versions of each program
 
 `lucid_rt` is small and has a C ABI. Today it provides printing and trap reporting. Allocation, reference counting, text and list primitives, and task scheduling are planned.
 
-A trap site is a cold block that passes `lucid_trap` a message holding its source position. Every task checks the stack pointer on entry. At M2 the limit is a constant in the code, because `lucid run` has one thread with a known stack. `lucid build` and `spawn` need a limit per thread.
+A trap site is a cold block that passes `lucid_trap` a message holding its source position. Every task checks the stack pointer on entry, after its prologue, so its frame must fit in the 1 MiB margin. E0902 rejects a task that might not fit. At M2 the limit is a constant in the code, because `lucid run` has one thread with a known stack. `lucid build` and `spawn` need a limit per thread.
 
 - `lucid run` links it directly, since the JIT runs inside the compiler process.
 - `lucid build` embeds a prebuilt `lucid_rt` static library in the compiler and passes it to the system linker.

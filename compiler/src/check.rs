@@ -33,9 +33,6 @@ pub fn check(file: &ast::File) -> (Program, Vec<Diagnostic>) {
     if diags.iter().any(|d| d.code == "E0901") {
         diags.retain(|d| d.code == "E0901");
     }
-    // A top-level literal is lowered once more for its own statement.
-    diags.sort_by_key(|d| d.span.start);
-    diags.dedup_by_key(|d| (d.code, d.span.start));
     (Program { tasks, main }, diags)
 }
 
@@ -88,7 +85,9 @@ fn is_literal(expr: &ast::Expr) -> bool {
 fn ends(stmts: &[Stmt]) -> bool {
     stmts.iter().any(|stmt| match stmt {
         Stmt::Return(_) | Stmt::Placeholder(_) => true,
-        Stmt::If { then, otherwise, .. } => ends(then) && ends(otherwise),
+        Stmt::If { branches, otherwise } => {
+            branches.iter().all(|(_, then)| ends(then)) && ends(otherwise)
+        }
         _ => false,
     })
 }
@@ -191,7 +190,13 @@ impl<'a> Checker<'a> {
             if let StmtKind::Let { mutable, name, value, .. } = &stmt.kind {
                 let top = match (*mutable, is_literal(value)) {
                     (true, _) => Top::Var,
-                    (false, true) => Top::Literal(self.expr(value)),
+                    (false, true) => {
+                        // Its own statement reports any error, later.
+                        let reported = self.diags.len();
+                        let value = self.expr(value);
+                        self.diags.truncate(reported);
+                        Top::Literal(value)
+                    }
                     (false, false) => Top::Let,
                 };
                 self.top.insert(&name.text, top);
@@ -326,13 +331,12 @@ impl<'a> Checker<'a> {
             }
             StmtKind::Assign { target, op, value } => return self.assign(target, *op, value, span),
             StmtKind::If { branches, otherwise } => {
-                let mut rest = otherwise.as_ref().map_or(Vec::new(), |body| self.block(body));
-                for (condition, then) in branches.iter().rev() {
-                    let condition = self.condition(condition, "`if`");
-                    let then = self.block(then);
-                    rest = vec![Stmt::If { condition, then, otherwise: rest }];
-                }
-                rest.pop()?
+                let branches = branches
+                    .iter()
+                    .map(|(condition, then)| (self.condition(condition, "`if`"), self.block(then)))
+                    .collect();
+                let otherwise = otherwise.as_ref().map_or(Vec::new(), |body| self.block(body));
+                Stmt::If { branches, otherwise }
             }
             StmtKind::While { condition, body } => {
                 let condition = self.condition(condition, "`while`");

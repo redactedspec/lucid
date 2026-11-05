@@ -44,6 +44,7 @@ Decide each one by the milestone shown.
 | How are generic arguments that are not expressions written? `f[int](x)` parses as an index, but `f[int?](x)` is a syntax error. | Parse index contents as a type when an expression fails. | M3 |
 | Is `T?` inside a map a problem? `map[text, int?].get` flattens to `int?`, which loses "key missing" versus "value none". | Accept, and offer `.has(key)`. | M3 |
 | Should `change` receivers be marked at dot calls? | No marker, and require `var`. | M3 |
+| `fib(40)` is 2.06x of Rust release, over the M2 exit of 2x, and 1.23x of Rust with overflow checks. Accept the M2 exit, or measure the target against checked Rust? | Owner decides. M3 waits for this. | M2 |
 | Can a task read a top-level `let` that is not a literal? It needs a defined initialization order. | No: keep decision 27. | M5 |
 | Add an LLVM backend for release builds? | Only if benchmarks demand it. | M4 |
 | Literal types such as `"open" or "closed"` | Leave out of version 1. | M5 |

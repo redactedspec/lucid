@@ -7,3 +7,5 @@ bad_arguments.lcd:10:15: error E0307: `f` has no parameter `d`
 bad_arguments.lcd:11:21: error E0307: `b` is out of parameter order
 bad_arguments.lcd:12:18: error E0307: a positional argument cannot follow a named one
 bad_arguments.lcd:13:21: error E0307: `b` is out of parameter order
+bad_arguments.lcd:18:1: error E0307: `two` is missing argument `x`
+bad_arguments.lcd:18:1: error E0307: `two` is missing argument `y`

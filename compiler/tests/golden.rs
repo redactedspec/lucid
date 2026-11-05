@@ -116,6 +116,18 @@ fn missing_file_is_reported() {
     assert!(text(&output.stderr).starts_with("no_such_file.lcd:1:1: error E0001: cannot read"));
 }
 
+/// Generated, since the program is too long to keep in `tests/fail/`.
+#[test]
+fn huge_task_is_rejected() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let body = "    n += 1\n".repeat(20_000);
+    let source = format!("task f()\n    var n = 0\n{body}\nf()\n");
+    fs::write(dir.join("huge.lcd"), source).expect("cannot write test file");
+    let output = lucid(dir, &["run", "huge.lcd"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(text(&output.stderr).starts_with("huge.lcd:1:1: error E0902:"));
+}
+
 #[test]
 fn bad_usage_exits_2() {
     assert_eq!(lucid(&repo(), &[]).status.code(), Some(2));
@@ -150,7 +162,8 @@ fn closed_output_does_not_crash() {
 /// also be listed in docs/agents.md.
 #[test]
 fn every_error_code_is_tested_and_documented() {
-    let mut tested = String::from("E0001"); // missing_file_is_reported
+    // missing_file_is_reported and huge_task_is_rejected
+    let mut tested = String::from("E0001 E0902");
     for err in files(&repo().join("tests").join("fail"), "err") {
         tested += &text(&fs::read(err).expect("cannot read .err file"));
     }
