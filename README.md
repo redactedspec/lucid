@@ -12,7 +12,7 @@ for person in people
     print greet(person)
 ```
 
-**Status:** early. The lexer and parser cover the full grammar, and `lucid run` runs `print` of plain text. Progress is in [docs/roadmap.md](docs/roadmap.md).
+**Status:** early. The lexer and parser cover the full grammar, and `lucid run` runs `print` of plain text. M1 is done. Progress is in [docs/roadmap.md](docs/roadmap.md).
 
 ## Docs
 

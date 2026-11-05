@@ -6,7 +6,7 @@ Each milestone ends with a runnable result. Do not start one until the last one 
 
 Documents and example programs.
 
-## M1: Hello world
+## M1: Hello world (done)
 
 Build a thin end-to-end path first. Depth comes later.
 
@@ -17,7 +17,7 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] Cranelift JIT backend
 - [x] `print` of text, `lucid run`, `lucid check`
 - [x] Golden test runner
-- [ ] Claude Code setup from "Planned setup" in `docs/claude-code.md`
+- [x] Claude Code setup, see "Project setup" in `docs/claude-code.md`
 
 **Exit:** `lucid run` prints `Hello, world!`. All files in `examples/` parse, even though they do not yet run.
 

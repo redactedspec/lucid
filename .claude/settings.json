@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": ["Bash(cargo:*)"]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          { "type": "command", "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/format-rust.sh\"" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/test-on-stop.sh\"", "timeout": 300 }
+        ]
+      }
+    ]
+  }
+}

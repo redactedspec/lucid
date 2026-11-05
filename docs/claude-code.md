@@ -61,7 +61,7 @@ Claude cannot run built-in commands. It asks when one is needed.
 
 ## What is enforced now
 
-`.githooks/commit-msg` checks every commit for the rules in `AGENTS.md`. It rejects bad types, long subjects, long body lines, and attribution lines. After a fresh clone, turn it on:
+`.githooks/commit-msg` checks every commit for the rules in `AGENTS.md`. It rejects bad types, long subjects, long body lines, and attribution lines. It also rejects a commit that changes `.rs` files under `compiler/` or `runtime/` with no `.md` file, unless the message has a `Docs: none` footer. After a fresh clone, turn it on:
 
 ```sh
 git config core.hooksPath .githooks
@@ -69,19 +69,18 @@ git config core.hooksPath .githooks
 
 Self-check: `sh .githooks/test-commit-msg.sh`.
 
-## Planned setup
+## Project setup
 
-These wait until the code they act on exists. They are tracked in `docs/roadmap.md` under M1.
+Hooks load when a session starts, so a change to them applies from the next session.
 
-| Feature | Plan |
+| Feature | What it does |
 | --- | --- |
-| `Stop` hook | Run `cargo test -q`, and block the end of a turn on failure |
-| `PostToolUse` hook | Run `rustfmt` on edited Rust files |
-| Rust code intelligence plugin | Show type errors after edits, without a compile |
-| `.claude/rules/` | Stage-specific rules, loaded only for matching paths |
+| `Stop` hook | `.claude/hooks/test-on-stop.sh` runs `cargo test -q`, and blocks the end of a turn on failure, once per stop |
+| `PostToolUse` hook | `.claude/hooks/format-rust.sh` runs `rustfmt` on edited Rust files |
+| Rust code intelligence | `rust-analyzer` shows errors after edits. It comes from the owner's setup, not this repository |
+| `.claude/rules/front-end.md` | Rules for the lexer and parser, loaded only for those files |
 | `.claude/agents/spec-reviewer.md` | Read-only reviewer that compares code with `docs/language.md` and `docs/grammar.md` |
-| `permissions.allow` | Allow `cargo` commands |
-| Doc check | Reject commits that change source with no doc change, unless marked as needing none |
+| `permissions.allow` | Allows `cargo` commands |
 
 ## Not useful for Lucid now
 
