@@ -165,6 +165,12 @@ impl Mono<'_> {
         (slot, total)
     }
 
+    /// A hidden local of the task being rewritten.
+    pub fn new_local(&mut self, ty: Ty) -> usize {
+        self.locals.push(ty);
+        self.locals.len() - 1
+    }
+
     /// A value as the wider type `to`.
     fn wrap(&self, value: Expr, to: Ty, span: Span) -> Expr {
         if !matches!(to, Ty::Union(_)) || matches!(value.ty, Ty::Union(_)) {

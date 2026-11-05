@@ -91,3 +91,9 @@ print 0.0 / 0.0 in [0.0 / 0.0]
 print some in [some, nothing]
 print 1 in [some]
 print Point in [Point]
+
+task once() -> text?
+    print "ran"
+    return "x"
+print once()
+print "{once()}"

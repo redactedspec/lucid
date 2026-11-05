@@ -148,12 +148,17 @@ impl Mono<'_> {
         if !value.ty.members().contains(&Ty::Text) {
             return self.shown(value, span);
         }
-        let held = Expr { kind: ExprKind::Field(boxed(value.clone()), 0), ty: Ty::Text, span };
+        let ty = value.ty;
+        let local = self.new_local(ty);
+        let read = || Expr { kind: ExprKind::Local(local), ty, span };
+        let held = Expr { kind: ExprKind::Field(boxed(read()), 0), ty: Ty::Text, span };
         let id = self.types.id(Ty::Text);
-        let is_text =
-            Expr { kind: ExprKind::TagIn(boxed(value.clone()), vec![id]), ty: Ty::Bool, span };
-        let shown = self.shown(value, span);
+        let is_text = ExprKind::TagIn(boxed(read()), vec![id]);
+        let is_text = Expr { kind: is_text, ty: Ty::Bool, span };
+        let shown = self.shown(read(), span);
         let kind = ExprKind::If(boxed(is_text), boxed(held), boxed(shown));
+        let choice = Expr { kind, ty: Ty::Text, span };
+        let kind = ExprKind::Seq(vec![Stmt::Set(local, value)], boxed(choice));
         Expr { kind, ty: Ty::Text, span }
     }
 
