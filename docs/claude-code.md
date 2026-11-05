@@ -13,7 +13,10 @@ How Claude Code is used to build Lucid. Based on the official docs, reviewed 202
 | Before calling work done | `verify-and-stop` |
 | After a non-trivial change | `code-review` (up to `xhigh`), `simplify` |
 | Runtime, `unsafe`, or permission code | `security-review` |
-| End of a milestone | `ponytail-audit`, `ponytail-debt` |
+| After a large diff | `ponytail-review`, to find what to delete |
+| Small review, to save usage | `caveman-review` |
+| Broad search in unfamiliar code | `caveman-explore` |
+| End of a milestone | `ponytail-audit`, `ponytail-debt`, `caveman-stats` |
 | Question needing many sources | Own searches first. `deep-research` starts subagents, so it needs owner approval |
 
 `code-review` at `max` level runs only on request.
