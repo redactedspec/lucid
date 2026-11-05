@@ -85,6 +85,7 @@ struct Runtime {
     text_byte_len: FuncId,
     text_char_at: FuncId,
     text_bytes: FuncId,
+    text_quote: FuncId,
     list_new: FuncId,
     list_push: FuncId,
     list_set: FuncId,
@@ -145,6 +146,7 @@ fn compile(
     builder.symbol("lucid_text_byte_len", lucid_rt::lucid_text_byte_len as *const u8);
     builder.symbol("lucid_text_char_at", lucid_rt::lucid_text_char_at as *const u8);
     builder.symbol("lucid_text_bytes", lucid_rt::lucid_text_bytes as *const u8);
+    builder.symbol("lucid_text_quote", lucid_rt::lucid_text_quote as *const u8);
     builder.symbol("lucid_list_new", lucid_rt::lucid_list_new as *const u8);
     builder.symbol("lucid_list_push", lucid_rt::lucid_list_push as *const u8);
     builder.symbol("lucid_list_set", lucid_rt::lucid_list_set as *const u8);
@@ -196,6 +198,7 @@ fn compile(
         text_byte_len: import("lucid_text_byte_len", &value, &int),
         text_char_at: import("lucid_text_char_at", &[value[0], int[0]], &value),
         text_bytes: import("lucid_text_bytes", &value, &value),
+        text_quote: import("lucid_text_quote", &value, &value),
         list_new: import("lucid_list_new", &[int[0], byte[0]], &value),
         list_push: import("lucid_list_push", &two, &value),
         list_set: import("lucid_list_set", &with_two, &value),
@@ -763,6 +766,10 @@ impl Lower<'_, '_> {
             ExprKind::TextBytes(value) => {
                 let value = self.expr(value);
                 self.call(self.runtime.text_bytes, &[value]).expect("it returns a list")
+            }
+            ExprKind::TextQuote(value) => {
+                let value = self.expr(value);
+                self.call(self.runtime.text_quote, &[value]).expect("it returns a text")
             }
             ExprKind::ListOf(items) => {
                 let Ty::List(item) = expr.ty else { unreachable!("it has a list type") };

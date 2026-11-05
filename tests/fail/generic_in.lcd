@@ -1,0 +1,2 @@
+task has[T](value: T, items: list[T]) -> bool
+    return value in items

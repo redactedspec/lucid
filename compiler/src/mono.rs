@@ -6,6 +6,7 @@
 //! `Wrap`, `View`, `Member`, and `Holds`, and this pass picks the code for each.
 //! No type error can appear here: substitution keeps equal types equal.
 
+use crate::derive::Derived;
 use crate::diag::{Diagnostic, Span};
 use crate::mir::{Expr, ExprKind, Program, Shape, Stmt, Task, Ty, Types, Update, Visit};
 use std::collections::HashMap;
@@ -21,6 +22,7 @@ pub fn run(program: &mut Program) -> Vec<Diagnostic> {
         datas: &program.datas,
         types: &mut program.types,
         instances: HashMap::new(),
+        derived: HashMap::new(),
         done: Vec::new(),
         queue: Vec::new(),
         diags: Vec::new(),
@@ -34,12 +36,18 @@ pub fn run(program: &mut Program) -> Vec<Diagnostic> {
         }
     }
     mono.task(&mut program.main, &[]);
-    while let Some((slot, id, args)) = mono.queue.pop() {
+    while let Some((slot, job)) = mono.queue.pop() {
         if !mono.diags.is_empty() {
             break;
         }
-        let mut task = source[id].clone();
-        mono.task(&mut task, args);
+        let task = match job {
+            Job::Task(id, args) => {
+                let mut task = source[id].clone();
+                mono.task(&mut task, args);
+                task
+            }
+            Job::Derived(kind, ty, span) => mono.derive(kind, ty, span),
+        };
         mono.done[slot] = Some(task);
     }
     let (done, diags) = (mono.done, mono.diags);
@@ -49,14 +57,23 @@ pub fn run(program: &mut Program) -> Vec<Diagnostic> {
     diags
 }
 
-struct Mono<'a> {
-    datas: &'a [Shape],
-    types: &'a mut Types,
+/// A task to build.
+enum Job {
+    /// A source task, and its type arguments.
+    Task(usize, &'static [Ty]),
+    Derived(Derived, Ty, Span),
+}
+
+pub struct Mono<'a> {
+    pub datas: &'a [Shape],
+    pub types: &'a mut Types,
     /// A generic task with its type arguments, and its place in `done`.
     instances: HashMap<(usize, &'static [Ty]), usize>,
+    /// A derived task for a type, and its place in `done`.
+    derived: HashMap<(Derived, Ty), usize>,
     done: Vec<Option<Task>>,
-    /// Its place in `done`, the source task, and its type arguments.
-    queue: Vec<(usize, usize, &'static [Ty])>,
+    /// Tasks still to build, with their places in `done`.
+    queue: Vec<(usize, Job)>,
     diags: Vec<Diagnostic>,
     /// The type arguments of the task being rewritten.
     args: &'static [Ty],
@@ -69,18 +86,35 @@ impl Mono<'_> {
         if let Some(&slot) = self.instances.get(&(id, args)) {
             return slot;
         }
-        let deep = args.iter().any(|ty| ty.depth() > MAX_TYPE_DEPTH);
+        let Some(slot) = self.reserve(args, span) else { return 0 };
+        self.instances.insert((id, args), slot);
+        self.queue.push((slot, Job::Task(id, args)));
+        slot
+    }
+
+    /// The derived task of this kind for a type.
+    pub fn derived(&mut self, kind: Derived, ty: Ty, span: Span) -> usize {
+        if let Some(&slot) = self.derived.get(&(kind, ty)) {
+            return slot;
+        }
+        let Some(slot) = self.reserve(&[ty], span) else { return 0 };
+        self.derived.insert((kind, ty), slot);
+        self.queue.push((slot, Job::Derived(kind, ty, span)));
+        slot
+    }
+
+    /// A place in `done`, or `None` after reporting E0903. Slot 0 then stands
+    /// in, and nothing runs, since the error stops the program.
+    fn reserve(&mut self, types: &[Ty], span: Span) -> Option<usize> {
+        let deep = types.iter().any(|ty| ty.depth() > MAX_TYPE_DEPTH);
         if deep || self.done.len() == MAX_INSTANCES {
             let note = "a generic task or type keeps asking for a larger type of itself";
             let diag = Diagnostic::new("E0903", "too many generic instances", span);
             self.diags.push(diag.note(note));
-            return 0;
+            return None;
         }
-        let slot = self.done.len();
         self.done.push(None);
-        self.instances.insert((id, args), slot);
-        self.queue.push((slot, id, args));
-        slot
+        Some(self.done.len() - 1)
     }
 
     fn task(&mut self, task: &mut Task, args: &'static [Ty]) {
@@ -95,11 +129,11 @@ impl Mono<'_> {
     /// The slot of a field, and how many counted slots its variant has.
     /// Counted fields take the first slots, so that a record needs only their
     /// number to know what it holds.
-    fn layout(&mut self, data: Ty, variant: usize, field: usize) -> (usize, usize) {
+    pub fn layout(&mut self, data: Ty, variant: usize, field: usize) -> (usize, usize) {
         let Ty::Data(_, id, args) = data else { unreachable!("only a `type` or `choice`") };
-        let fields = &self.datas[id].variants[variant];
+        let fields = &self.datas[id].variants[variant].fields;
         let counted: Vec<bool> =
-            fields.iter().map(|&ty| self.types.subst(ty, args).is_counted()).collect();
+            fields.iter().map(|&(_, ty)| self.types.subst(ty, args).is_counted()).collect();
         let before = |want: bool, end: usize| counted[..end].iter().filter(|&&c| c == want).count();
         let total = before(true, counted.len());
         let slot = match counted.get(field) {
@@ -147,6 +181,10 @@ impl Visit for Mono<'_> {
         for stmt in stmts {
             self.stmt_parts(stmt);
             match stmt {
+                Stmt::Print(value) if value.ty.is_compound() => {
+                    let (taken, span) = (value.clone(), value.span);
+                    *value = self.shown_alone(taken, span);
+                }
                 Stmt::Clear(local) if !self.locals[*local].is_counted() => {
                     *stmt = Stmt::Block(Vec::new());
                 }
@@ -196,6 +234,18 @@ impl Visit for Mono<'_> {
                 return;
             }
             ExprKind::Holds(inner, members) => self.holds(*inner, &members, span),
+            ExprKind::ToText(inner) => {
+                *value = self.shown_alone(*inner, span);
+                return;
+            }
+            ExprKind::Binary(op, left, right) if left.ty.is_compound() => {
+                *value = self.compare(op, *left, *right, span);
+                return;
+            }
+            ExprKind::ListHas(item, list) if !item.ty.is_key() => {
+                *value = self.list_has(*item, *list, span);
+                return;
+            }
             ExprKind::Member { value: inner, variant, field } => {
                 let (slot, _) = self.layout(inner.ty, variant, field);
                 ExprKind::Field(inner, slot)

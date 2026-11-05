@@ -38,4 +38,3 @@ collection_types.lcd:39:15: error E0303: an empty list does not fit `int`
 collection_types.lcd:40:21: error E0303: an empty map does not fit `list[int]`
 collection_types.lcd:41:1: error E0301: name `undefined_name` is not defined
 collection_types.lcd:42:1: error E0301: name `undefined_task` is not defined
-collection_types.lcd:43:16: error E0303: `in` on a list cannot compare `float`

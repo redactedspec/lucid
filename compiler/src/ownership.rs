@@ -28,6 +28,7 @@ impl Visit for Owners<'_> {
             value.kind,
             ExprKind::Text(_)
                 | ExprKind::ToText(_)
+                | ExprKind::TextQuote(_)
                 | ExprKind::Join(_)
                 | ExprKind::Call(..)
                 | ExprKind::TextSlice(..)

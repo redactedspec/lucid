@@ -101,8 +101,8 @@ impl Ty {
         }
     }
 
-    /// True for a value made of other values. Comparing, showing, and hashing
-    /// one waits for derived traits.
+    /// True for a value made of other values, whose comparing and showing are
+    /// derived tasks. Hashing one waits for the derived `Hash`.
     pub fn is_compound(self) -> bool {
         self.is_collection() || matches!(self, Ty::Data(..) | Ty::Union(_))
     }
@@ -231,7 +231,13 @@ impl Types {
 
 /// The shape of a `type` or `choice`. Field types use its own parameters.
 pub struct Shape {
-    pub variants: Vec<Vec<Ty>>,
+    pub variants: Vec<ShapeVariant>,
+}
+
+/// A `type` has one, with its own name.
+pub struct ShapeVariant {
+    pub name: String,
+    pub fields: Vec<(String, Ty)>,
 }
 
 /// An index into `Task::locals`. Parameters come first.
@@ -366,6 +372,8 @@ pub enum ExprKind {
     ToText(Box<Expr>),
     /// A new text from these text values, in order.
     Join(Vec<Expr>),
+    /// A new text: this text as a literal, with quotes and escapes.
+    TextQuote(Box<Expr>),
     /// The number of Unicode characters.
     TextLen(Box<Expr>),
     TextIsEmpty(Box<Expr>),
@@ -501,6 +509,7 @@ pub trait Visit {
             | ExprKind::ToFloat(inner)
             | ExprKind::ToInt(inner)
             | ExprKind::ToText(inner)
+            | ExprKind::TextQuote(inner)
             | ExprKind::TextLen(inner)
             | ExprKind::TextIsEmpty(inner)
             | ExprKind::TextByteLen(inner)

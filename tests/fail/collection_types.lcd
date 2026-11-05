@@ -40,4 +40,3 @@ let ab: int = []
 let ac: list[int] = {}
 undefined_name = []
 undefined_task([])
-let p = 1.5 in [1.5]

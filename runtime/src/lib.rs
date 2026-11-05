@@ -451,6 +451,33 @@ pub unsafe extern "C" fn lucid_text_char_at(text: *const Text, offset: i64) -> *
 
 /// The bytes of a text, one to a slot.
 ///
+/// A new text: `text` as a literal, which reads back as the same value.
+///
+/// # Safety
+///
+/// `text` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_quote(text: *const Text) -> *mut Text {
+    // SAFETY: the caller guarantees a live text, whose bytes are valid UTF-8.
+    let source = unsafe { std::str::from_utf8_unchecked(bytes(text)) };
+    let mut out = String::with_capacity(source.len() + 2);
+    out.push('"');
+    for character in source.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            '{' => out.push_str("{{"),
+            '}' => out.push_str("}}"),
+            other => out.push(other),
+        }
+    }
+    out.push('"');
+    text_from(out.as_bytes())
+}
+
 /// # Safety
 ///
 /// `text` must point to a live text.

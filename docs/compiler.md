@@ -4,7 +4,7 @@ The compiler is written in Rust until M9, when its front end moves to Lucid (dec
 
 ## Status
 
-M3 is in progress. `lucid run` compiles `int`, `float`, `bool`, `none`, `text`, `list`, `map`, `set`, a basic `byte`, `type`, `choice`, `match`, unions, `is` with narrowing, interpolation, text slices, `let`, `var`, `if`, `while`, `for` over ranges, text, and collections, top-level tasks with recursion and defaults, generic tasks, types, and aliases, and `print`. It reports E0901 for anything else. `check.rs` binds names, checks types, and lowers to MIR in one pass, because with no modules those stages have nothing to do alone. It splits when they arrive. A generic body is checked once, with each parameter as an opaque `Ty::Param`. Flattening means that only the real type arguments show what is a union and what is counted, so `check.rs` records intent as `Wrap`, `View`, `Member`, and `Holds`, and `mono.rs` picks the code for each, starting from every task with no type parameters. `Ty` keeps compound types behind leaked references, so it stays `Copy`. `Ty::Data` holds a name, an index into the checker's table, and type arguments, so a recursive type needs no cycle in `Ty`. A `match` lowers to an `if` chain on a hidden local, and the last arm has no test, since the exhaustiveness check proves what remains. `Ty::Union` holds flat members in a fixed order, so two spellings are equal. Narrowing is a stack of facts in the checker, cut back at the end of each block. An assignment resets entries in place, and a loop first resets each name its body assigns. List, map, and set tasks are built into `check.rs` until generics can express them. `ownership.rs` is the naive stage: it gives each new heap value an owner, and "Counting" in `mir.rs` states the rules that a backend follows.
+M3 is in progress. `lucid run` compiles `int`, `float`, `bool`, `none`, `text`, `list`, `map`, `set`, a basic `byte`, `type`, `choice`, `match`, unions, `is` with narrowing, interpolation, text slices, `let`, `var`, `if`, `while`, `for` over ranges, text, and collections, top-level tasks with recursion and defaults, generic tasks, types, and aliases, and `print`. It reports E0901 for anything else. `check.rs` binds names, checks types, and lowers to MIR in one pass, because with no modules those stages have nothing to do alone. It splits when they arrive. A generic body is checked once, with each parameter as an opaque `Ty::Param`. Flattening means that only the real type arguments show what is a union and what is counted, so `check.rs` records intent as `Wrap`, `View`, `Member`, and `Holds`, and `mono.rs` picks the code for each, starting from every task with no type parameters. `Ty` keeps compound types behind leaked references, so it stays `Copy`. `Ty::Data` holds a name, an index into the checker's table, and type arguments, so a recursive type needs no cycle in `Ty`. A `match` lowers to an `if` chain on a hidden local, and the last arm has no test, since the exhaustiveness check proves what remains. `Ty::Union` holds flat members in a fixed order, so two spellings are equal. Narrowing is a stack of facts in the checker, cut back at the end of each block. An assignment resets entries in place, and a loop first resets each name its body assigns. List, map, and set tasks are built into `check.rs` until generics can express them. `mono.rs` also replaces `==`, `<`, showing, and `in` on a compound value with a call to a task from `derive.rs`. `ownership.rs` is the naive stage: it gives each new heap value an owner, and "Counting" in `mir.rs` states the rules that a backend follows.
 
 ## Pipeline
 
@@ -36,6 +36,7 @@ compiler/          Rust crate `lucid`: the CLI and compiler
         resolve.rs     planned
         check.rs   names, types, lowering to MIR
         mono.rs    one concrete task per use of a generic
+        derive.rs  derived tasks, as MIR for one concrete type
         mir.rs     typed, structured operations
         ownership.rs   owners of new heap values
         native.rs  Cranelift backend
@@ -49,7 +50,7 @@ benchmarks/        Lucid and Rust versions of each program
 
 ## Runtime
 
-`lucid_rt` is small and has a C ABI. Today it provides printing, trap reporting, allocation, reference counting, and text, list, map, and record primitives. Task scheduling is planned.
+`lucid_rt` is small and has a C ABI. Showing and comparing a compound value use no runtime type information: each is a derived task. Today it provides printing, trap reporting, allocation, reference counting, and text, list, map, and record primitives. Task scheduling is planned.
 
 A task with counted locals has one exit block, which releases them, so code size does not grow with returns times locals. Every other task returns directly.
 

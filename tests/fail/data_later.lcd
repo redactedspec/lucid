@@ -5,8 +5,4 @@ type Plain
     a: int
 
 let p = Plain(a: 1)
-print p
-print "{p}"
-print p == p
 let m: map[Plain, int] = {}
-print p in [p]

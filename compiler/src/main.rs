@@ -3,6 +3,7 @@
 #[allow(dead_code)] // Later stages read the tree that the parser builds now.
 mod ast;
 mod check;
+mod derive;
 mod diag;
 mod lexer;
 mod mir;

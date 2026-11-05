@@ -1,0 +1,9 @@
+type Flag
+    on: bool
+
+print Flag(on: true) < Flag(on: false)
+print [true] < [false]
+print {"a": 1} < {"a": 1}
+let a: int? = 1
+print a < a
+print 1 in ["a"]

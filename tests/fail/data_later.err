@@ -1,12 +1,4 @@
 data_later.lcd:1:1: error E0901: `public` parses, but cannot run yet
   note: see docs/roadmap.md for the milestone that adds it
-data_later.lcd:8:7: error E0901: showing `Plain` parses, but cannot run yet
-  note: see docs/roadmap.md for the milestone that adds it
-data_later.lcd:9:9: error E0901: showing `Plain` parses, but cannot run yet
-  note: see docs/roadmap.md for the milestone that adds it
-data_later.lcd:10:7: error E0901: `==` on `Plain` parses, but cannot run yet
-  note: see docs/roadmap.md for the milestone that adds it
-data_later.lcd:11:8: error E0901: `Plain` as a key parses, but cannot run yet
-  note: see docs/roadmap.md for the milestone that adds it
-data_later.lcd:12:12: error E0901: `in` on a list of `Plain` parses, but cannot run yet
+data_later.lcd:8:8: error E0901: `Plain` as a key parses, but cannot run yet
   note: see docs/roadmap.md for the milestone that adds it

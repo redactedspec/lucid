@@ -7,7 +7,9 @@ use crate::ast::{
     self, BinaryOp, ExprKind as Ast, StmtKind, TextPart, TypeBody, TypeKind, UnaryOp,
 };
 use crate::diag::{Diagnostic, Span};
-use crate::mir::{Expr, ExprKind, Local, Program, Shape, Stmt, Task, Ty, Types, Update, inner};
+use crate::mir::{
+    Expr, ExprKind, Local, Program, Shape, ShapeVariant, Stmt, Task, Ty, Types, Update, inner,
+};
 use std::collections::{HashMap, HashSet};
 
 /// Names of the spec's built-in types that this milestone cannot represent.
@@ -94,8 +96,11 @@ struct Data<'a> {
 
 impl Data<'_> {
     fn shape(&self) -> Shape {
-        let fields = |variant: &Variant| variant.fields.iter().map(|field| field.ty).collect();
-        Shape { variants: self.variants.iter().map(fields).collect() }
+        let shape = |variant: &Variant| ShapeVariant {
+            name: variant.name.into(),
+            fields: variant.fields.iter().map(|f| (f.name.into(), f.ty)).collect(),
+        };
+        Shape { variants: self.variants.iter().map(shape).collect() }
     }
 }
 
@@ -607,8 +612,8 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// A collection needs the derived `Hash` trait, which is not built yet. A
-    /// `float` never gets it, since NaN is not equal to itself.
+    /// A compound key needs the derived `Hash` trait, which is not built yet.
+    /// A `float` never gets it, since NaN is not equal to itself.
     fn check_key(&mut self, ty: Ty, span: Span) {
         match ty {
             Ty::Error => {}
@@ -791,9 +796,11 @@ impl<'a> Checker<'a> {
     /// arguments in place.
     fn variants_of(&mut self, ty: Ty) -> Vec<Vec<Ty>> {
         let Ty::Data(_, id, args) = ty else { return Vec::new() };
-        let written: Vec<Vec<Ty>> = self.datas[id].shape().variants;
+        let written = self.datas[id].shape().variants;
         let table = &mut self.table;
-        let subst = |fields: Vec<Ty>| fields.iter().map(|&f| table.subst(f, args)).collect();
+        let subst = |variant: ShapeVariant| {
+            variant.fields.iter().map(|&(_, ty)| table.subst(ty, args)).collect()
+        };
         written.into_iter().map(subst).collect()
     }
 
@@ -2611,16 +2618,31 @@ impl<'a> Checker<'a> {
         self.read(local, span)
     }
 
-    /// Reports a value that `print` and interpolation cannot show yet.
+    /// Reports a value that `print` and interpolation cannot show.
     fn showable(&mut self, value: Expr) -> Expr {
         if let Ty::Param(name, _) = value.ty {
             let message = format!("`{name}` might not be shown here");
             return self.fail("E0303", message, value.span);
         }
-        if value.ty.is_compound() {
-            return self.unsupported(&format!("showing `{}`", value.ty.name()), value.span);
-        }
         value
+    }
+
+    /// True if `<` and the like work on a type: numbers, text, and lists and
+    /// data made of those. `seen` ends the walk on a recursive type.
+    fn ordered(&mut self, ty: Ty, seen: &mut Vec<Ty>) -> bool {
+        match ty {
+            Ty::Int | Ty::Float | Ty::Byte | Ty::Text | Ty::Error => true,
+            Ty::List(item) => self.ordered(*item, seen),
+            Ty::Data(..) => {
+                if seen.contains(&ty) || seen.len() == MAX_ALIASES {
+                    return true;
+                }
+                seen.push(ty);
+                let variants = self.variants_of(ty);
+                variants.iter().flatten().all(|&field| self.ordered(field, seen))
+            }
+            _ => false,
+        }
     }
 
     fn text(&mut self, parts: &'a [TextPart], span: Span) -> Expr {
@@ -2726,14 +2748,11 @@ impl<'a> Checker<'a> {
                 return self.fail("E0303", message, right.span);
             }
         };
-        if list && item.is_compound() {
-            let what = format!("`in` on a list of `{}`", item.name());
-            return self.unsupported(&what, right.span);
-        }
-        if list && !item.is_key() && item != Ty::Error {
-            let message = format!("`in` on a list cannot compare `{}`", item.name());
+        if let Ty::Param(name, _) = item {
+            let message = format!("`in` might not compare `{name}`");
             return self.fail("E0303", message, right.span);
         }
+        let left = self.widen(left, item);
         self.expect(&left, item, "`in`");
         let kind = if list {
             ExprKind::ListHas(left.into(), right.into())
@@ -2790,8 +2809,14 @@ impl<'a> Checker<'a> {
             Ty::Text => equality || order,
             Ty::Byte if equality || order => true,
             Ty::Byte => return self.unsupported("arithmetic on `byte`", span),
-            ty if ty.is_compound() && equality => {
-                return self.unsupported(&format!("`{name}` on `{}`", ty.name()), span);
+            ty if ty.is_compound() && equality => true,
+            ty if ty.is_compound() && order => {
+                if !self.ordered(ty, &mut Vec::new()) {
+                    let message = format!("`{name}` cannot order `{}`", ty.name());
+                    let note = "only numbers, text, and lists and types of them have an order";
+                    return self.report(Diagnostic::new("E0303", message, span).note(note));
+                }
+                true
             }
             _ => false,
         };

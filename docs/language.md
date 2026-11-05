@@ -81,7 +81,7 @@ let block = """
 
 Escapes are `\n`, `\t`, `\r`, `\\`, and `\"`. Interpolated expressions may contain text of their own. In `"""` text, the first line break, the common indentation, and a final line holding only the closing quotes are all removed. So `block` above has two lines and no trailing line break.
 
-Interpolated values may be `text`, `int`, `float`, `bool`, or `none`. They read as `print` shows them. Interpolation is the only way to join text, so `+` does not work on `text`.
+Any value can be interpolated, and reads as `print` shows it. Interpolation is the only way to join text, so `+` does not work on `text`.
 
 `==`, `!=`, `<`, `<=`, `>`, and `>=` work on `text`. Order is by Unicode code point.
 
@@ -136,7 +136,7 @@ seen.remove(1)
 
 An index is an `int` from 0, and a negative index traps. A map or set has `int`, `bool`, `byte`, or `text` keys. A `float` cannot be a key, because NaN does not equal itself.
 
-All three have `.len()` and `.is_empty()`. `x in items` and `x not in items` test a list, or the keys of a map or set. A list test is linear, and works for the same types as keys.
+All three have `.len()` and `.is_empty()`. `x in items` and `x not in items` test a list, or the keys of a map or set. A list test is linear, and compares with `==`, so it finds no NaN.
 
 A map or set keeps insertion order. Replacing a value keeps its key's place, and a key that is removed and added again goes last. In a map literal, a repeated key replaces the value before it, and keeps its place.
 
@@ -159,7 +159,9 @@ while top is int
 
 `x[a..b]` on a list is a new list with the elements from `a` up to but not including `b`, and `x[a..=b]` means `x[a..b + 1]`. Both ends are required, and a range out of bounds traps, by the same rules as text. A slice copies, so it cannot be written to.
 
-Planned: tasks that take a lambda such as `.map`. Printing a collection and `==` on one wait for the derived `Show` and `Equal`. Collections as keys wait for `Hash`.
+`print` shows a list as `[1, 2]`, a map as `{"a": 1}`, and a set as `set([1, 2])`. Text inside a value has quotes and escapes, so what prints reads back as a literal. `==` and `!=` compare two values of one type. Lists compare in order. Maps and sets compare what they hold, whatever its order. `<` and the like work on a list if they work on its elements: the first difference decides, and a shorter list comes first.
+
+Planned: tasks that take a lambda such as `.map`. Collections as keys wait for `Hash`.
 
 ## Control flow
 
@@ -254,7 +256,7 @@ type UserId = int
 
 Types may refer to each other in any order. A type that always holds another value of itself has no finite value, and is error E0315. So `next: Node` needs a list, a union such as `Node?`, or a `choice` with a variant that ends the chain.
 
-Planned: printing a value and `==` on one wait for the derived `Show` and `Equal`. A value as a key waits for `Hash`.
+`print` shows a value as `User(name: "Ada", age: 36)`, in the order the fields are written. `==` and `!=` compare every field. `<` and the like compare fields in that order, and need every field to have an order. A value as a key waits for `Hash`.
 
 ## Methods
 
@@ -310,6 +312,8 @@ On a union, an arm tests what the value holds:
 
 A union takes no literal or variant arm: match the member first. A typed arm on anything but a union is an error.
 
+A variant prints as `Circle(radius: 2.0)` or `Point`. `==` compares variant and fields. In `<` and the like, an earlier variant comes first, and fields decide within a variant.
+
 The subject runs once. An arm may assign the variable it came from, and its names keep the values they bound. As a statement, an arm can be an expression, `print`, `return`, or a block, and its value is dropped. As the value of `let`, `var`, or `return`, each arm is one expression of one type, or a `return`.
 
 ## Union types and optionals
@@ -357,7 +361,7 @@ while node is not none
 
 Only a local name or parameter narrows. A field or a call may not hold the same value when read again, so `if a.b is not none` does not narrow `a.b`. Write `let b = a.b`, then test `b`. The same goes for a top-level `let` read in a task.
 
-Planned: showing a union and `==` on one wait for the derived `Show` and `Equal`. A union as a key waits for `Hash`, and `in` on a list of unions waits with them.
+A union shows what it holds, and text in it has no quotes unless the union is inside another value. `==` on two values of one union type is true if they hold equal values of one type. `x == 1` on an `int?` is an error, since the sides differ in type: test it first. A union has no order. A union as a key waits for `Hash`.
 
 ## Errors
 
@@ -436,7 +440,7 @@ task show_all[T: Describe](items: list[T])
 
 Bounds use static dispatch. `any Describe` is a boxed value with dynamic dispatch, which allows mixed lists.
 
-The compiler derives `Equal`, `Hash`, `Order`, `Show`, `Copy`, and `Json` for a type when all its fields support them. Writing the task by hand overrides the derived version. There are no macros.
+The compiler derives `Equal`, `Hash`, `Order`, `Show`, `Copy`, and `Json` for a type when all its fields support them. Writing the task by hand overrides the derived version. There are no macros. So far `Equal`, `Order`, and `Show` exist, with no bounds or hand-written versions yet, and they follow the rules in "Collections", "Types", and "Choices". In a derived order a NaN compares as neither less nor more, so it counts as a tie.
 
 Operators are defined by the traits `Add`, `Sub`, `Mul`, `Div`, `Equal`, and `Order`. No other operators can be overloaded, and no new operators can be defined.
 

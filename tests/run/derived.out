@@ -1,0 +1,63 @@
+User(name: "Ada", age: 36)
+User(name: "Ada", age: 36)!
+[1, 2, 3]
+["a", "b\n\"{{"]
+[[1], []]
+{"x": 1, "y": 2}
+set([3, 1])
+{}
+set([])
+Circle(radius: 1.5)
+Rect(w: 1.0, h: 2.0)
+Point
+[Point, Circle(radius: 0.5)]
+Link(value: 1, next: Link(value: 2, next: End))
+Pair(left: 1, right: [Pair(left: "x", right: none)])
+Empty(items: [])
+1
+none
+1 none
+hi
+hi
+["hi"]
+[1, none]
+true
+false
+true
+true
+true
+false
+false
+true
+false
+true
+true
+true
+false
+true
+true
+true
+false
+true
+true
+false
+true
+true
+true
+true
+false
+true
+true
+true
+true
+true
+false
+true
+true
+true
+true
+true
+false
+true
+true
+true

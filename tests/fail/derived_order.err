@@ -1,0 +1,9 @@
+derived_order.lcd:4:7: error E0303: `<` cannot order `Flag`
+  note: only numbers, text, and lists and types of them have an order
+derived_order.lcd:5:7: error E0303: `<` cannot order `list[bool]`
+  note: only numbers, text, and lists and types of them have an order
+derived_order.lcd:6:7: error E0303: `<` cannot order `map[text, int]`
+  note: only numbers, text, and lists and types of them have an order
+derived_order.lcd:8:7: error E0303: `<` cannot order `int?`
+  note: only numbers, text, and lists and types of them have an order
+derived_order.lcd:9:7: error E0303: `in` needs `text`, found `int`

@@ -41,7 +41,8 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] `type`, `choice`, `match` with exhaustiveness
 - [x] Unions, `T?`, narrowing, `is`, and `.get`, `.pop`
 - [x] Generics with monomorphization, list slices
-- [ ] Traits, derived traits, showing and comparing collections
+- [x] Derived `Show`, `Equal`, and `Order`, showing and comparing collections
+- [ ] Traits, bounds, hand-written overrides, `Hash` on compound keys
 - [ ] Sized numbers, wrapping math tasks, nested tasks, lambdas, task values, `self` and dot calls
 - [ ] Parameter modes, exclusivity checks, `for change` over lists
 - [x] Naive reference counting, leak-checking debug runtime
