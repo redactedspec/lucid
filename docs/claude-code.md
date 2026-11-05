@@ -51,6 +51,7 @@ Claude cannot run built-in commands. It asks when one is needed.
 
 ## Working rules
 
+- **Decide, then report.** Claude settles design and workflow choices itself, and does not ask the owner to pick. Spending limits under "Plan limits" and owner approval for `deep-research` still hold.
 - **Pass-or-fail checks.** Every task ends with a command that passes or fails. Report the command and its output, not a claim.
 - **Two corrections, then reset.** After two failed corrections, ask the owner to run `/clear`, and restart with a better prompt.
 - **One session per task.** Unrelated tasks raise the cost of each later turn.

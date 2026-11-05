@@ -31,7 +31,7 @@ Docs describe what is true now. Mark planned items as planned, and remove claims
 
 ## Rules
 
-- Claude builds Lucid. The owner directs and decides.
+- Claude builds Lucid and makes its design decisions, on Opus 5.5 at `xhigh`. The owner directs, and can overrule any decision.
 - Back every design decision with research. Cite primary sources in `docs/research.md`, and link the decision entry to them. If evidence is weak or missing, say so, and test it with a benchmark or experiment.
 - Language change: update spec, grammar, examples, and tests in the same change. Add a decision entry when the change is not obvious.
 - Before adding a feature, apply the priority order in `docs/vision.md` and the rules in `docs/agents.md`. A feature that adds a second way to do something needs a strong reason.
