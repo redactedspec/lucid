@@ -53,3 +53,7 @@ print 1.5 != 1.5
 print true == false
 print true != false
 print (0.0 / 0.0) == (0.0 / 0.0)
+
+print 0.0 / 0.0
+print -0.0
+print -1.5.to_int()

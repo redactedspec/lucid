@@ -911,6 +911,11 @@ impl Parser {
 
     fn unary(&mut self) -> Parsed<Expr> {
         let start = self.start();
+        if let Some(kind) = self.negative_literal() {
+            self.advance();
+            self.advance();
+            return Ok(Expr { kind, span: self.since(start) });
+        }
         let op = match self.kind() {
             TokenKind::Sym("-") => UnaryOp::Neg,
             TokenKind::Sym("try") => UnaryOp::Try,
@@ -922,6 +927,19 @@ impl Parser {
         self.advance();
         let inner = self.nested(Self::unary)?;
         Ok(Expr { kind: ExprKind::Unary(op, Box::new(inner)), span: self.since(start) })
+    }
+
+    /// A `-` joins a number with no postfix after it, so that the lowest `int`
+    /// can be written. With a postfix, `-` applies to the postfix result.
+    fn negative_literal(&self) -> Option<ExprKind> {
+        if !self.at("-") || matches!(self.kind_at(2), TokenKind::Sym("(" | "[" | ".")) {
+            return None;
+        }
+        match self.kind_at(1) {
+            TokenKind::Int(lexeme) => Some(ExprKind::Int(format!("-{lexeme}"))),
+            TokenKind::Float(lexeme) => Some(ExprKind::Float(format!("-{lexeme}"))),
+            _ => None,
+        }
     }
 
     fn postfix(&mut self) -> Parsed<Expr> {

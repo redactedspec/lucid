@@ -36,3 +36,6 @@ type_mismatch.lcd:32:12: error E0303: this `return` needs `int`, found `float`
 type_mismatch.lcd:34:12: error E0303: this `return` needs `none`, found `int`
 type_mismatch.lcd:36:5: error E0303: this `return` needs `int`, found `none`
 type_mismatch.lcd:37:12: error E0303: this argument needs `int`, found `bool`
+type_mismatch.lcd:38:7: error E0303: `to_int` does not work on `bool`
+type_mismatch.lcd:39:7: error E0303: `to_int` does not work on `int`
+type_mismatch.lcd:40:7: error E0303: `to_float` does not work on `float`

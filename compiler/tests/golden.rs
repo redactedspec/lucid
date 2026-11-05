@@ -158,6 +158,21 @@ fn closed_output_does_not_crash() {
     assert_eq!(exit_with_closed_pipes(&run, &["run", "hello.lcd"]), Some(101));
 }
 
+#[test]
+fn failed_stdout_write_traps_without_a_position() {
+    let mut child = Command::new(LUCID)
+        .args(["run", "hello.lcd"])
+        .current_dir(repo().join("tests").join("run"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("cannot start lucid");
+    drop(child.stdout.take());
+    let output = child.wait_with_output().expect("cannot wait for lucid");
+    assert_eq!(output.status.code(), Some(101));
+    assert_eq!(text(&output.stderr), "trap: cannot write to stdout\n");
+}
+
 /// AGENTS.md: every compile error needs a stable code and a test. It must
 /// also be listed in docs/agents.md.
 #[test]

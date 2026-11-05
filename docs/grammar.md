@@ -28,7 +28,7 @@ escape   = "\n" | "\t" | "\r" | "\\" | '\"' ;
 
 `letter` is an ASCII letter and `digit` is an ASCII digit. Names are ASCII only. Comments may hold any UTF-8. Text may too, except a NUL character, which the compiler uses internally. Outside text, any other character is an error.
 
-A `FLOAT` needs digits on both sides of the point, so `0..10` lexes as a range. A number directly followed by a letter or `_` is an error, so `1e5` is rejected. Write `1.0e5`.
+A `FLOAT` needs digits on both sides of the point, so `0..10` lexes as a range. A number directly followed by a letter is an error, and so is a number that ends in `_`, so `1e5` and `1_` are rejected. Write `1.0e5`.
 
 A file may start with a byte order mark, which is ignored. `\r\n` counts as one newline, and a multi-line `TEXT` holds `\n` for it.
 
@@ -169,5 +169,6 @@ entry       = expression ":" expression ;
 - **`then` branch:** it uses `logic_or`, not `expression`, so the `else` in `if a then b else c` is never read as a fallback.
 - **`is` target:** it is a single `type_term`, so `or` after it stays boolean: `x is text or y > 3`.
 - **`try` scope:** `try` covers the whole postfix chain. `try read(p).trim()` calls `.trim()` first, on the union, and fails type checking. Write `(try read(p)).trim()`.
+- **Negative numbers:** in `unary`, a `-` before a number with no postfix after it joins the literal, which does not change the value. It lets `-9223372036854775808` fit. Parentheses keep them apart, so `-(1)` negates a literal.
 - **Generic calls:** `f[int](x)` parses as an index followed by a call. The resolver rewrites it to a generic instantiation once it knows `f` is a task.
 - **Lambdas:** recognize with one token of lookahead past `NAME`, or by scanning to the matching `)` and checking for `=>`.

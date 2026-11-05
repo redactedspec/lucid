@@ -260,7 +260,7 @@ impl Lexer<'_> {
             self.take_while(|c| c == '_' || c.is_ascii_alphanumeric());
         }
         let lexeme = self.src[start..self.pos].to_string();
-        if !valid {
+        if !valid || lexeme.ends_with('_') {
             self.error("E0107", format!("malformed number `{lexeme}`"), start);
         }
         let kind = if float { TokenKind::Float(lexeme) } else { TokenKind::Int(lexeme) };

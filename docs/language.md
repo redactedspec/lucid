@@ -62,9 +62,9 @@ Arithmetic and comparison need one type on both sides. `==` and `!=` also work o
 
 `x.to_float()` converts an `int`. `x.to_int()` rounds a `float` toward zero, and traps on NaN or a value outside `int`.
 
-A number literal must fit its type. `-9223372036854775808` is the lowest `int` literal, because a leading `-` is part of the literal.
+A number literal must fit its type, and a `float` literal that is not zero must not round to zero. A `-` directly before a number joins the literal, unless a call, index, or field follows the number. So `-9223372036854775808` is the lowest `int`, and `-1.5.to_int()` negates the result of the call.
 
-`print` takes one value. A finite `float` prints as the shortest literal that reads back as the same value, such as `3.0`, `0.1`, or `1.0e21`. The others print as `inf`, `-inf`, and `NaN`. A `none` prints as `none`.
+`print` takes one value. A finite `float` prints as a valid literal, with the fewest digits that read back as the same value, such as `3.0`, `0.1`, `1000.0`, or `1.0e21`. The others print as `inf`, `-inf`, and `NaN`. A `none` prints as `none`.
 
 ## Text
 

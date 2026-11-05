@@ -35,3 +35,6 @@ task g()
 task h() -> int
     return
 print f(a: true)
+print true.to_int()
+print 1.to_int()
+print 1.5.to_float()

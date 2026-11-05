@@ -31,7 +31,7 @@ pub extern "C" fn lucid_print_int(value: i64) {
     print_line(value);
 }
 
-/// Debug format is the shortest text that reads back as the same float. It
+/// Debug format uses the fewest digits that read back as the same float. It
 /// writes `1e21`, but a Lucid float literal needs digits around a point.
 #[unsafe(no_mangle)]
 pub extern "C" fn lucid_print_float(value: f64) {

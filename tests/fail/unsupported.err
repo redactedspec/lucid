@@ -12,3 +12,9 @@ unsupported.lcd:11:15: error E0901: a `change` or `take` parameter parses, but c
   note: see docs/roadmap.md for the milestone that adds it
 unsupported.lcd:11:18: error E0901: this type parses, but cannot run yet
   note: see docs/roadmap.md for the milestone that adds it
+unsupported.lcd:17:12: error E0901: a task reading a non-literal top-level `let` parses, but cannot run yet
+  note: see docs/roadmap.md for the milestone that adds it
+unsupported.lcd:19:1: error E0901: `public` parses, but cannot run yet
+  note: see docs/roadmap.md for the milestone that adds it
+unsupported.lcd:22:9: error E0901: a text value parses, but cannot run yet
+  note: see docs/roadmap.md for the milestone that adds it

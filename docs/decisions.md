@@ -35,6 +35,7 @@ Add new entries at the end of the list. To reverse a decision, add a new entry t
 | 27 | 2026-11-05 | A task reads a top-level `let` only if its value is a literal | Top-level statements run in order, so a task called earlier could read an uninitialized value. That would break a guarantee in `security.md`. |
 | 28 | 2026-11-05 | A trap message holds its source position, and each site's text is static data | One runtime entry point, and no cost on the hot path. Research favored a shared cold path. A stack trace comes later. |
 | 29 | 2026-11-05 | Accept the M2 exit with `fib(40)` at 2.02x to 2.09x of Rust release. The 2x target in `vision.md` stays, and M4 judges it on the benchmark suite | Owner's choice. Evidence is in `research.md`: Rust itself pays 1.56x to 1.92x for the same checks, and Lucid is 1.20x to 1.26x of checked Rust on `fib`. This accepts one exit, not a lower target. `collatz` at 2.47x of checked Rust stays an M4 item. |
+| 30 | 2026-11-05 | `-` joins a number with no postfix after it, in the parser. A default must be a literal (E0313) | The checker could not tell `-(x)` from `-x`, which let an out-of-range literal through. A literal default has no evaluation order to explain. Judgment calls with no outside evidence. |
 
 ## Open questions
 

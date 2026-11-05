@@ -97,6 +97,7 @@ The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and 
 | E0310 | `return` outside a task |
 | E0311 | `break` or `continue` outside a loop |
 | E0312 | Number does not fit its type |
+| E0313 | Default is not a literal |
 | E0901 | Parses, but cannot run at this milestone |
 | E0902 | Task is too large for the stack check: over 65,536 values |
 

@@ -9,3 +9,8 @@ task f(p: int)
     limit = 3
 
 let limit = 1
+
+task g()
+    return
+
+g = totl

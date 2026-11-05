@@ -39,7 +39,7 @@ Build a thin end-to-end path first. Depth comes later.
 - [ ] `type`, `choice`, `match` with exhaustiveness
 - [ ] Unions, `T?`, narrowing, `is`
 - [ ] Generics with monomorphization, traits, derived traits
-- [ ] Sized numbers, nested tasks, lambdas, task values, `self` and dot calls
+- [ ] Sized numbers, wrapping math tasks, nested tasks, lambdas, task values, `self` and dot calls
 - [ ] Parameter modes and exclusivity checks
 - [ ] Naive reference counting, leak-checking debug runtime
 - [ ] Draft `docs/agent-guide.md`, and run a 10-task agent trial

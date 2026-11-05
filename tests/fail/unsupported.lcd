@@ -10,3 +10,13 @@ type User
 
 task f(change a: list[int])
     return
+
+let d = 1 + 1
+
+task g() -> int
+    return d
+
+public task h()
+    return
+
+missing("x")

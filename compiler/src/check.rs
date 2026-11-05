@@ -74,11 +74,7 @@ fn poisoned(span: Span) -> Expr {
 }
 
 fn is_literal(expr: &ast::Expr) -> bool {
-    match &expr.kind {
-        Ast::Int(_) | Ast::Float(_) | Ast::Bool(_) => true,
-        Ast::Unary(UnaryOp::Neg, value) => matches!(value.kind, Ast::Int(_) | Ast::Float(_)),
-        _ => false,
-    }
+    matches!(expr.kind, Ast::Int(_) | Ast::Float(_) | Ast::Bool(_))
 }
 
 /// True if control never reaches the end of `stmts`.
@@ -177,6 +173,9 @@ impl<'a> Checker<'a> {
                 self.unsupported("`unsafe extern task`", stmt.span);
                 continue;
             }
+            if def.public {
+                self.unsupported("`public`", stmt.span);
+            }
             let name = def.sig.name.text.as_str();
             if self.task_ids.contains_key(name) {
                 self.fail("E0304", format!("`{name}` is already defined"), def.sig.name.span);
@@ -222,7 +221,7 @@ impl<'a> Checker<'a> {
             }
             let default = param.default.as_ref().map(|value| {
                 if !is_literal(value) {
-                    return self.unsupported("a default that is not a literal", value.span);
+                    return self.fail("E0313", "a default must be a literal".into(), value.span);
                 }
                 let value = self.expr(value);
                 self.expect(&value, ty, "this default");
@@ -395,12 +394,18 @@ impl<'a> Checker<'a> {
         let Ast::Name(name) = &target.kind else {
             return self.later("assignment to a field or index", target.span);
         };
+        if self.lookup(name).is_none() && self.task_ids.contains_key(name.as_str()) {
+            self.expr(value);
+            self.fail("E0305", format!("`{name}` cannot change"), target.span);
+            return None;
+        }
         let place = self.name(name, target.span);
         if place.ty == Ty::Error {
             self.expr(value);
             return None;
         }
         let ExprKind::Local(local) = place.kind else {
+            self.expr(value);
             self.fail("E0305", format!("`{name}` cannot change"), target.span);
             return None;
         };
@@ -485,8 +490,9 @@ impl<'a> Checker<'a> {
         self.fail("E0301", format!("name `{name}` is not defined"), span)
     }
 
-    fn int(&mut self, lexeme: &str, negative: bool, span: Span) -> Expr {
-        let digits = lexeme.replace('_', "");
+    fn int(&mut self, lexeme: &str, span: Span) -> Expr {
+        let negative = lexeme.starts_with('-');
+        let digits = lexeme.trim_start_matches('-').replace('_', "");
         let parsed = match digits.get(..2) {
             Some("0x") => u64::from_str_radix(&digits[2..], 16),
             Some("0b") => u64::from_str_radix(&digits[2..], 2),
@@ -503,8 +509,11 @@ impl<'a> Checker<'a> {
     }
 
     fn float(&mut self, lexeme: &str, span: Span) -> Expr {
-        match lexeme.replace('_', "").parse::<f64>() {
-            Ok(value) if value.is_finite() => {
+        let digits = lexeme.replace('_', "");
+        let mantissa = digits.split(['e', 'E']).next().unwrap_or_default();
+        let nonzero = mantissa.contains(|c: char| matches!(c, '1'..='9'));
+        match digits.parse::<f64>() {
+            Ok(value) if value.is_finite() && (value != 0.0 || !nonzero) => {
                 Expr { kind: ExprKind::Float(value), ty: Ty::Float, span }
             }
             _ => self.fail("E0312", format!("`{lexeme}` does not fit in `float`"), span),
@@ -514,7 +523,7 @@ impl<'a> Checker<'a> {
     fn expr(&mut self, expr: &'a ast::Expr) -> Expr {
         let span = expr.span;
         let (kind, ty) = match &expr.kind {
-            Ast::Int(lexeme) => return self.int(lexeme, false, span),
+            Ast::Int(lexeme) => return self.int(lexeme, span),
             Ast::Float(lexeme) => return self.float(lexeme, span),
             Ast::Bool(value) => (ExprKind::Bool(*value), Ty::Bool),
             Ast::None => (ExprKind::None, Ty::None),
@@ -546,10 +555,6 @@ impl<'a> Checker<'a> {
     fn unary(&mut self, op: UnaryOp, value: &'a ast::Expr, span: Span) -> Expr {
         match op {
             UnaryOp::Neg => {
-                // Folded here so that the lowest `int` can be written.
-                if let Ast::Int(lexeme) = &value.kind {
-                    return self.int(lexeme, true, span);
-                }
                 let value = self.expr(value);
                 match value.ty {
                     Ty::Error => poisoned(span),
@@ -657,19 +662,27 @@ impl<'a> Checker<'a> {
                     (Ty::Float, "to_int") => {
                         Expr { kind: ExprKind::ToInt(value.into()), ty: Ty::Int, span }
                     }
+                    (ty, "to_float" | "to_int") => {
+                        let message = format!("`{}` does not work on `{}`", name.text, ty.name());
+                        self.fail("E0303", message, span)
+                    }
                     _ => self.unsupported("this dot call", span),
                 }
             }
             Ast::Name(name) => {
+                if let Some(&id) = self.task_ids.get(name.as_str())
+                    && self.lookup(name).is_none()
+                    && !self.top.contains_key(name.as_str())
+                {
+                    return self.task_call(id, name, args, span);
+                }
+                for arg in args {
+                    self.expr(&arg.value);
+                }
                 if self.lookup(name).is_some() || self.top.contains_key(name.as_str()) {
                     return self.fail("E0308", format!("`{name}` is not a task"), callee.span);
                 }
-                match self.task_ids.get(name.as_str()) {
-                    Some(&id) => self.task_call(id, name, args, span),
-                    None => {
-                        self.fail("E0301", format!("name `{name}` is not defined"), callee.span)
-                    }
-                }
+                self.fail("E0301", format!("name `{name}` is not defined"), callee.span)
             }
             _ => self.unsupported("this call", span),
         }

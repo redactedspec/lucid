@@ -1,3 +1,4 @@
 print totl
 print nothing(1)
 total = 1
+nothing(other)
