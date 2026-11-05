@@ -31,5 +31,6 @@ Read in this order:
 | [roadmap.md](docs/roadmap.md) | Milestones with exit criteria |
 | [decisions.md](docs/decisions.md) | Decision log and open questions |
 | [research.md](docs/research.md) | Evidence behind each decision, and its gaps |
+| [claude-code.md](docs/claude-code.md) | How Claude Code is used to build Lucid |
 
 [examples/](examples/) holds target programs. They become the first compiler tests.

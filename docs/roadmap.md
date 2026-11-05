@@ -17,6 +17,7 @@ Build a thin end-to-end path first. Depth comes later.
 - [ ] Cranelift JIT backend
 - [ ] `print` of text, `lucid run`, `lucid check`
 - [ ] Golden test runner
+- [ ] Claude Code setup from "Planned setup" in `docs/claude-code.md`
 
 **Exit:** `lucid run` prints `Hello, world!`. All files in `examples/` parse, even though they do not yet run.
 

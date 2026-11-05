@@ -24,6 +24,7 @@ Docs must never go stale. Every commit that changes behavior, code, plans, or de
 | Milestone progress or scope | `docs/roadmap.md` |
 | A decision made or reversed | `docs/decisions.md` |
 | New evidence or benchmark results | `docs/research.md` |
+| Agent tooling, hooks, or Claude Code workflow | `docs/claude-code.md` |
 | Project status, or a doc added or removed | `README.md` |
 
 Docs describe what is true now. Mark planned items as planned, and remove claims that stop being true.
@@ -50,3 +51,4 @@ No compiler exists until M1. The planned commands are listed in `docs/compiler.m
 - Subject at most 50 characters, imperative mood, lowercase start, no trailing period.
 - Body wrapped at 72, and explains what and why.
 - A change that fits two types is two commits.
+- `.githooks/commit-msg` enforces these rules. Never bypass it. Turn it on with `git config core.hooksPath .githooks`.
