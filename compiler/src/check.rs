@@ -22,9 +22,10 @@ const BUILT_IN_TYPES: [&str; 8] = ["int", "float", "bool", "byte", "text", "list
 /// The same limit as nesting in the parser, for a chain of aliases.
 const MAX_ALIASES: usize = 128;
 
-/// How many instances of generic types the E0315 check follows. A type past
-/// this limit counts as finite, and `mono.rs` stops any that really grows.
-const MAX_FINITE_CHECK: usize = 1024;
+/// How many instances of generic types the E0315 check follows, and how many
+/// questions one trait check asks. For E0315 a type past this limit counts as
+/// finite, and `mono.rs` stops any that really grows.
+const MAX_FINITE_CHECK: usize = 256;
 
 /// Traits that the compiler knows, and that a bound can name.
 const BUILT_IN_TRAITS: [&str; 8] = ["Equal", "Order", "Show", "Hash", "Add", "Sub", "Mul", "Div"];
@@ -197,17 +198,6 @@ fn own_params(params: &[ast::TypeParam]) -> TypeEnv<'_> {
     (params.iter().enumerate())
         .map(|(index, p)| (p.name.text.as_str(), Ty::Param(p.name.text.clone().leak(), index)))
         .collect()
-}
-
-/// True if `part` appears anywhere in `ty`.
-fn mentions(ty: Ty, part: Ty) -> bool {
-    ty == part
-        || match ty {
-            Ty::List(item) | Ty::Set(item) => mentions(*item, part),
-            Ty::Map(key, value) => mentions(*key, part) || mentions(*value, part),
-            Ty::Data(_, _, args) | Ty::Union(args) => args.iter().any(|&a| mentions(a, part)),
-            _ => false,
-        }
 }
 
 /// True for a task that the language builds in for this type.
@@ -788,15 +778,24 @@ impl<'a> Checker<'a> {
         self.satisfied(ty, name, &mut Vec::new())
     }
 
-    /// True if a type has a trait. `seen` holds the types on the way here: a
-    /// recursive type has a trait if nothing else in it lacks one.
-    fn satisfied(&mut self, ty: Ty, name: &str, seen: &mut Vec<Ty>) -> bool {
+    /// True if a type has a trait. `seen` holds what was already asked: a
+    /// recursive type has a trait if nothing else in it lacks one, and any
+    /// `false` ends the whole walk. A type that keeps growing has no last
+    /// answer, so past the limits the answer is no.
+    fn satisfied(&mut self, ty: Ty, name: &str, seen: &mut Vec<(Ty, String)>) -> bool {
         if ty == Ty::Error {
             return true;
         }
         if let Ty::Param(_, index) = ty {
             return self.bounds.get(index).is_some_and(|traits| traits.contains(&name));
         }
+        if ty.too_large() || seen.len() == MAX_FINITE_CHECK {
+            return false;
+        }
+        if seen.iter().any(|(known, trait_name)| *known == ty && trait_name == name) {
+            return true;
+        }
+        seen.push((ty, name.into()));
         let written = match name {
             "Show" => "show",
             "Equal" => "equal",
@@ -807,12 +806,12 @@ impl<'a> Checker<'a> {
             "Div" => "div",
             _ => "",
         };
-        if let Some(found) = self.written_task(written, ty) {
+        if let Some(found) = self.written_task(written, ty, seen) {
             return found;
         }
         if !BUILT_IN_TRAITS.contains(&name) {
             let tasks = self.traits.get(name).cloned().unwrap_or_default();
-            return tasks.into_iter().all(|task| self.fits_trait_task(ty, task));
+            return tasks.into_iter().all(|task| self.fits_trait_task(ty, task, seen));
         }
         let parts: Vec<Ty> = match ty {
             Ty::List(item) | Ty::Set(item) => vec![*item],
@@ -834,23 +833,17 @@ impl<'a> Checker<'a> {
         if !holds {
             return false;
         }
-        if matches!(ty, Ty::Data(..)) {
-            if seen.contains(&ty) || seen.len() == MAX_ALIASES {
-                return true;
-            }
-            seen.push(ty);
-        }
         parts.into_iter().all(|part| self.satisfied(part, name, seen))
     }
 
     /// With a hand-written task for this type, true if its bounds hold.
     /// `None` if there is no such task.
-    fn written_task(&mut self, name: &str, ty: Ty) -> Option<bool> {
+    fn written_task(&mut self, name: &str, ty: Ty, seen: &mut Vec<(Ty, String)>) -> Option<bool> {
         let (id, known) = self.find_method(name, ty)?;
         let bounds = self.signatures[id].bounds.clone();
         for (arg, traits) in known.iter().zip(bounds) {
             for name in traits {
-                if !arg.is_some_and(|arg| self.satisfies(arg, name)) {
+                if !arg.is_some_and(|arg| self.satisfied(arg, name, seen)) {
                     return Some(false);
                 }
             }
@@ -859,9 +852,9 @@ impl<'a> Checker<'a> {
     }
 
     /// True if `ty` has a task that matches a task of a trait.
-    fn fits_trait_task(&mut self, ty: Ty, task: usize) -> bool {
+    fn fits_trait_task(&mut self, ty: Ty, task: usize, seen: &mut Vec<(Ty, String)>) -> bool {
         let name = &self.signatures[task].name.text;
-        let Some(true) = self.written_task(name, ty) else { return false };
+        let Some(true) = self.written_task(name, ty, seen) else { return false };
         let Some((id, known)) = self.find_method(name, ty) else { return false };
         let Some(args) = known.into_iter().collect::<Option<Vec<Ty>>>() else { return false };
         let wanted: Vec<Ty> = self.signatures[task].params.iter().map(|p| p.ty).collect();
@@ -878,9 +871,8 @@ impl<'a> Checker<'a> {
     fn find_method(&mut self, name: &str, ty: Ty) -> Option<(usize, Vec<Option<Ty>>)> {
         for id in self.methods.get(name).cloned().unwrap_or_default() {
             let pattern = self.signatures[id].params[0].ty;
-            let mut known = vec![None; self.signatures[id].type_params.len()];
-            self.table.unify(pattern, ty, &mut known);
-            if self.partial(pattern, &known) == Some(ty) {
+            let count = self.signatures[id].type_params.len();
+            if let Some(known) = self.table.fit(pattern, ty, count) {
                 return Some((id, known));
             }
         }
@@ -1048,21 +1040,23 @@ impl<'a> Checker<'a> {
     /// type needs this per instance: `type R` with a `W[R]` field holds itself
     /// if `W[T]` holds a `T`.
     fn check_finite(&mut self) {
-        fn holds(ty: Ty, finite: &HashSet<Ty>, instances: &[Ty]) -> bool {
+        fn holds(ty: Ty, finite: &HashSet<Ty>, explored: &HashSet<Ty>) -> bool {
             match ty {
-                Ty::Data(..) => finite.contains(&ty) || !instances.contains(&ty),
-                Ty::Union(members) => members.iter().any(|&m| holds(m, finite, instances)),
+                Ty::Data(..) => ty.too_large() || finite.contains(&ty) || !explored.contains(&ty),
+                Ty::Union(members) => members.iter().any(|&m| holds(m, finite, explored)),
                 _ => true,
             }
         }
         let mut instances: Vec<Ty> = self.datas.iter().map(|data| data.ty).collect();
+        let mut listed: HashSet<Ty> = instances.iter().copied().collect();
         let mut shapes = Vec::new();
         let limit = MAX_FINITE_CHECK.max(instances.len());
         while shapes.len() < instances.len() && shapes.len() < limit {
             let variants = self.variants_of(instances[shapes.len()]);
             for &field in variants.iter().flatten() {
                 for &member in field.members() {
-                    if matches!(member, Ty::Data(..)) && !instances.contains(&member) {
+                    let open = matches!(member, Ty::Data(..)) && !member.too_large();
+                    if open && listed.insert(member) {
                         instances.push(member);
                     }
                 }
@@ -1070,6 +1064,7 @@ impl<'a> Checker<'a> {
             shapes.push(variants);
         }
         instances.truncate(shapes.len());
+        let explored: HashSet<Ty> = instances.iter().copied().collect();
         let mut finite = HashSet::new();
         let mut changed = true;
         while changed {
@@ -1077,7 +1072,7 @@ impl<'a> Checker<'a> {
             for (&ty, variants) in instances.iter().zip(&shapes) {
                 let reachable = variants
                     .iter()
-                    .any(|fields| fields.iter().all(|&f| holds(f, &finite, &instances)));
+                    .any(|fields| fields.iter().all(|&f| holds(f, &finite, &explored)));
                 changed |= reachable && finite.insert(ty);
             }
         }
@@ -1135,14 +1130,8 @@ impl<'a> Checker<'a> {
     }
 
     /// True if one value could be the receiver of both tasks.
-    fn overlap(&mut self, a: usize, b: usize) -> bool {
-        [(a, b), (b, a)].into_iter().any(|(a, b)| {
-            let pattern = self.signatures[a].params[0].ty;
-            let other = self.signatures[b].params[0].ty;
-            let mut known = vec![None; self.signatures[a].type_params.len()];
-            self.table.unify(pattern, other, &mut known);
-            self.partial(pattern, &known) == Some(other)
-        })
+    fn overlap(&self, a: usize, b: usize) -> bool {
+        self.signatures[a].params[0].ty.may_overlap(self.signatures[b].params[0].ty)
     }
 
     /// A task named after a derived one replaces it, so it must fit. See
@@ -1158,10 +1147,14 @@ impl<'a> Checker<'a> {
             "add" | "sub" | "mul" | "div" => (1, receiver),
             _ => return,
         };
+        let count = signature.type_params.len();
         let fits = signature.params.len() == others + 1
             && signature.params[1..].iter().all(|p| p.ty == receiver)
             && signature.returns == returns
             && receiver.is_compound();
+        let mut known = vec![None; count];
+        self.table.unify(receiver, receiver, &mut known);
+        let fits = fits && known.iter().all(Option::is_some);
         if !fits {
             let other = if others == 1 { ", other: T" } else { "" };
             let message = format!("`{name}` replaces a derived task, so it needs this form");
@@ -1494,7 +1487,7 @@ impl<'a> Checker<'a> {
         match &value.kind {
             Ast::Match { subject, arms } => Some(self.matching(subject, arms, Some(want))),
             Ast::Call { callee, args } => match &callee.kind {
-                Ast::Field { base, name } if name.text == "pop" && self.is_collection(base) => {
+                Ast::Field { base, name } if name.text == "pop" && self.is_builtin(base, "pop") => {
                     Some(self.pop(base, args, value.span))
                 }
                 _ => None,
@@ -1521,7 +1514,8 @@ impl<'a> Checker<'a> {
             Ast::Match { subject, arms } => self.matching(subject, arms, None).0,
             Ast::Call { callee, args } => match &callee.kind {
                 Ast::Field { base, name }
-                    if CHANGING_CALLS.contains(&name.text.as_str()) && self.is_collection(base) =>
+                    if CHANGING_CALLS.contains(&name.text.as_str())
+                        && self.is_builtin(base, &name.text) =>
                 {
                     return self.changing_call(base, name, args, span);
                 }
@@ -2112,28 +2106,12 @@ impl<'a> Checker<'a> {
         found.map(|(index, field)| (index, self.subst_data(field, ty)))
     }
 
-    /// A type with what is known so far of the type parameters in it, or
-    /// `None` if one is still open.
-    fn partial(&mut self, pattern: Ty, known: &[Option<Ty>]) -> Option<Ty> {
-        let args: Option<Vec<Ty>> = known.iter().copied().collect();
-        if let Some(args) = args {
-            return Some(self.table.subst(pattern, &args));
-        }
-        if !pattern.has_param() {
-            return Some(pattern);
-        }
-        let open = Ty::Param("", usize::MAX);
-        let args: Vec<Ty> = known.iter().map(|ty| ty.unwrap_or(open)).collect();
-        let found = self.table.subst(pattern, &args);
-        (!mentions(found, open)).then_some(found)
-    }
-
     /// Lowers a value for a parameter or field of type `pattern`, whose type
     /// parameters may come from this value. Types flow left to right, as in a
     /// list literal, so an earlier value gives a type to a later one. See
     /// decision 67. `settled` checks the result, once all types are known.
     fn inferred(&mut self, value: &'a ast::Expr, pattern: Ty, known: &mut [Option<Ty>]) -> Expr {
-        let want = self.partial(pattern, known);
+        let want = self.table.partial(pattern, known);
         let lowered = self.expected(value, want);
         if want.is_none() {
             self.table.unify(pattern, lowered.ty, known);
@@ -2306,13 +2284,13 @@ impl<'a> Checker<'a> {
         self.read(value, span)
     }
 
-    /// True if `value` has a list, map, or set type. Errors stay for the real
-    /// lowering to report.
-    fn is_collection(&mut self, value: &'a ast::Expr) -> bool {
+    /// True if the language builds this task in for the type of `value`.
+    /// Errors stay for the real lowering to report.
+    fn is_builtin(&mut self, value: &'a ast::Expr, name: &str) -> bool {
         let reported = self.diags.len();
-        let collection = self.expr(value).ty.is_collection();
+        let found = builtin_method(self.expr(value).ty, name);
         self.diags.truncate(reported);
-        collection
+        found
     }
 
     fn changing_call(
@@ -3145,7 +3123,7 @@ impl<'a> Checker<'a> {
                 }
                 true
             }
-            Ty::Data(..) | Ty::Param(..) if !int_only => {
+            ty if (ty.is_compound() || matches!(ty, Ty::Param(..))) && !int_only => {
                 let trait_name = match op {
                     BinaryOp::Add => "Add",
                     BinaryOp::Sub => "Sub",

@@ -1,0 +1,29 @@
+type Box[T]
+    value: T?
+
+task show[U: Show](self: Box[U]) -> text
+    return "box"
+
+type R
+    inner: Box[R]
+
+print R(inner: Box[R](value: none))
+
+task show(self: text?) -> text
+    return "custom"
+
+let x: text? = "hi"
+print x
+print "{x}"
+
+task add(self: list[int], other: list[int]) -> list[int]
+    return [self.len() + other.len()]
+
+print [1] + [2, 3]
+var a = [1]
+print a.add([2])
+a.add([2])
+
+task pushed(self: map[text, int]) -> int
+    return self.len()
+print {"a": 1}.pushed()

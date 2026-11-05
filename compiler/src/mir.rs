@@ -34,6 +34,9 @@ pub enum Ty {
     Error,
 }
 
+/// See `Ty::too_large`.
+pub const MAX_TYPE_PARTS: usize = 256;
+
 /// Leaked, to keep `Ty` a small `Copy` value. A compile ends with the process,
 /// and each type written in the source costs a few bytes.
 pub fn inner(ty: Ty) -> &'static Ty {
@@ -80,6 +83,17 @@ impl Ty {
         self == Ty::Text || self.is_compound() || matches!(self, Ty::Param(..))
     }
 
+    /// True if `part` appears anywhere in this type.
+    pub fn mentions(self, part: Ty) -> bool {
+        self == part
+            || match self {
+                Ty::List(item) | Ty::Set(item) => item.mentions(part),
+                Ty::Map(key, value) => key.mentions(part) || value.mentions(part),
+                Ty::Data(_, _, args) | Ty::Union(args) => args.iter().any(|a| a.mentions(part)),
+                _ => false,
+            }
+    }
+
     /// True if a type parameter appears anywhere in this type.
     pub fn has_param(self) -> bool {
         match self {
@@ -91,14 +105,43 @@ impl Ty {
         }
     }
 
-    /// How deep type arguments and elements nest.
-    pub fn depth(self) -> usize {
-        let deepest = |types: &[Ty]| types.iter().map(|ty| ty.depth()).max().unwrap_or(0);
-        match self {
-            Ty::List(item) | Ty::Set(item) => 1 + item.depth(),
-            Ty::Map(key, value) => 1 + key.depth().max(value.depth()),
-            Ty::Data(_, _, args) | Ty::Union(args) => 1 + deepest(args),
-            _ => 0,
+    /// True if this type has over `MAX_TYPE_PARTS` parts. Comparing and hashing
+    /// a `Ty` walks it as a tree, and `Pair[T, T]` doubles at each level, so
+    /// a limit on depth alone would let one type take exponential time.
+    pub fn too_large(self) -> bool {
+        fn spend(ty: Ty, left: &mut usize) -> bool {
+            if *left == 0 {
+                return false;
+            }
+            *left -= 1;
+            match ty {
+                Ty::List(item) | Ty::Set(item) => spend(*item, left),
+                Ty::Map(key, value) => spend(*key, left) && spend(*value, left),
+                Ty::Data(_, _, args) | Ty::Union(args) => args.iter().all(|&a| spend(a, left)),
+                _ => true,
+            }
+        }
+        !spend(self, &mut MAX_TYPE_PARTS.clone())
+    }
+
+    /// True if one value could have both types, with the parameters of each
+    /// free. It ignores a parameter used twice, so `Pair[T, T]` counts as
+    /// overlapping `Pair[int, text]`. A false yes only asks for another name.
+    pub fn may_overlap(self, other: Ty) -> bool {
+        match (self, other) {
+            (Ty::Param(..), _) | (_, Ty::Param(..)) => true,
+            (Ty::Union(_), Ty::Union(_)) => self == other || self.has_param() || other.has_param(),
+            // `T?` is not a union for `T = none`.
+            (Ty::Union(members), single) | (single, Ty::Union(members)) => {
+                members.iter().any(|m| matches!(m, Ty::Param(..)) && !single.has_param())
+                    || (single.has_param() && members.iter().any(|m| m.may_overlap(single)))
+            }
+            (Ty::List(a), Ty::List(b)) | (Ty::Set(a), Ty::Set(b)) => a.may_overlap(*b),
+            (Ty::Map(a, b), Ty::Map(c, d)) => a.may_overlap(*c) && b.may_overlap(*d),
+            (Ty::Data(_, a, own), Ty::Data(_, b, args)) => {
+                a == b && own.iter().zip(args).all(|(x, &y)| x.may_overlap(y))
+            }
+            _ => self == other,
         }
     }
 
@@ -188,6 +231,30 @@ impl Types {
 
     pub fn subst_all(&mut self, types: &[Ty], args: &[Ty]) -> &'static [Ty] {
         types.iter().map(|&ty| self.subst(ty, args)).collect::<Vec<_>>().leak()
+    }
+
+    /// A type with what is known so far of the type parameters in it, or
+    /// `None` if one is still open.
+    pub fn partial(&mut self, pattern: Ty, known: &[Option<Ty>]) -> Option<Ty> {
+        let args: Option<Vec<Ty>> = known.iter().copied().collect();
+        if let Some(args) = args {
+            return Some(self.subst(pattern, &args));
+        }
+        if !pattern.has_param() {
+            return Some(pattern);
+        }
+        let open = Ty::Param("", usize::MAX);
+        let args: Vec<Ty> = known.iter().map(|ty| ty.unwrap_or(open)).collect();
+        let found = self.subst(pattern, &args);
+        (!found.mentions(open)).then_some(found)
+    }
+
+    /// What `ty` shows about `count` type parameters, if it fits a receiver of
+    /// type `pattern`. Both stages use this, so they pick the same task.
+    pub fn fit(&mut self, pattern: Ty, ty: Ty, count: usize) -> Option<Vec<Option<Ty>>> {
+        let mut known = vec![None; count];
+        self.unify(pattern, ty, &mut known);
+        (self.partial(pattern, &known) == Some(ty)).then_some(known)
     }
 
     /// Fills `known` with what `ty` shows about the parameters of `pattern`.

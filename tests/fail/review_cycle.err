@@ -1,0 +1,4 @@
+review_cycle.lcd:23:6: error E0304: `name` is already defined
+review_cycle.lcd:29:6: error E0323: `equal` replaces a derived task, so it needs this form
+  note: write `task equal(self: T, other: T) -> bool`, for a `type`, `choice`, or collection `T`
+review_cycle.lcd:33:7: error E0320: `list[int]` does not have `Add`

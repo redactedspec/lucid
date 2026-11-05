@@ -11,9 +11,9 @@ use crate::diag::{Diagnostic, Span};
 use crate::mir::{Expr, ExprKind, Program, Shape, Stmt, Task, Ty, Types, Update, Visit};
 use std::collections::HashMap;
 
-/// Deeper type arguments stop as E0903. Depth alone can fire late when one
-/// task makes several larger copies of itself, so the count is capped too.
-const MAX_TYPE_DEPTH: usize = 32;
+/// Generic instances and derived tasks past this stop as E0903. See also
+/// `Ty::too_large`: a size limit alone can fire late when one task makes
+/// several larger copies of itself.
 const MAX_INSTANCES: usize = 20_000;
 
 pub fn run(program: &mut Program) -> Vec<Diagnostic> {
@@ -26,6 +26,7 @@ pub fn run(program: &mut Program) -> Vec<Diagnostic> {
         instances: HashMap::new(),
         derived: HashMap::new(),
         done: Vec::new(),
+        generated: 0,
         queue: Vec::new(),
         diags: Vec::new(),
         args: &[],
@@ -76,6 +77,8 @@ pub struct Mono<'a> {
     /// A derived task for a type, and its place in `done`.
     derived: HashMap<(Derived, Ty), usize>,
     done: Vec<Option<Task>>,
+    /// How many generic instances and derived tasks exist.
+    generated: usize,
     /// Tasks still to build, with their places in `done`.
     queue: Vec<(usize, Job)>,
     diags: Vec<Diagnostic>,
@@ -87,6 +90,7 @@ pub struct Mono<'a> {
 
 impl Mono<'_> {
     fn instance(&mut self, id: usize, args: &'static [Ty], span: Span) -> usize {
+        let Some(_) = self.check_size(args, span) else { return 0 };
         if let Some(&slot) = self.instances.get(&(id, args)) {
             return slot;
         }
@@ -102,11 +106,8 @@ impl Mono<'_> {
         let ids = self.methods.get(name)?;
         for &id in ids {
             let task = &self.source[id];
-            let mut known = vec![None; task.type_params];
-            let pattern = task.locals[0];
-            self.types.unify(pattern, ty, &mut known);
-            let Some(args) = known.into_iter().collect::<Option<Vec<Ty>>>() else { continue };
-            if self.types.subst(pattern, &args) == ty {
+            if let Some(known) = self.types.fit(task.locals[0], ty, task.type_params) {
+                let args: Vec<Ty> = known.into_iter().collect::<Option<_>>()?;
                 return Some(self.instance(id, args.leak(), span));
             }
         }
@@ -115,6 +116,7 @@ impl Mono<'_> {
 
     /// The derived task of this kind for a type.
     pub fn derived(&mut self, kind: Derived, ty: Ty, span: Span) -> usize {
+        let Some(_) = self.check_size(&[ty], span) else { return 0 };
         if let Some(&slot) = self.derived.get(&(kind, ty)) {
             return slot;
         }
@@ -124,15 +126,30 @@ impl Mono<'_> {
         slot
     }
 
-    /// A place in `done`, or `None` after reporting E0903. Slot 0 then stands
-    /// in, and nothing runs, since the error stops the program.
-    fn reserve(&mut self, types: &[Ty], span: Span) -> Option<usize> {
-        let deep = types.iter().any(|ty| ty.depth() > MAX_TYPE_DEPTH);
-        if deep || self.done.len() == MAX_INSTANCES {
-            let note = "a generic task or type keeps asking for a larger type of itself";
-            let diag = Diagnostic::new("E0903", "too many generic instances", span);
-            self.diags.push(diag.note(note));
+    /// Reports E0903 for a type too large to hash. Slot 0 then stands in, and
+    /// nothing runs, since the error stops the program.
+    fn check_size(&mut self, types: &[Ty], span: Span) -> Option<()> {
+        if types.iter().any(|ty| ty.too_large()) {
+            self.too_many(span);
             return None;
+        }
+        Some(())
+    }
+
+    fn too_many(&mut self, span: Span) {
+        let note = "a generic task or type keeps asking for a larger type of itself";
+        let diag = Diagnostic::new("E0903", "too many generic instances", span);
+        self.diags.push(diag.note(note));
+    }
+
+    /// A place in `done`. A task with no type arguments always gets one.
+    fn reserve(&mut self, types: &[Ty], span: Span) -> Option<usize> {
+        if !types.is_empty() {
+            if self.generated == MAX_INSTANCES {
+                self.too_many(span);
+                return None;
+            }
+            self.generated += 1;
         }
         self.done.push(None);
         Some(self.done.len() - 1)
@@ -209,7 +226,9 @@ impl Visit for Mono<'_> {
             self.stmt_parts(stmt);
             match stmt {
                 Stmt::Print(value) if value.ty.is_compound() => {
-                    let (taken, span) = (value.clone(), value.span);
+                    let span = value.span;
+                    let empty = Expr { kind: ExprKind::None, ty: Ty::None, span };
+                    let taken = std::mem::replace(value, empty);
                     *value = self.shown_alone(taken, span);
                 }
                 Stmt::Clear(local) if !self.locals[*local].is_counted() => {

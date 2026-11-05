@@ -1,0 +1,33 @@
+type Box[T]
+    value: T?
+
+task show[U: Show](self: Box[U]) -> text
+    return "box"
+
+type R
+    inner: Box[R]
+
+type Pair[A, B]
+    a: A
+    b: B
+
+type G[T]
+    next: G[Pair[T, T]]?
+
+type W[T]
+    v: W[list[T]]
+
+task name[B](self: Pair[text, B]) -> text
+    return "first"
+
+task name[A](self: Pair[A, int]) -> text
+    return "second"
+
+task open[U, V](self: Box[U]) -> text
+    return "x"
+
+task equal[U, V](self: Box[U], other: Box[U]) -> bool
+    return true
+
+print R(inner: Box[R](value: none))
+print [1] + [2]

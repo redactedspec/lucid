@@ -145,7 +145,8 @@ impl Mono<'_> {
         if value.ty == Ty::Text {
             return value;
         }
-        if !value.ty.members().contains(&Ty::Text) {
+        let written = value.ty.is_compound() && self.method("show", value.ty, span).is_some();
+        if written || !value.ty.members().contains(&Ty::Text) {
             return self.shown(value, span);
         }
         let ty = value.ty;
@@ -312,8 +313,7 @@ impl Mono<'_> {
                 let walk = body.each_key(X, *key, |body, held| {
                     let key_text = self.shown(body.read(held), span);
                     let mut parts = vec![key_text];
-                    if let Ty::Map(key_ty, value) = ty {
-                        let _ = key_ty;
+                    if let Ty::Map(_, value) = ty {
                         let kind = ExprKind::MapGet(boxed(body.read(X)), boxed(body.read(held)));
                         let value = body.expr(kind, *value);
                         parts.push(body.text(": "));
