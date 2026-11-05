@@ -23,6 +23,7 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | No `async`, lightweight tasks in browser | Now feasible through JSPI | Snippet | Decide at M7 |
 | ASCII names, text escapes | Judgment call from existing practice | None | Revisit before 1.0 |
 | Division, argument order | Judgment call from existing practice | None | Agent trial at M3 |
+| Type arguments in brackets, read in one pass | Follows Go. Form also proposed for Python | Read, parser Snippet | Agent trial at M3 |
 | Union narrowing by control flow | Follows TypeScript and Kotlin, tightened for memory safety | Read | Agent trial at M3 |
 | Text slices, no character type | Judgment call from existing practice | None | Agent trial at M3 |
 | Compact ordered map, SipHash with random keys | Supported by Python and Rust practice | Snippet | Benchmark at M4 |
@@ -216,6 +217,17 @@ Decisions 59 and 60, with `.get` in decision 62. Level: **Read**, for the TypeSc
 - **Python.** `dict.get` returns `None` for a missing key, and never raises `KeyError`. Summary text, so check the wording.
 
 Sources: [TypeScript narrowing](https://www.typescriptlang.org/docs/handbook/2/narrowing.html), [Kotlin type checks and casts](https://kotlinlang.org/docs/typecasts.html), [Python built-in types](https://docs.python.org/3/library/stdtypes.html).
+
+## Type arguments
+
+Decision 65. PEP 718 and the Rust reference: **Read**. The Go spec and parser: **Snippet**, since the sections on index expressions and `parseIndexOrSliceOrInstance` came through a summary. Check the code before relying on the exact behavior.
+
+- **Go.** `f[T]` uses brackets for both jobs. The summary of the parser quotes this comment: "We can't know if we have an index expression or a type instantiation; so even if we see a (named) type we are not going to be in type context." It reads the first element as an expression and decides from the next token. The summary reported no backtracking.
+- **Rust.** The reference says `::` is required before `<` "to avoid ambiguity with the less-than operator". Lucid uses `[`, which is no operator, so it has no need for this form.
+- **Python.** PEP 718 is a draft, targeted at 3.16. It proposes `func[int](1, 2)`, and says that type checkers "cannot always infer `T` from the arguments alone (e.g. empty containers, lambdas, or factory callbacks)". So explicit arguments stay necessary even with good inference. It rejects `f<int>(x)`, as that "is already valid syntax with a different meaning."
+- **Swift.** Whether a call can specialize a generic task was not settled: the pages read did not say.
+
+Sources: [Go spec](https://go.dev/ref/spec), [Go parser](https://github.com/golang/go/blob/master/src/go/parser/parser.go), [PEP 718](https://peps.python.org/pep-0718/), [Rust paths](https://doc.rust-lang.org/reference/paths.html).
 
 ## Open research
 

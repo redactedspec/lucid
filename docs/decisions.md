@@ -70,6 +70,7 @@ Add new entries at the end of the list. To reverse a decision, add a new entry t
 | 62 | 2026-11-05 | `.get` gives `T?` on a list or map, and a negative index gives `none`. `.pop` works on lists, gives `T?`, and must be a whole statement or all of the value of `let`, `var`, `return`, or `name =` | Python's `dict.get` gives the same shape, and `T?` makes `.pop` on an empty list a value, not a trap. A `.pop` inside an expression could free an element that the same statement borrows, the reason in decision 41. Judgment call, and the agent trial tests `f(x.pop())`. |
 | 63 | 2026-11-05 | `none` is a literal, so it can be a default | `limit: int? = none` is the usual form of an optional parameter, and it has no evaluation order to explain, as in decision 30. |
 | 64 | 2026-11-05 | On a union, `match` has `none`, typed, name, and `_` arms, and a name binds what earlier arms left. A union takes no literal or variant arm | Patterns do not nest, per decision 52, and a variant arm on a union would be a nested pattern. Binding what is left gives the same result as narrowing after a branch that leaves. Judgment call. |
+| 65 | 2026-11-05 | Type arguments stay in brackets, as in `f[int?](x)`. The parser reads one form for an index and for type arguments, in one pass, and the checker decides which it is from the base. Type-only forms parse as expressions, and the checker rejects them outside type arguments | Rules 2 and 6 in `agents.md`. `[` has no operator to clash with, so Rust's `::` is not needed, and `json.parse[Book](raw)` is already the documented form. Replaces the default, parsing as a type after an expression fails: that needs backtracking, gives two trees for one form, and turns a typo in an index into a type error. Go also reads the bracket without knowing which it holds. Evidence is in `research.md`. |
 
 ## Open questions
 
@@ -77,7 +78,6 @@ Decide each one by the milestone shown.
 
 | Question | Default if undecided | Decide by |
 | --- | --- | --- |
-| How are generic arguments that are not expressions written? `f[int](x)` parses as an index, but `f[int?](x)` is a syntax error. | Parse index contents as a type when an expression fails. | M3 |
 | Should `change` receivers be marked at dot calls? | No marker, and require `var`. | M3 |
 | Can a task read a top-level `let` that is not a literal? It needs a defined initialization order. | No: keep decision 27. | M5 |
 | Add an LLVM backend for release builds? | Only if benchmarks demand it. | M4 |

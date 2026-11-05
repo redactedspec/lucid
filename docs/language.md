@@ -403,6 +403,8 @@ type Pair[A, B]
 
 Generics are monomorphized: each used combination gets its own compiled code.
 
+Planned: brackets give type arguments at a call, as in `f[int?](x)` or `Pair[int, text](left: 1, right: "a")`, and they hold any type.
+
 ## Traits
 
 A trait lists required tasks. Satisfaction is structural: any type with matching tasks qualifies, with no declaration.
