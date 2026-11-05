@@ -1,0 +1,11 @@
+[package]
+name = "lucid"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cranelift-codegen = "0.137.1"
+cranelift-frontend = "0.137.1"
+cranelift-jit = "0.137.1"
+cranelift-module = "0.137.1"
+lucid_rt = { path = "../runtime" }

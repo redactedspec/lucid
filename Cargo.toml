@@ -1,0 +1,6 @@
+[workspace]
+members = ["compiler", "runtime"]
+resolver = "3"
+
+[profile.dev]
+debug = "line-tables-only"
