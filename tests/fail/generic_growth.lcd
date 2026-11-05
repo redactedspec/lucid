@@ -1,0 +1,3 @@
+task grow[T](value: T) -> int
+    return grow([value])
+print grow(1)

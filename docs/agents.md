@@ -103,8 +103,12 @@ The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and 
 | E0316 | `match` does not cover every case |
 | E0317 | `match` arm can never run |
 | E0318 | Pattern does not fit its value: unknown variant, wrong number of names, a bound type or variant name, `{}` in text, or a type that the value never holds |
+| E0319 | Type argument cannot be told from the values |
+| E0321 | Wrong number of type arguments |
+| E0322 | Type form where a value belongs, or a value where a type belongs |
 | E0901 | Parses, but cannot run at this milestone |
 | E0902 | Task frame is too large for the stack check: over 512 KiB, or half the stack for top-level code |
+| E0903 | Too many generic instances: over 20,000, or type arguments nested over 32 levels |
 
 ## Agent onboarding
 

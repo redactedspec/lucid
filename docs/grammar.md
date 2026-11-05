@@ -151,12 +151,14 @@ compare_op  = "==" | "!=" | "<" | "<=" | ">" | ">=" | "in" | "not" "in" ;
 is_target   = "none" | "empty" | type_term ;
 range       = sum [ ( ".." | "..=" ) sum ] ;
 sum         = product { ( "+" | "-" ) product } ;
-product     = unary { ( "*" | "/" | "//" | "%" ) unary } ;
+product     = typed { ( "*" | "/" | "//" | "%" ) typed } ;
+typed       = unary [ "?" ] ;
 unary       = ( "-" | "try" | "spawn" | "shared" | "weak" ) unary | postfix ;
 postfix     = primary { "(" [ args ] ")" | "[" expression { "," expression } "]" | "." NAME } ;
 args        = arg { "," arg } [ "," ] ;
 arg         = [ "change" ] expression | NAME ":" expression ;
 primary     = NAME | "self" | "none" | "true" | "false" | INT | FLOAT | TEXT
+            | type_prefix          (* only one that starts with "any" or "task" *)
             | "(" expression ")"
             | "[" [ expression { "," expression } [ "," ] ] "]"
             | "{" [ entry { "," entry } [ "," ] ] "}" ;
@@ -172,6 +174,5 @@ entry       = expression ":" expression ;
 - **`try` scope:** `try` covers the whole postfix chain. `try read(p).trim()` calls `.trim()` first, on the union, and fails type checking. Write `(try read(p)).trim()`.
 - **Negative numbers:** in `unary`, a `-` before a number with no postfix after it joins the literal, which does not change the value. It lets `-9223372036854775808` fit. Parentheses keep them apart, so `-(1)` negates a literal.
 - **Name patterns:** the grammar has one form for `Point` and `n`. The checker decides from the type of the subject: on a `choice` a name must be a variant, and on any other type it binds the value. On a union it binds what earlier arms left.
-- **Generic calls:** `f[int](x)` parses as an index followed by a call. The resolver rewrites it to a generic instantiation once it knows `f` is a generic task or type.
-- **Type arguments, planned with generics:** `f[int?](x)` is a syntax error until then. Decision 65 settles the change. `product` will take `typed = unary [ "?" ]`, and `unary` and `primary` will take `any` and the `task(...)` type. These forms parse anywhere, in one pass, with no lookahead past the current token. The checker reads a bracket as type arguments if its base is generic, and it rejects them with their own error code anywhere else. Placing `?` above the prefix operators keeps `weak Node?` as `(weak Node)?`, as in types.
+- **Type arguments:** `f[int?](x)` parses as an index followed by a call, by decision 65. `typed`, and the `type_prefix` form of `primary`, parse anywhere, in one pass, with no lookahead past the current token. The checker reads a bracket as type arguments if its base is a task or constructor. It rejects a type form anywhere else with E0322. Placing `?` above the prefix operators keeps `weak Node?` as `(weak Node)?`, as in types.
 - **Lambdas:** recognize with one token of lookahead past `NAME`, or by scanning to the matching `)` and checking for `=>`.

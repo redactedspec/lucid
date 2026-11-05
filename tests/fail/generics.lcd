@@ -1,0 +1,41 @@
+task same[T](value: T) -> T
+    return value
+
+task blank[T]() -> list[T]
+    return []
+
+task body[T](a: T, b: T) -> T
+    print a + b
+    print "{a}"
+    if a is none
+        return a
+    return 1
+
+task twice[T, T](a: T)
+    return
+
+task hide[int](a: int)
+    return
+
+type Pair[A, B]
+    left: A
+    right: B
+
+choice Maybe[T]
+    Has(value: T)
+    Nothing
+
+task both[T](a: T, b: T) -> T
+    return a
+
+let a = blank()
+let b = Nothing
+let c = Pair(left: 1)
+let d: Pair[int] = Pair(left: 1, right: 2)
+let e: Pair = Pair(left: 1, right: 2)
+let f: int[int] = 1
+let g = same[int, int](1)
+let h = both(1, "a")
+let i = same[Pair](1)
+let j = same[1 + 2](1)
+let k = same[int](1.5)

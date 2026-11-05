@@ -1,12 +1,5 @@
-type Pair[A, B]
-    left: A
-    right: B
-
 public type Open
     a: int
-
-choice Box[T]
-    Full(value: T)
 
 type Plain
     a: int

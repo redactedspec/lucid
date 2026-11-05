@@ -40,7 +40,8 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] `list`, `map`, `set`, and `text.bytes()`
 - [x] `type`, `choice`, `match` with exhaustiveness
 - [x] Unions, `T?`, narrowing, `is`, and `.get`, `.pop`
-- [ ] Generics with monomorphization, traits, derived traits, showing and comparing collections, list slices
+- [x] Generics with monomorphization, list slices
+- [ ] Traits, derived traits, showing and comparing collections
 - [ ] Sized numbers, wrapping math tasks, nested tasks, lambdas, task values, `self` and dot calls
 - [ ] Parameter modes, exclusivity checks, `for change` over lists
 - [x] Naive reference counting, leak-checking debug runtime

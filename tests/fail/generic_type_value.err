@@ -1,0 +1,4 @@
+generic_type_value.lcd:2:7: error E0322: a type cannot be a value
+  note: a type only goes in brackets, as in `f[int?](x)`
+generic_type_value.lcd:3:7: error E0322: a type cannot be a value
+  note: a type only goes in brackets, as in `f[int?](x)`

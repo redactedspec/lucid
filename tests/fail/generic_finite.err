@@ -1,0 +1,2 @@
+generic_finite.lcd:4:6: error E0315: `Loop` has no finite value
+  note: building it needs a type that holds itself: add a variant with no such field, or hold the value in a list or a union such as `T?`

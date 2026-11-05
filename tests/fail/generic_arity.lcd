@@ -1,0 +1,3 @@
+task plain(a: int)
+    return
+plain[int](1)

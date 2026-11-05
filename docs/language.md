@@ -403,9 +403,23 @@ type Pair[A, B]
     right: B
 ```
 
-Generics are monomorphized: each used combination gets its own compiled code.
+Generics are monomorphized: each used combination gets its own compiled code. An alias can be generic too, as in `type Table[V] = map[text, V]`.
 
-Planned: brackets give type arguments at a call, as in `f[int?](x)` or `Pair[int, text](left: 1, right: "a")`, and they hold any type.
+A generic body is checked once, where it is written, and a parameter is an opaque type there. So it works for every type or for none, and a call can never fail inside the body. Until bounds arrive, a body can only store, pass, and return a `T`. A generic program that keeps asking for a larger type of itself is error E0903, even if it would stop at run time.
+
+Type arguments come from the values, left to right, as an empty list takes its type from an earlier element. So `pair(1, [])` works for `pair[T](a: T, b: list[T])`, and `T` is `int` in `first([1, 2])`. A type that the values do not show is error E0319. Brackets name it, and they hold any type:
+
+```lucid
+let a = same[int?](none)
+let b = Pair[int, text](left: 1, right: "a")
+let c: list[text] = nothing[text]()
+let d: Maybe[int] = Nothing       # the context gives the type to a constructor
+let e = Nothing[int]
+```
+
+Only a constructor takes type arguments from its context. A generic call does not, since its arguments alone must explain it.
+
+Unions flatten after substitution, so `T?` is `int?` for `T = int?`, and it is `none` for `T = none`.
 
 ## Traits
 

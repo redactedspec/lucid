@@ -901,7 +901,7 @@ impl Parser {
 
     fn product(&mut self) -> Parsed<Expr> {
         let start = self.start();
-        let mut left = self.unary()?;
+        let mut left = self.typed()?;
         loop {
             let op = match self.kind() {
                 TokenKind::Sym("*") => BinaryOp::Mul,
@@ -912,7 +912,7 @@ impl Parser {
             };
             self.link()?;
             self.advance();
-            let right = self.unary()?;
+            let right = self.typed()?;
             left = self.binary(op, left, right, start);
         }
     }
@@ -996,6 +996,16 @@ impl Parser {
         Ok(Arg { name: None, change, value: self.expression()? })
     }
 
+    /// Parses `unary [ "?" ]`. See "Type arguments" in docs/grammar.md.
+    fn typed(&mut self) -> Parsed<Expr> {
+        let start = self.start();
+        let value = self.unary()?;
+        if !self.eat("?") {
+            return Ok(value);
+        }
+        Ok(Expr { kind: ExprKind::Optional(Box::new(value)), span: self.since(start) })
+    }
+
     fn primary(&mut self) -> Parsed<Expr> {
         let start = self.start();
         let first = self.pos;
@@ -1003,6 +1013,10 @@ impl Parser {
             TokenKind::Name(name) => ExprKind::Name(name.clone()),
             TokenKind::Int(lexeme) => ExprKind::Int(lexeme.clone()),
             TokenKind::Float(lexeme) => ExprKind::Float(lexeme.clone()),
+            TokenKind::Sym("any" | "task") => {
+                let ty = self.type_prefix()?;
+                return Ok(Expr { kind: ExprKind::Type(ty), span: self.since(start) });
+            }
             TokenKind::Sym("self") => ExprKind::SelfValue,
             TokenKind::Sym("none") => ExprKind::None,
             TokenKind::Sym("true") => ExprKind::Bool(true),

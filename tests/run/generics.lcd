@@ -1,0 +1,113 @@
+task first[T](items: list[T]) -> T?
+    return items.get(0)
+
+task same[T](value: T) -> T
+    return value
+
+task pair_up[A, B](a: A, b: B) -> Pair[A, B]
+    return Pair(left: a, right: b)
+
+task repeat[T](value: T, times: int) -> list[T]
+    var out: list[T] = []
+    for i in 0..times
+        out.push(value)
+    return out
+
+task or_default[T](value: T?, fallback: T) -> T
+    if value is none
+        return fallback
+    return value
+
+task count[T](items: list[T], from: int = 0) -> int
+    var total = from
+    for item in items
+        total += 1
+    return total
+
+task nothing[T]() -> list[T]
+    return []
+
+type Pair[A, B]
+    left: A
+    right: B
+
+type Tagged[T]
+    tag: text = "none"
+    value: T
+
+choice Tree[T]
+    Leaf
+    Node(left: Tree[T], value: T, right: Tree[T])
+
+type Names = list[text]
+type Table[V] = map[text, V]
+
+task insert[T](tree: Tree[T], value: T, before: task_order) -> Tree[T]
+    return Node(left: tree, value: value, right: Leaf)
+
+type task_order = int
+
+task depth[T](tree: Tree[T]) -> int
+    return match tree
+        Leaf -> 0
+        Node(left, _, right) -> 1 + max(depth(left), depth(right))
+
+task max(a: int, b: int) -> int
+    return if a > b then a else b
+
+let a = first([1, 2])
+if a is int
+    print a
+let b = first(["x"])
+if b is not none
+    print b
+print same(3.5)
+print same("t")
+print same[int?](none) is none
+let c: int? = same[int?](7)
+if c is int
+    print c
+
+let p = pair_up(1, "one")
+print p.left
+print p.right
+var q = Pair[text, float](left: "l", right: 1.5)
+q.right += 1.0
+q.left = "m"
+print q.left
+print q.right
+
+print repeat("a", 3).len()
+print repeat(1.5, 2)[1]
+print repeat([1], 2)[1][0]
+print or_default(none, 4)
+print or_default(5, 4)
+print or_default("s", "d")
+print or_default[int?](none, none) is none
+print count([1, 2, 3])
+print count(["a"], from: 10)
+print nothing[int]().len()
+print nothing[text]().is_empty()
+
+let t = Tagged(value: 5)
+print t.tag
+print t.value
+let u = Tagged[text?](value: none)
+print u.value is none
+let v: Tagged[text?] = Tagged(tag: "x", value: "y")
+print v.tag
+
+var tree: Tree[int] = Leaf
+tree = insert(tree, 1, 0)
+tree = insert(tree, 2, 0)
+print depth(tree)
+let empty_tree = Leaf[text]
+print depth(empty_tree)
+
+let names: Names = ["a"]
+let table: Table[int] = {"x": 1}
+print names[0]
+print table["x"]
+
+let flat: Pair[int?, list[int?]] = Pair(left: none, right: [1, none])
+print flat.right.len()

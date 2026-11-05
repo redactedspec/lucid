@@ -1,0 +1,21 @@
+generics.lcd:8:11: error E0303: `+` needs a number, found `T`
+generics.lcd:9:13: error E0303: `T` might not be shown here
+generics.lcd:10:8: error E0303: `is none` gives one answer for every `T`
+  note: `is` tests what a union holds, and `==` tests equality
+generics.lcd:12:12: error E0303: this `return` needs `T`, found `int`
+generics.lcd:14:15: error E0304: `T` is already defined
+generics.lcd:17:11: error E0304: `int` is already defined
+generics.lcd:31:9: error E0319: cannot tell what `T` is here
+  note: name the types, as in `blank[int](...)`
+generics.lcd:32:9: error E0319: cannot tell what `T` is here
+  note: name the types, as in `Nothing[int](...)`
+generics.lcd:33:9: error E0307: `Pair` is missing field `right`
+generics.lcd:34:8: error E0321: `Pair` takes 2 type arguments, found 1
+generics.lcd:35:8: error E0321: `Pair` takes 2 type arguments, found 0
+generics.lcd:36:8: error E0321: `int` takes 0 type arguments, found 1
+generics.lcd:37:9: error E0321: `same` takes 1 type argument, found 2
+generics.lcd:38:17: error E0303: this argument needs `int`, found `text`
+generics.lcd:39:14: error E0321: `Pair` takes 2 type arguments, found 0
+generics.lcd:40:14: error E0322: this is not a type
+generics.lcd:41:19: error E0303: this argument needs `int`, found `float`
+  note: conversions are explicit: use `.to_int()`

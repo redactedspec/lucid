@@ -207,6 +207,10 @@ pub enum ExprKind {
         base: Box<Expr>,
         name: Name,
     },
+    /// `T?`, which is only a type: the checker rejects it outside type arguments.
+    Optional(Box<Expr>),
+    /// `any T` or a `task(...)` type, which the same rule covers.
+    Type(Type),
     /// Only in value position: after `let`, `var`, and `return`, or as a statement.
     Match {
         subject: Box<Expr>,

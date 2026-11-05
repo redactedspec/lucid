@@ -1,0 +1,52 @@
+# Parameters that turn out to be unions, or `none`, or the same type.
+type Box
+    value: int
+
+task unwrap[T](value: T?, fallback: T) -> T
+    if value is none
+        return fallback
+    var held = value
+    held = fallback
+    return value
+
+task either[A, B](value: A or B, a: A) -> A
+    match value
+        x: A -> return x
+        _ -> return a
+
+task pick[T](value: T or int) -> int
+    if value is int
+        return value
+    return -1
+
+task bump[T](value: T or Box) -> int
+    var held = value
+    if held is Box
+        held.value += 1
+        return held.value
+    return 0
+
+print unwrap(1, 2)
+print unwrap(none, 2)
+print unwrap[int?](none, 3) is int
+print unwrap[none](none, none)
+
+print either[int, text](1, 2)
+print either[int, text]("a", 2)
+print either[int, int](1, 2)
+
+print pick[text]("a")
+print pick[text](4)
+print pick[int](5)
+print pick[int?](none)
+
+print bump[text]("a")
+print bump[text](Box(value: 1))
+print bump[Box](Box(value: 2))
+print bump[Box?](none)
+
+task wrap[T](value: T) -> list[T?]
+    return [value, none]
+print wrap(1).len()
+print wrap[int?](none).len()
+

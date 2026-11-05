@@ -1,12 +1,13 @@
 //! Binds names, checks types, and lowers the syntax tree to MIR in one pass.
-//! There are no modules or generics yet, so nothing needs separate stages.
-//! List, map, and set tasks are built in until generics can express them.
+//! A generic body is checked once, with its parameters as opaque types, and
+//! `mono.rs` makes the concrete tasks. There are no modules yet, so nothing
+//! else needs a separate stage. List, map, and set tasks are built in.
 
 use crate::ast::{
     self, BinaryOp, ExprKind as Ast, StmtKind, TextPart, TypeBody, TypeKind, UnaryOp,
 };
 use crate::diag::{Diagnostic, Span};
-use crate::mir::{Expr, ExprKind, Local, Program, Stmt, Task, Ty, Update, inner};
+use crate::mir::{Expr, ExprKind, Local, Program, Shape, Stmt, Task, Ty, Types, Update, inner};
 use std::collections::{HashMap, HashSet};
 
 /// Names of the spec's built-in types that this milestone cannot represent.
@@ -18,6 +19,10 @@ const BUILT_IN_TYPES: [&str; 8] = ["int", "float", "bool", "byte", "text", "list
 
 /// The same limit as nesting in the parser, for a chain of aliases.
 const MAX_ALIASES: usize = 128;
+
+/// How many instances of generic types the E0315 check follows. A type past
+/// this limit counts as finite, and `mono.rs` stops any that really grows.
+const MAX_FINITE_CHECK: usize = 1024;
 
 /// Dot calls that change their receiver, so they only work as statements, or
 /// for `pop`, as the whole value of one.
@@ -44,14 +49,19 @@ pub fn check(file: &ast::File) -> (Program, Vec<Diagnostic>) {
         .collect();
     let main = checker.main(file);
 
+    let datas = checker.datas.iter().map(Data::shape).collect();
     let mut diags = checker.diags;
     if diags.iter().any(|d| d.code == "E0901") {
         diags.retain(|d| d.code == "E0901");
     }
-    (Program { tasks, main }, diags)
+    (Program { tasks, main, types: checker.table, datas }, diags)
 }
 
+/// Type parameters in scope, with the type that each one stands for.
+type TypeEnv<'a> = Vec<(&'a str, Ty)>;
+
 struct Signature<'a> {
+    type_params: TypeEnv<'a>,
     params: Vec<Param<'a>>,
     returns: Ty,
 }
@@ -66,30 +76,39 @@ struct Param<'a> {
 #[derive(Clone, Copy)]
 enum Named<'a> {
     Known(Ty),
-    /// Replaced by `Known` once resolved.
-    Alias(&'a ast::Type),
+    /// A `type` or `choice` with type parameters.
+    Generic(usize),
+    /// Replaced by `Known` once resolved, unless it has type parameters.
+    Alias(&'a ast::Type, &'a [ast::TypeParam]),
 }
 
 /// A `type`, which has one variant with its own name, or a `choice`.
 struct Data<'a> {
     name: &'a ast::Name,
+    /// With its own parameters as type arguments.
     ty: Ty,
+    type_params: TypeEnv<'a>,
     choice: bool,
     variants: Vec<Variant<'a>>,
+}
+
+impl Data<'_> {
+    fn shape(&self) -> Shape {
+        let fields = |variant: &Variant| variant.fields.iter().map(|field| field.ty).collect();
+        Shape { variants: self.variants.iter().map(fields).collect() }
+    }
 }
 
 struct Variant<'a> {
     name: &'a str,
     /// In written order, which is what a pattern binds.
     fields: Vec<Field<'a>>,
-    /// The number of counted fields, which take the first slots.
-    counted: usize,
 }
 
 struct Field<'a> {
     name: &'a str,
+    /// Uses the type parameters of its `type` or `choice`.
     ty: Ty,
-    slot: usize,
     default: Option<Expr>,
 }
 
@@ -124,6 +143,8 @@ struct Checker<'a> {
     task_ids: HashMap<&'a str, usize>,
     signatures: Vec<Signature<'a>>,
     types: HashMap<&'a str, Named<'a>>,
+    /// The type parameters that a written name can reach here.
+    type_params: TypeEnv<'a>,
     datas: Vec<Data<'a>>,
     /// A type or variant name, with its data and variant index.
     constructors: HashMap<&'a str, (usize, usize)>,
@@ -136,10 +157,27 @@ struct Checker<'a> {
     /// The return type, or `None` at top level.
     returns: Option<Ty>,
     loops: usize,
-    /// Every member of a union. A position here is the tag of that type.
-    type_ids: Vec<Ty>,
+    table: Types,
     /// What tests have proved about locals, latest last. See `forget`.
     narrowed: Vec<(Local, Ty)>,
+}
+
+/// The parameters that a declaration brings into scope, by position.
+fn own_params(params: &[ast::TypeParam]) -> TypeEnv<'_> {
+    (params.iter().enumerate())
+        .map(|(index, p)| (p.name.text.as_str(), Ty::Param(p.name.text.clone().leak(), index)))
+        .collect()
+}
+
+/// True if `part` appears anywhere in `ty`.
+fn mentions(ty: Ty, part: Ty) -> bool {
+    ty == part
+        || match ty {
+            Ty::List(item) | Ty::Set(item) => mentions(*item, part),
+            Ty::Map(key, value) => mentions(*key, part) || mentions(*value, part),
+            Ty::Data(_, _, args) | Ty::Union(args) => args.iter().any(|&a| mentions(a, part)),
+            _ => false,
+        }
 }
 
 fn poisoned(span: Span) -> Expr {
@@ -189,21 +227,20 @@ fn ends(stmts: &[Stmt], jumps: bool) -> bool {
     })
 }
 
-/// A union value as a narrower type: the same record for a smaller union, or
-/// else what its slot holds.
+/// A union value as a narrower type.
 fn view(value: Expr, ty: Ty) -> Expr {
-    if ty == value.ty || matches!(ty, Ty::Union(_) | Ty::Error) {
+    if ty == value.ty || ty == Ty::Error {
         return Expr { ty, ..value };
     }
     let span = value.span;
-    Expr { kind: ExprKind::Field(value.into(), 0), ty, span }
+    Expr { kind: ExprKind::View(value.into()), ty, span }
 }
 
 /// True if reading `value` twice costs nothing and changes nothing.
 fn repeatable(value: &Expr) -> bool {
     match &value.kind {
         ExprKind::Local(_) | ExprKind::Int(_) | ExprKind::Bool(_) => true,
-        ExprKind::Field(inner, _) => repeatable(inner),
+        ExprKind::Member { value: inner, .. } | ExprKind::View(inner) => repeatable(inner),
         ExprKind::ListGet(base, key) | ExprKind::MapGet(base, key) => {
             repeatable(base) && repeatable(key)
         }
@@ -269,31 +306,11 @@ impl<'a> Checker<'a> {
 
     /// The tag of a member of a union.
     fn type_id(&self, ty: Ty) -> usize {
-        self.type_ids.iter().position(|&known| known == ty).expect("a union lists its members")
+        self.table.id(ty)
     }
 
-    /// Flattens and orders members into one type. One member is that member.
     fn union(&mut self, members: impl IntoIterator<Item = Ty>) -> Ty {
-        let mut flat = Vec::new();
-        for member in members {
-            if member == Ty::Error {
-                return Ty::Error;
-            }
-            for &ty in member.members() {
-                if !flat.contains(&ty) {
-                    flat.push(ty);
-                }
-                if !self.type_ids.contains(&ty) {
-                    self.type_ids.push(ty);
-                }
-            }
-        }
-        flat.sort_by_key(|&ty| self.type_id(ty));
-        match flat.as_slice() {
-            [] => Ty::Error,
-            &[one] => one,
-            _ => Ty::Union(flat.leak()),
-        }
+        self.table.union(members)
     }
 
     /// Makes `value` a `want`, if `want` is a union that accepts it. Any other
@@ -303,12 +320,8 @@ impl<'a> Checker<'a> {
         if value.ty.members().iter().any(|member| !members.contains(member)) {
             return value;
         }
-        if matches!(value.ty, Ty::Union(_)) {
-            return Expr { ty: want, ..value };
-        }
-        let (tag, counted, span) =
-            (self.type_id(value.ty), usize::from(value.ty.is_counted()), value.span);
-        Expr { kind: ExprKind::New { tag, counted, fields: vec![(0, value)] }, ty: want, span }
+        let span = value.span;
+        Expr { kind: ExprKind::Wrap(value.into()), ty: want, span }
     }
 
     /// Splits a union by a test for `want`: what a true test leaves, then what
@@ -438,44 +451,125 @@ impl<'a> Checker<'a> {
     }
 
     fn ty(&mut self, ty: &'a ast::Type) -> Ty {
-        let name = match &ty.kind {
-            TypeKind::None => return Ty::None,
+        match &ty.kind {
+            TypeKind::None => Ty::None,
             TypeKind::Union(terms) => {
                 let members: Vec<Ty> = terms.iter().map(|term| self.ty(term)).collect();
-                return self.union(members);
+                self.union(members)
             }
             TypeKind::Optional(inner) => {
                 let inner = self.ty(inner);
-                return self.union([inner, Ty::None]);
+                self.union([inner, Ty::None])
             }
-            TypeKind::Named { path, args } => match (path.as_slice(), args.as_slice()) {
-                ([name], args) if matches!(name.text.as_str(), "list" | "map" | "set") => {
-                    return self.collection_type(&name.text, args, ty.span);
+            TypeKind::Named { path, args } => match path.as_slice() {
+                [name] => {
+                    let args: Vec<Ty> = args.iter().map(|arg| self.ty(arg)).collect();
+                    self.named(&name.text, args, ty.span)
                 }
-                ([name], []) => name.text.as_str(),
-                _ => "",
+                _ => self.unsupported("this type", ty.span).ty,
             },
-            _ => "",
-        };
-        match name {
-            "int" => Ty::Int,
-            "float" => Ty::Float,
-            "bool" => Ty::Bool,
-            "byte" => Ty::Byte,
-            "text" => Ty::Text,
-            "" => self.unsupported("this type", ty.span).ty,
-            name if LATER_TYPES.contains(&name) => {
-                self.unsupported(&format!("type `{name}`"), ty.span).ty
-            }
-            name => match self.types.get_key_value(name) {
-                Some((_, &Named::Known(known))) => known,
-                Some((&name, &Named::Alias(target))) => self.alias(name, target, ty.span),
-                None => self.fail("E0302", format!("type `{name}` is not defined"), ty.span).ty,
-            },
+            _ => self.unsupported("this type", ty.span).ty,
         }
     }
 
-    fn alias(&mut self, name: &'a str, target: &'a ast::Type, span: Span) -> Ty {
+    /// Reads a type argument, which the parser kept as an expression. See
+    /// decision 65.
+    fn expr_type(&mut self, expr: &'a ast::Expr) -> Ty {
+        let span = expr.span;
+        match &expr.kind {
+            Ast::None => Ty::None,
+            Ast::Name(name) => self.named(name, Vec::new(), span),
+            Ast::Index { base, indices } => {
+                let args: Vec<Ty> = indices.iter().map(|arg| self.expr_type(arg)).collect();
+                match &base.kind {
+                    Ast::Name(name) => self.named(name, args, span),
+                    _ => self.fail("E0322", "this is not a type".into(), span).ty,
+                }
+            }
+            Ast::Binary(BinaryOp::Or, left, right) => {
+                let (left, right) = (self.expr_type(left), self.expr_type(right));
+                self.union([left, right])
+            }
+            Ast::Optional(inner) => {
+                let inner = self.expr_type(inner);
+                self.union([inner, Ty::None])
+            }
+            Ast::Type(ty) => self.ty(ty),
+            _ => self.fail("E0322", "this is not a type".into(), span).ty,
+        }
+    }
+
+    /// The type that a written name means, with its type arguments.
+    fn named(&mut self, name: &str, args: Vec<Ty>, span: Span) -> Ty {
+        if args.contains(&Ty::Error) {
+            return Ty::Error;
+        }
+        if let Some(&(_, param)) = self.type_params.iter().find(|(known, _)| *known == name) {
+            return if self.arity(name, 0, args.len(), span) { param } else { Ty::Error };
+        }
+        if matches!(name, "list" | "map" | "set") {
+            return self.collection_type(name, &args, span);
+        }
+        let plain = match name {
+            "int" => Some(Ty::Int),
+            "float" => Some(Ty::Float),
+            "bool" => Some(Ty::Bool),
+            "byte" => Some(Ty::Byte),
+            "text" => Some(Ty::Text),
+            _ => None,
+        };
+        if let Some(plain) = plain {
+            return if self.arity(name, 0, args.len(), span) { plain } else { Ty::Error };
+        }
+        if LATER_TYPES.contains(&name) {
+            return self.unsupported(&format!("type `{name}`"), span).ty;
+        }
+        match self.types.get_key_value(name) {
+            Some((_, &Named::Known(known))) => {
+                if self.arity(name, 0, args.len(), span) {
+                    known
+                } else {
+                    Ty::Error
+                }
+            }
+            Some((_, &Named::Generic(id))) => {
+                let want = self.datas[id].type_params.len();
+                if !self.arity(name, want, args.len(), span) {
+                    return Ty::Error;
+                }
+                let Ty::Data(name, ..) = self.datas[id].ty else {
+                    unreachable!("a data type has its own name")
+                };
+                Ty::Data(name, id, args.leak())
+            }
+            Some((&name, &Named::Alias(target, params))) => {
+                if !self.arity(name, params.len(), args.len(), span) {
+                    return Ty::Error;
+                }
+                self.alias(name, target, params, &args, span)
+            }
+            None => self.fail("E0302", format!("type `{name}` is not defined"), span).ty,
+        }
+    }
+
+    /// Reports E0321 unless a name gets as many type arguments as it declares.
+    fn arity(&mut self, name: &str, want: usize, given: usize, span: Span) -> bool {
+        if want != given {
+            let plural = if want == 1 { "" } else { "s" };
+            let message = format!("`{name}` takes {want} type argument{plural}, found {given}");
+            self.fail("E0321", message, span);
+        }
+        want == given
+    }
+
+    fn alias(
+        &mut self,
+        name: &'a str,
+        target: &'a ast::Type,
+        params: &'a [ast::TypeParam],
+        args: &[Ty],
+        span: Span,
+    ) -> Ty {
         if self.resolving.contains(&name) {
             let message = format!("alias `{name}` is defined by itself");
             return self.fail("E0315", message, span).ty;
@@ -483,17 +577,20 @@ impl<'a> Checker<'a> {
         if self.resolving.len() == MAX_ALIASES {
             return self.fail("E0205", "aliases are nested too deep".into(), span).ty;
         }
+        let env = params.iter().map(|p| p.name.text.as_str()).zip(args.iter().copied()).collect();
+        let outer = std::mem::replace(&mut self.type_params, env);
         self.resolving.push(name);
         let ty = self.ty(target);
         self.resolving.pop();
-        self.types.insert(name, Named::Known(ty));
+        self.type_params = outer;
+        if params.is_empty() {
+            self.types.insert(name, Named::Known(ty));
+        }
         ty
     }
 
-    fn collection_type(&mut self, name: &str, args: &'a [ast::Type], span: Span) -> Ty {
-        let args: Vec<Ty> = args.iter().map(|arg| self.ty(arg)).collect();
-        match (name, args.as_slice()) {
-            (_, args) if args.contains(&Ty::Error) => Ty::Error,
+    fn collection_type(&mut self, name: &str, args: &[Ty], span: Span) -> Ty {
+        match (name, args) {
             ("list", &[item]) => Ty::List(inner(item)),
             ("set", &[item]) => {
                 self.check_key(item, span);
@@ -554,16 +651,42 @@ impl<'a> Checker<'a> {
         if public {
             self.unsupported("`public`", span);
         }
-        if let Some(first) = params.first() {
-            self.unsupported("a generic type", first.name.span);
+        if let Some(first) = params.iter().find(|param| param.bound.is_some()) {
+            self.unsupported("a type parameter bound", first.name.span);
         }
     }
 
-    fn new_data(&mut self, name: &'a ast::Name, choice: bool) -> usize {
+    /// Reports a type parameter that reuses a name. A field or parameter could
+    /// otherwise not tell it from the type that it hides.
+    fn check_type_params(&mut self, params: &'a [ast::TypeParam]) {
+        let mut seen: Vec<&str> = Vec::new();
+        for param in params {
+            let text = param.name.text.as_str();
+            let taken = seen.contains(&text)
+                || self.types.contains_key(text)
+                || BUILT_IN_TYPES.contains(&text)
+                || LATER_TYPES.contains(&text);
+            if taken {
+                self.fail("E0304", format!("`{text}` is already defined"), param.name.span);
+            }
+            seen.push(text);
+        }
+    }
+
+    fn new_data(
+        &mut self,
+        name: &'a ast::Name,
+        params: &'a [ast::TypeParam],
+        choice: bool,
+    ) -> usize {
         let id = self.datas.len();
-        let ty = Ty::Data(name.text.clone().leak(), id);
-        self.datas.push(Data { name, ty, choice, variants: Vec::new() });
-        self.types.insert(&name.text, Named::Known(ty));
+        let type_params = own_params(params);
+        let args: Vec<Ty> = type_params.iter().map(|&(_, ty)| ty).collect();
+        let generic = !args.is_empty();
+        let ty = Ty::Data(name.text.clone().leak(), id, args.leak());
+        self.datas.push(Data { name, ty, type_params, choice, variants: Vec::new() });
+        let named = if generic { Named::Generic(id) } else { Named::Known(ty) };
+        self.types.insert(&name.text, named);
         id
     }
 
@@ -571,6 +694,7 @@ impl<'a> Checker<'a> {
     /// all names go in first, then aliases resolve, then fields.
     fn declare_types(&mut self, file: &'a ast::File) {
         let mut aliases = Vec::new();
+        let mut headers = Vec::new();
         let mut written: Vec<(usize, usize, Vec<WrittenField<'a>>)> = Vec::new();
         for stmt in &file.stmts {
             match &stmt.kind {
@@ -579,19 +703,18 @@ impl<'a> Checker<'a> {
                     if !self.define_data(&def.name) {
                         continue;
                     }
+                    headers.push(def.type_params.as_slice());
                     match &def.body {
                         TypeBody::Alias(target) => {
-                            self.types.insert(&def.name.text, Named::Alias(target));
-                            aliases.push((def.name.text.as_str(), target, def.name.span));
+                            let name = def.name.text.as_str();
+                            let params = def.type_params.as_slice();
+                            self.types.insert(name, Named::Alias(target, params));
+                            aliases.push((name, target, params, def.name.span));
                         }
                         TypeBody::Fields(fields) => {
-                            let id = self.new_data(&def.name, false);
+                            let id = self.new_data(&def.name, &def.type_params, false);
                             let name = def.name.text.as_str();
-                            self.datas[id].variants.push(Variant {
-                                name,
-                                fields: Vec::new(),
-                                counted: 0,
-                            });
+                            self.datas[id].variants.push(Variant { name, fields: Vec::new() });
                             self.constructors.insert(name, (id, 0));
                             let fields = fields
                                 .iter()
@@ -606,18 +729,15 @@ impl<'a> Checker<'a> {
                     if !self.define_data(&def.name) {
                         continue;
                     }
-                    let id = self.new_data(&def.name, true);
+                    headers.push(def.type_params.as_slice());
+                    let id = self.new_data(&def.name, &def.type_params, true);
                     for variant in &def.variants {
                         let name = variant.name.text.as_str();
                         let index = self.datas[id].variants.len();
                         if self.define_data(&variant.name) {
                             self.constructors.insert(name, (id, index));
                         }
-                        self.datas[id].variants.push(Variant {
-                            name,
-                            fields: Vec::new(),
-                            counted: 0,
-                        });
+                        self.datas[id].variants.push(Variant { name, fields: Vec::new() });
                         let fields = variant
                             .params
                             .iter()
@@ -632,23 +752,25 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
         }
-        for (name, target, span) in aliases {
-            if let Some(Named::Alias(_)) = self.types.get(name) {
-                self.alias(name, target, span);
+        for params in headers {
+            self.check_type_params(params);
+        }
+        for (name, target, params, span) in aliases {
+            if let Some(Named::Alias(..)) = self.types.get(name) {
+                let args: Vec<Ty> = own_params(params).iter().map(|&(_, ty)| ty).collect();
+                self.alias(name, target, params, &args, span);
             }
         }
         for (id, variant, fields) in written {
-            let (fields, counted) = self.fields(fields);
-            let variant = &mut self.datas[id].variants[variant];
-            variant.fields = fields;
-            variant.counted = counted;
+            self.type_params.clone_from(&self.datas[id].type_params);
+            let fields = self.fields(fields);
+            self.type_params.clear();
+            self.datas[id].variants[variant].fields = fields;
         }
         self.check_finite();
     }
 
-    /// Counted fields take the first slots, so that a record needs only their
-    /// number to know what it holds.
-    fn fields(&mut self, written: Vec<WrittenField<'a>>) -> (Vec<Field<'a>>, usize) {
+    fn fields(&mut self, written: Vec<WrittenField<'a>>) -> Vec<Field<'a>> {
         let mut fields: Vec<Field<'a>> = Vec::with_capacity(written.len());
         for (name, ty, default, plain) in written {
             if !plain {
@@ -660,49 +782,67 @@ impl<'a> Checker<'a> {
                 self.fail("E0304", format!("`{}` is already defined", name.text), name.span);
             }
             let default = default.map(|value| self.default_value(value, ty));
-            fields.push(Field { name: &name.text, ty, slot: 0, default });
+            fields.push(Field { name: &name.text, ty, default });
         }
-        let counted = fields.iter().filter(|field| field.ty.is_counted()).count();
-        let (mut held, mut plain) = (0, counted);
-        for field in &mut fields {
-            let next = if field.ty.is_counted() { &mut held } else { &mut plain };
-            field.slot = *next;
-            *next += 1;
-        }
-        (fields, counted)
+        fields
+    }
+
+    /// The field types of each variant of a `type` or `choice`, with its type
+    /// arguments in place.
+    fn variants_of(&mut self, ty: Ty) -> Vec<Vec<Ty>> {
+        let Ty::Data(_, id, args) = ty else { return Vec::new() };
+        let written: Vec<Vec<Ty>> = self.datas[id].shape().variants;
+        let table = &mut self.table;
+        let subst = |fields: Vec<Ty>| fields.iter().map(|&f| table.subst(f, args)).collect();
+        written.into_iter().map(subst).collect()
     }
 
     /// Reports a type with no finite value. Recursion must pass through a
-    /// variant that can avoid it, or a collection that can be empty.
+    /// variant that can avoid it, or a collection that can be empty. A generic
+    /// type needs this per instance: `type R` with a `W[R]` field holds itself
+    /// if `W[T]` holds a `T`.
     fn check_finite(&mut self) {
-        fn holds(ty: Ty, finite: &[bool]) -> bool {
+        fn holds(ty: Ty, finite: &HashSet<Ty>, instances: &[Ty]) -> bool {
             match ty {
-                Ty::Data(_, id) => finite[id],
-                Ty::Union(members) => members.iter().any(|&member| holds(member, finite)),
+                Ty::Data(..) => finite.contains(&ty) || !instances.contains(&ty),
+                Ty::Union(members) => members.iter().any(|&m| holds(m, finite, instances)),
                 _ => true,
             }
         }
-        let mut finite = vec![false; self.datas.len()];
+        let mut instances: Vec<Ty> = self.datas.iter().map(|data| data.ty).collect();
+        let mut shapes = Vec::new();
+        let limit = MAX_FINITE_CHECK.max(instances.len());
+        while shapes.len() < instances.len() && shapes.len() < limit {
+            let variants = self.variants_of(instances[shapes.len()]);
+            for &field in variants.iter().flatten() {
+                for &member in field.members() {
+                    if matches!(member, Ty::Data(..)) && !instances.contains(&member) {
+                        instances.push(member);
+                    }
+                }
+            }
+            shapes.push(variants);
+        }
+        instances.truncate(shapes.len());
+        let mut finite = HashSet::new();
         let mut changed = true;
         while changed {
             changed = false;
-            for (id, data) in self.datas.iter().enumerate() {
-                let reachable = data
-                    .variants
+            for (&ty, variants) in instances.iter().zip(&shapes) {
+                let reachable = variants
                     .iter()
-                    .any(|variant| variant.fields.iter().all(|f| holds(f.ty, &finite)));
-                if reachable && !finite[id] {
-                    finite[id] = true;
-                    changed = true;
-                }
+                    .any(|fields| fields.iter().all(|&f| holds(f, &finite, &instances)));
+                changed |= reachable && finite.insert(ty);
             }
         }
-        for id in (0..finite.len()).filter(|&id| !finite[id]) {
-            let name = self.datas[id].name;
-            let message = format!("`{}` has no finite value", name.text);
-            let note = "building it needs a type that holds itself: add a variant with no such \
-                        field, or hold the value in a list or a union such as `T?`";
-            self.report(Diagnostic::new("E0315", message, name.span).note(note));
+        for id in 0..self.datas.len() {
+            if !finite.contains(&self.datas[id].ty) {
+                let name = self.datas[id].name;
+                let message = format!("`{}` has no finite value", name.text);
+                let note = "building it needs a type that holds itself: add a variant with no \
+                            such field, or hold the value in a list or a union such as `T?`";
+                self.report(Diagnostic::new("E0315", message, name.span).note(note));
+            }
         }
     }
 
@@ -737,9 +877,12 @@ impl<'a> Checker<'a> {
     }
 
     fn signature(&mut self, sig: &'a ast::TaskSig) -> Signature<'a> {
-        if let Some(first) = sig.type_params.first() {
-            self.unsupported("a generic task", first.name.span);
+        if let Some(first) = sig.type_params.iter().find(|param| param.bound.is_some()) {
+            self.unsupported("a type parameter bound", first.name.span);
         }
+        self.check_type_params(&sig.type_params);
+        let type_params = own_params(&sig.type_params);
+        self.type_params.clone_from(&type_params);
         let mut params: Vec<Param<'a>> = Vec::new();
         for param in &sig.params {
             let span = param.name.span;
@@ -761,7 +904,8 @@ impl<'a> Checker<'a> {
             params.push(Param { name: &param.name.text, ty, default });
         }
         let returns = sig.returns.as_ref().map_or(Ty::None, |ty| self.ty(ty));
-        Signature { params, returns }
+        self.type_params.clear();
+        Signature { type_params, params, returns }
     }
 
     fn default_value(&mut self, value: &'a ast::Expr, ty: Ty) -> Expr {
@@ -782,6 +926,7 @@ impl<'a> Checker<'a> {
     ) -> Task {
         let returns = self.signatures[id].returns;
         self.returns = Some(returns);
+        self.type_params.clone_from(&self.signatures[id].type_params);
         let params: Vec<(&'a str, Ty)> =
             self.signatures[id].params.iter().map(|p| (p.name, p.ty)).collect();
         let mut scope = HashMap::new();
@@ -797,7 +942,10 @@ impl<'a> Checker<'a> {
             self.fail("E0309", message, name.span);
         }
         self.mutable.clear();
-        Task { params: params.len(), returns, locals: std::mem::take(&mut self.locals), body, span }
+        let type_params = self.type_params.len();
+        self.type_params.clear();
+        let locals = std::mem::take(&mut self.locals);
+        Task { params: params.len(), type_params, returns, locals, body, span }
     }
 
     fn main(&mut self, file: &'a ast::File) -> Task {
@@ -805,7 +953,8 @@ impl<'a> Checker<'a> {
         self.scopes.push(HashMap::new());
         let body = self.stmts(&file.stmts);
         let span = Span { start: 0, end: 0 };
-        Task { params: 0, returns: Ty::None, locals: std::mem::take(&mut self.locals), body, span }
+        let locals = std::mem::take(&mut self.locals);
+        Task { params: 0, type_params: 0, returns: Ty::None, locals, body, span }
     }
 
     fn new_local(&mut self, ty: Ty, mutable: bool) -> Local {
@@ -1121,7 +1270,7 @@ impl<'a> Checker<'a> {
     /// The `choice` that a value of this type belongs to, if any.
     fn choice_of(&self, ty: Ty) -> Option<usize> {
         match ty {
-            Ty::Data(_, id) if self.datas[id].choice => Some(id),
+            Ty::Data(_, id, _) if self.datas[id].choice => Some(id),
             _ => None,
         }
     }
@@ -1226,7 +1375,7 @@ impl<'a> Checker<'a> {
             self.fail("E0317", message, span);
         }
         let bound = local.map(|local| Stmt::Set(local, view(self.read(holder, span), target)));
-        let kind = ExprKind::TagIn(self.read(holder, span).into(), ids);
+        let kind = ExprKind::Holds(self.read(holder, span).into(), target.members().to_vec());
         (Some(Expr { kind, ty: Ty::Bool, span }), bound.into_iter().collect())
     }
 
@@ -1324,14 +1473,15 @@ impl<'a> Checker<'a> {
         }
         for (index, binding) in bindings.iter().enumerate() {
             let field = self.datas[id].variants[variant].fields.get(index);
-            let (field_ty, slot) = field.map_or((Ty::Error, 0), |field| (field.ty, field.slot));
+            let field_ty = field.map_or(Ty::Error, |field| field.ty);
+            let field_ty = self.subst_data(field_ty, ty);
             if binding.text == "_" {
                 continue;
             }
             self.check_binding(binding);
             let local = self.bind(binding, field_ty, false);
-            let from = self.read(holder, span).into();
-            let kind = ExprKind::Field(from, slot);
+            let value = self.read(holder, span).into();
+            let kind = ExprKind::Member { value, variant, field: index };
             bound.push(Stmt::Set(local, Expr { kind, ty: field_ty, span }));
         }
         let int = |kind| Box::new(Expr { kind, ty: Ty::Int, span });
@@ -1419,7 +1569,7 @@ impl<'a> Checker<'a> {
                     return Some(place);
                 }
                 // A narrowed union: what it holds is a field of its record.
-                let read = self.slot_of(local, 0, ty, span);
+                let read = view(self.read(local, span), ty);
                 let key = Expr { kind: ExprKind::Int(0), ty: Ty::Int, span };
                 Some(self.step(place, key, read))
             }
@@ -1487,7 +1637,8 @@ impl<'a> Checker<'a> {
     fn write(&self, local: Local, key: Expr, value: Expr, span: Span) -> Stmt {
         let op = match self.locals[local] {
             Ty::List(_) => Update::ListSet,
-            Ty::Data(..) | Ty::Union(_) => Update::FieldSet,
+            Ty::Data(..) => Update::FieldSet,
+            Ty::Union(_) => Update::UnionSet,
             _ => Update::MapSet,
         };
         Stmt::Update { local, op, args: vec![key, value], span }
@@ -1557,15 +1708,22 @@ impl<'a> Checker<'a> {
         Some(place.stmts(write))
     }
 
-    fn slot_of(&self, local: Local, slot: usize, ty: Ty, span: Span) -> Expr {
-        Expr { kind: ExprKind::Field(self.read(local, span).into(), slot), ty, span }
+    fn slot_of(&self, local: Local, field: usize, ty: Ty, span: Span) -> Expr {
+        let value = self.read(local, span).into();
+        Expr { kind: ExprKind::Member { value, variant: 0, field }, ty, span }
     }
 
-    /// Finds a field of a `type`. Returns its slot and type.
+    /// A field type of `data`, with the type arguments of `data` in place.
+    fn subst_data(&mut self, field: Ty, data: Ty) -> Ty {
+        let Ty::Data(_, _, args) = data else { return field };
+        self.table.subst(field, args)
+    }
+
+    /// Finds a field of a `type`. Returns its position and type.
     fn field(&mut self, ty: Ty, name: &ast::Name) -> Option<(usize, Ty)> {
         let id = match ty {
             Ty::Error => return None,
-            Ty::Data(_, id) if !self.datas[id].choice => id,
+            Ty::Data(_, id, _) if !self.datas[id].choice => id,
             Ty::Data(..) => {
                 let message = format!("`{}` is a `choice`, so it has no fields", ty.name());
                 let diag = Diagnostic::new("E0303", message, name.span);
@@ -1581,24 +1739,108 @@ impl<'a> Checker<'a> {
             _ => usize::MAX,
         };
         let fields = self.datas.get(id).map_or(&[][..], |data| &data.variants[0].fields);
-        let found = fields.iter().find(|f| f.name == name.text).map(|f| (f.slot, f.ty));
+        let found = fields.iter().position(|f| f.name == name.text);
+        let found = found.map(|index| (index, fields[index].ty));
         if found.is_none() {
             let message = format!("`{}` has no field `{}`", ty.name(), name.text);
             self.fail("E0303", message, name.span);
         }
-        found
+        found.map(|(index, field)| (index, self.subst_data(field, ty)))
+    }
+
+    /// A type with what is known so far of the type parameters in it, or
+    /// `None` if one is still open.
+    fn partial(&mut self, pattern: Ty, known: &[Option<Ty>]) -> Option<Ty> {
+        let args: Option<Vec<Ty>> = known.iter().copied().collect();
+        if let Some(args) = args {
+            return Some(self.table.subst(pattern, &args));
+        }
+        if !pattern.has_param() {
+            return Some(pattern);
+        }
+        let open = Ty::Param("", usize::MAX);
+        let args: Vec<Ty> = known.iter().map(|ty| ty.unwrap_or(open)).collect();
+        let found = self.table.subst(pattern, &args);
+        (!mentions(found, open)).then_some(found)
+    }
+
+    /// Lowers a value for a parameter or field of type `pattern`, whose type
+    /// parameters may come from this value. Types flow left to right, as in a
+    /// list literal, so an earlier value gives a type to a later one. See
+    /// decision 67. `settled` checks the result, once all types are known.
+    fn inferred(&mut self, value: &'a ast::Expr, pattern: Ty, known: &mut [Option<Ty>]) -> Expr {
+        let want = self.partial(pattern, known);
+        let lowered = self.expected(value, want);
+        if want.is_none() {
+            self.table.unify(pattern, lowered.ty, known);
+        }
+        lowered
+    }
+
+    /// Gives a value its final type, and checks it. A `none` for a `T?` could
+    /// not widen before a later value told what `T` is.
+    fn settled(&mut self, value: Expr, ty: Ty, what: &str) -> Expr {
+        let value = self.widen(value, ty);
+        self.expect(&value, ty, what);
+        value
+    }
+
+    /// Finishes type arguments. Reports E0319 for one with no answer, unless
+    /// an error was already reported since `reported`.
+    fn solved(
+        &mut self,
+        name: &str,
+        params: &[&str],
+        known: &[Option<Ty>],
+        reported: usize,
+        span: Span,
+    ) -> Option<&'static [Ty]> {
+        if let Some(index) = known.iter().position(Option::is_none) {
+            if self.diags.len() == reported {
+                let message = format!("cannot tell what `{}` is here", params[index]);
+                let note = format!("name the types, as in `{name}[int](...)`");
+                self.report(Diagnostic::new("E0319", message, span).note(note));
+            }
+            return None;
+        }
+        Some(known.iter().flatten().copied().collect::<Vec<_>>().leak())
+    }
+
+    /// Reads written type arguments, for something that takes `want` of them.
+    fn explicit(
+        &mut self,
+        indices: &'a [ast::Expr],
+        want: usize,
+        name: &str,
+        span: Span,
+    ) -> Option<Vec<Ty>> {
+        let args: Vec<Ty> = indices.iter().map(|index| self.expr_type(index)).collect();
+        (self.arity(name, want, args.len(), span) && !args.contains(&Ty::Error)).then_some(args)
     }
 
     /// Builds a `type` or a variant. Arguments are always named, and run in
     /// the order written, so any order keeps the order on the page.
+    ///
+    /// Type arguments come from `explicit`, then `want`, then the values.
     fn construct(
         &mut self,
         (id, variant): (usize, usize),
+        explicit: Option<&[Ty]>,
+        want: Option<Ty>,
         args: &'a [ast::Arg],
         span: Span,
     ) -> Expr {
+        let reported = self.diags.len();
         let name = self.datas[id].variants[variant].name;
         let count = self.datas[id].variants[variant].fields.len();
+        let wanted = want.iter().flat_map(|ty| ty.members()).find_map(|ty| match ty {
+            Ty::Data(_, found, args) if *found == id => Some(*args),
+            _ => None,
+        });
+        let mut known: Vec<Option<Ty>> = match explicit.or(wanted) {
+            Some(types) => types.iter().copied().map(Some).collect(),
+            None => vec![None; self.datas[id].type_params.len()],
+        };
         let mut given = vec![false; count];
         let mut fields = Vec::with_capacity(count);
         for arg in args {
@@ -1607,8 +1849,8 @@ impl<'a> Checker<'a> {
                 .name
                 .as_ref()
                 .and_then(|label| info.fields.iter().position(|field| field.name == label.text));
-            let want = found.map_or(Ty::Error, |index| info.fields[index].ty);
-            let value = self.expected(&arg.value, Some(want));
+            let pattern = found.map_or(Ty::Error, |index| info.fields[index].ty);
+            let value = self.inferred(&arg.value, pattern, &mut known);
             let span = arg.value.span;
             let Some(label) = &arg.name else {
                 let diag =
@@ -1626,22 +1868,67 @@ impl<'a> Checker<'a> {
                 continue;
             }
             given[index] = true;
-            self.expect(&value, want, "this field");
-            fields.push((self.datas[id].variants[variant].fields[index].slot, value));
+            fields.push((index, value));
         }
         for index in (0..count).filter(|&index| !given[index]) {
             let field = &self.datas[id].variants[variant].fields[index];
-            match field.default.clone() {
-                Some(value) => fields.push((field.slot, value)),
-                None => {
-                    let message = format!("`{name}` is missing field `{}`", field.name);
-                    self.fail("E0307", message, span);
-                }
+            if field.default.is_none() {
+                let message = format!("`{name}` is missing field `{}`", field.name);
+                self.fail("E0307", message, span);
             }
         }
-        let ty = self.datas[id].ty;
-        let counted = self.datas[id].variants[variant].counted;
-        Expr { kind: ExprKind::New { tag: variant, counted, fields }, ty, span }
+        let params: Vec<&str> = self.datas[id].type_params.iter().map(|&(name, _)| name).collect();
+        let Some(args) = self.solved(name, &params, &known, reported, span) else {
+            return poisoned(span);
+        };
+        for (index, value) in &mut fields {
+            let ty = self.datas[id].variants[variant].fields[*index].ty;
+            let ty = self.table.subst(ty, args);
+            let lowered = std::mem::replace(value, poisoned(span));
+            *value = self.settled(lowered, ty, "this field");
+        }
+        for index in (0..count).filter(|&index| !given[index]) {
+            let field = &self.datas[id].variants[variant].fields[index];
+            if let Some(value) = field.default.clone() {
+                let ty = field.ty;
+                let ty = self.table.subst(ty, args);
+                fields.push((index, Expr { ty, ..value }));
+            }
+        }
+        let Ty::Data(type_name, ..) = self.datas[id].ty else {
+            unreachable!("a data type has its own name")
+        };
+        let ty = Ty::Data(type_name, id, args);
+        Expr { kind: ExprKind::New { tag: variant, counted: 0, fields }, ty, span }
+    }
+
+    /// The `type` or variant that this name builds here, if any.
+    fn constructor(&self, name: &str) -> Option<(usize, usize)> {
+        let free = self.lookup(name).is_none() && !self.top.contains_key(name);
+        self.constructors.get(name).copied().filter(|_| free)
+    }
+
+    fn task_named(&self, name: &str) -> Option<usize> {
+        let free = self.lookup(name).is_none() && !self.top.contains_key(name);
+        self.task_ids.get(name).copied().filter(|_| free)
+    }
+
+    /// `Name(...)` with fields, or `Name[T](...)`.
+    fn construct_call(
+        &mut self,
+        target: (usize, usize),
+        name: &str,
+        explicit: Option<&[Ty]>,
+        want: Option<Ty>,
+        args: &'a [ast::Arg],
+        span: Span,
+    ) -> Expr {
+        let (id, variant) = target;
+        if self.datas[id].variants[variant].fields.is_empty() {
+            let diag = Diagnostic::new("E0307", format!("`{name}` has no fields"), span);
+            return self.report(diag.note(format!("write `{name}`, with no `()`")));
+        }
+        self.construct(target, explicit, want, args, span)
     }
 
     /// Reads a value now if the write takes a slot that it may read.
@@ -1888,7 +2175,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(&(id, variant)) = self.constructors.get(name) {
             if self.datas[id].variants[variant].fields.is_empty() {
-                return self.construct((id, variant), &[], span);
+                return self.construct((id, variant), None, None, &[], span);
             }
             let diag = Diagnostic::new("E0307", format!("`{name}` needs its fields"), span);
             return self.report(diag.note(format!("write `{name}(field: value)`")));
@@ -1957,8 +2244,11 @@ impl<'a> Checker<'a> {
                 let kind = ExprKind::If(test.into(), then.into(), otherwise.into());
                 Expr { kind, ty, span }
             }
-            Ast::Call { callee, args } => match &callee.kind {
-                Ast::Name(name) if self.is_set_call(name) => self.set_call(args, want, span),
+            Ast::Call { callee, args } => self.call(callee, args, want, span),
+            Ast::Name(name) => match self.constructor(name) {
+                Some((id, variant)) if self.datas[id].variants[variant].fields.is_empty() => {
+                    self.construct((id, variant), None, want, &[], span)
+                }
                 _ => self.expr(expr),
             },
             _ => self.expr(expr),
@@ -2080,7 +2370,7 @@ impl<'a> Checker<'a> {
             Ast::Unary(op, value) => return self.unary(*op, value, span),
             Ast::Binary(op, left, right) => return self.binary(*op, left, right, span),
             Ast::If { .. } | Ast::List(_) | Ast::Map(_) => return self.expected(expr, None),
-            Ast::Call { callee, args } => return self.call(callee, args, span),
+            Ast::Call { callee, args } => return self.call(callee, args, None, span),
             Ast::Text(parts) => return self.text(parts, span),
             Ast::Is { value, negated, target } => {
                 return self.is_test(value, *negated, target, span);
@@ -2089,18 +2379,32 @@ impl<'a> Checker<'a> {
             Ast::Index { base, indices } => return self.index(base, indices, span),
             Ast::Field { base, name } => {
                 let value = self.expr(base);
-                let Some((slot, ty)) = self.field(value.ty, name) else {
+                let Some((field, ty)) = self.field(value.ty, name) else {
                     return poisoned(span);
                 };
-                (ExprKind::Field(value.into(), slot), ty)
+                (ExprKind::Member { value: value.into(), variant: 0, field }, ty)
             }
             Ast::Match { .. } => unreachable!("only `let`, `return`, and statements hold one"),
+            Ast::Optional(_) | Ast::Type(_) => {
+                let diag = Diagnostic::new("E0322", "a type cannot be a value", span);
+                return self.report(diag.note("a type only goes in brackets, as in `f[int?](x)`"));
+            }
             Ast::SelfValue => return self.unsupported("`self`", span),
         };
         Expr { kind, ty, span }
     }
 
     fn index(&mut self, base: &'a ast::Expr, indices: &'a [ast::Expr], span: Span) -> Expr {
+        if let Ast::Name(name) = &base.kind
+            && let Some((id, variant)) = self.constructor(name)
+            && self.datas[id].variants[variant].fields.is_empty()
+        {
+            let want = self.datas[id].type_params.len();
+            let Some(args) = self.explicit(indices, want, name, span) else {
+                return poisoned(span);
+            };
+            return self.construct((id, variant), Some(&args), None, &[], span);
+        }
         let value = self.expr(base);
         let slice = match indices {
             [
@@ -2219,8 +2523,8 @@ impl<'a> Checker<'a> {
                     let note = "`is` tests what a union holds, and `==` tests equality";
                     return self.report(Diagnostic::new("E0303", message, span).note(note));
                 }
-                let ids = want.members().iter().map(|&member| self.type_id(member)).collect();
-                Expr { kind: ExprKind::TagIn(value.into(), ids), ty: Ty::Bool, span }
+                let kind = ExprKind::Holds(value.into(), want.members().to_vec());
+                Expr { kind, ty: Ty::Bool, span }
             }
         };
         if negated && test.ty != Ty::Error {
@@ -2309,6 +2613,10 @@ impl<'a> Checker<'a> {
 
     /// Reports a value that `print` and interpolation cannot show yet.
     fn showable(&mut self, value: Expr) -> Expr {
+        if let Ty::Param(name, _) = value.ty {
+            let message = format!("`{name}` might not be shown here");
+            return self.fail("E0303", message, value.span);
+        }
         if value.ty.is_compound() {
             return self.unsupported(&format!("showing `{}`", value.ty.name()), value.span);
         }
@@ -2514,7 +2822,13 @@ impl<'a> Checker<'a> {
         Expr { kind: ExprKind::Binary(op, left.into(), right.into()), ty: result, span }
     }
 
-    fn call(&mut self, callee: &'a ast::Expr, args: &'a [ast::Arg], span: Span) -> Expr {
+    fn call(
+        &mut self,
+        callee: &'a ast::Expr,
+        args: &'a [ast::Arg],
+        want: Option<Ty>,
+        span: Span,
+    ) -> Expr {
         match &callee.kind {
             Ast::Field { base, name } if CHANGING_CALLS.contains(&name.text.as_str()) => {
                 let value = self.expr(base);
@@ -2567,25 +2881,32 @@ impl<'a> Checker<'a> {
                     _ => self.unsupported("this dot call", span),
                 }
             }
-            Ast::Name(name) if self.is_set_call(name) => self.set_call(args, None, span),
-            Ast::Name(name) => {
-                if let Some(&target) = self.constructors.get(name.as_str())
-                    && self.lookup(name).is_none()
-                    && !self.top.contains_key(name.as_str())
-                {
-                    let (id, variant) = target;
-                    if self.datas[id].variants[variant].fields.is_empty() {
-                        let diag =
-                            Diagnostic::new("E0307", format!("`{name}` has no fields"), span);
-                        return self.report(diag.note(format!("write `{name}`, with no `()`")));
+            Ast::Name(name) if self.is_set_call(name) => self.set_call(args, want, span),
+            Ast::Index { base, indices } => {
+                if let Ast::Name(name) = &base.kind {
+                    if let Some(target) = self.constructor(name) {
+                        let count = self.datas[target.0].type_params.len();
+                        let Some(types) = self.explicit(indices, count, name, span) else {
+                            return self.poison_args(args, span);
+                        };
+                        return self.construct_call(target, name, Some(&types), None, args, span);
                     }
-                    return self.construct(target, args, span);
+                    if let Some(id) = self.task_named(name) {
+                        let count = self.signatures[id].type_params.len();
+                        let Some(types) = self.explicit(indices, count, name, span) else {
+                            return self.poison_args(args, span);
+                        };
+                        return self.task_call(id, name, Some(&types), args, span);
+                    }
                 }
-                if let Some(&id) = self.task_ids.get(name.as_str())
-                    && self.lookup(name).is_none()
-                    && !self.top.contains_key(name.as_str())
-                {
-                    return self.task_call(id, name, args, span);
+                self.unsupported("this call", span)
+            }
+            Ast::Name(name) => {
+                if let Some(target) = self.constructor(name) {
+                    return self.construct_call(target, name, None, want, args, span);
+                }
+                if let Some(id) = self.task_named(name) {
+                    return self.task_call(id, name, None, args, span);
                 }
                 for arg in args {
                     self.expected(&arg.value, Some(Ty::Error));
@@ -2601,7 +2922,19 @@ impl<'a> Checker<'a> {
 
     /// Named arguments follow positional ones, in parameter order, so that the
     /// order of evaluation is always the order on the page.
-    fn task_call(&mut self, id: usize, name: &str, args: &'a [ast::Arg], span: Span) -> Expr {
+    fn task_call(
+        &mut self,
+        id: usize,
+        name: &str,
+        explicit: Option<&[Ty]>,
+        args: &'a [ast::Arg],
+        span: Span,
+    ) -> Expr {
+        let reported = self.diags.len();
+        let mut known: Vec<Option<Ty>> = match explicit {
+            Some(types) => types.iter().copied().map(Some).collect(),
+            None => vec![None; self.signatures[id].type_params.len()],
+        };
         let count = self.signatures[id].params.len();
         let required = self.signatures[id].params.iter().filter(|p| p.default.is_none()).count();
         let mut values: Vec<Option<Expr>> = vec![None; count];
@@ -2616,7 +2949,8 @@ impl<'a> Checker<'a> {
                 None => params.get(next),
                 Some(label) => params.iter().find(|p| p.name == label.text),
             };
-            let value = self.expected(&arg.value, Some(want.map_or(Ty::Error, |p| p.ty)));
+            let pattern = want.map_or(Ty::Error, |p| p.ty);
+            let value = self.inferred(&arg.value, pattern, &mut known);
             let slot = match &arg.name {
                 None if named => Err("a positional argument cannot follow a named one".into()),
                 None if next >= required => {
@@ -2640,7 +2974,6 @@ impl<'a> Checker<'a> {
             };
             match slot {
                 Ok(slot) => {
-                    self.expect(&value, self.signatures[id].params[slot].ty, "this argument");
                     values[slot] = Some(value);
                     next = slot + 1;
                 }
@@ -2649,17 +2982,40 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        for (slot, value) in values.iter().enumerate() {
+            let param = &self.signatures[id].params[slot];
+            if value.is_none() && param.default.is_none() {
+                let message = format!("`{name}` is missing argument `{}`", param.name);
+                self.fail("E0307", message, span);
+            }
+        }
+        let params: Vec<&str> =
+            self.signatures[id].type_params.iter().map(|&(name, _)| name).collect();
+        let Some(types) = self.solved(name, &params, &known, reported, span) else {
+            return poisoned(span);
+        };
         let mut lowered = Vec::with_capacity(count);
         for (slot, value) in values.into_iter().enumerate() {
             let param = &self.signatures[id].params[slot];
-            match value.or_else(|| param.default.clone()) {
-                Some(value) => lowered.push(value),
-                None => {
-                    let message = format!("`{name}` is missing argument `{}`", param.name);
-                    self.fail("E0307", message, span);
-                }
+            let default = param.default.clone();
+            let ty = param.ty;
+            let ty = self.table.subst(ty, types);
+            if let Some(value) = value {
+                lowered.push(self.settled(value, ty, "this argument"));
+            } else if let Some(value) = default {
+                lowered.push(Expr { ty, ..value });
             }
         }
-        Expr { kind: ExprKind::Call(id, lowered), ty: self.signatures[id].returns, span }
+        let returns = self.signatures[id].returns;
+        let ty = self.table.subst(returns, types);
+        Expr { kind: ExprKind::Call(id, types, lowered), ty, span }
+    }
+
+    /// Lowers arguments of a call that already failed, to report their errors.
+    fn poison_args(&mut self, args: &'a [ast::Arg], span: Span) -> Expr {
+        for arg in args {
+            self.expected(&arg.value, Some(Ty::Error));
+        }
+        poisoned(span)
     }
 }

@@ -24,6 +24,7 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | ASCII names, text escapes | Judgment call from existing practice | None | Revisit before 1.0 |
 | Division, argument order | Judgment call from existing practice | None | Agent trial at M3 |
 | Type arguments in brackets, read in one pass | Follows Go. Form also proposed for Python | Read, parser Snippet | Agent trial at M3 |
+| Generic body checked once, then substituted in MIR | Follows Rust and Go, not C++ templates | Snippet | Agent trial at M3 |
 | Union narrowing by control flow | Follows TypeScript and Kotlin, tightened for memory safety | Read | Agent trial at M3 |
 | Text slices, no character type | Judgment call from existing practice | None | Agent trial at M3 |
 | Compact ordered map, SipHash with random keys | Supported by Python and Rust practice | Snippet | Benchmark at M4 |
@@ -228,6 +229,17 @@ Decision 65. PEP 718 and the Rust reference: **Read**. The Go spec and parser: *
 - **Swift.** Whether a call can specialize a generic task was not settled: the pages read did not say.
 
 Sources: [Go spec](https://go.dev/ref/spec), [Go parser](https://github.com/golang/go/blob/master/src/go/parser/parser.go), [PEP 718](https://peps.python.org/pep-0718/), [Rust paths](https://doc.rust-lang.org/reference/paths.html).
+
+## Generics
+
+Decisions 67 and 68. Level: **Snippet**: all of this came through search summaries, so read the source before relying on the detail.
+
+- **Rust.** The rustc collector finds every concrete instance, starting from non-generic roots and following uses through MIR. `mono.rs` does the same. It has a depth-based recursion limit, and open pull request 156993 says that this check can fire too late for polymorphic recursion, where each step makes the type arguments larger. The pull request adds a check on their length. Whether it merged is not known.
+- **Go.** `go/types` infers in stages: given type arguments first, then typed function arguments, then untyped ones. Lucid has the same order, with no untyped literals to treat apart. The searches did not reach Go's rule on instantiation cycles.
+- **C++.** Pre-C++20 templates caught type errors at instantiation, in the second phase of lookup. Concepts improve the message at the call site, and a forum thread says they do not move the check of the body to its definition. This is weak evidence, from forum posts and a blog.
+- **Not found.** No source was read on which design agents handle best. The M3 agent trial tests E0319 and the rule that a call takes no type from its context.
+
+Sources: [rustc monomorphization](https://rustc-dev-guide.rust-lang.org/backend/monomorph.html), [rustc collector](https://doc.rust-lang.org/nightly/nightly-rustc/rustc_monomorphize/collector/index.html), [Rust PR 156993](https://github.com/rust-lang/rust/pull/156993), [go/types infer.go](https://go.googlesource.com/go/+/refs/tags/go1.17/src/go/types/infer.go), [Go type inference post](https://go.googlesource.com/website/+show/HEAD/_content/blog/type-inference.md), [Lemire on concepts](https://isocpp.org/blog/2025/06/cpp20-concepts-for-nicer-compiler-errors-daniel-lemire).
 
 ## Open research
 

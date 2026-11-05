@@ -6,6 +6,7 @@ mod check;
 mod diag;
 mod lexer;
 mod mir;
+mod mono;
 mod native;
 mod ownership;
 mod parser;
@@ -48,6 +49,9 @@ fn cli(args: &[String]) -> ExitCode {
     {
         let (mut program, errors) = check::check(file);
         diags = errors;
+        if diags.is_empty() {
+            diags = mono::run(&mut program);
+        }
         if run && diags.is_empty() {
             ownership::run(&mut program);
             diags = native::run(&program, path, &src, STACK_BYTES).err().unwrap_or_default();

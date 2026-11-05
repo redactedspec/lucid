@@ -62,6 +62,7 @@ fn clif(ty: Ty) -> Type {
         | Ty::Union(_) => types::I64,
         Ty::Float => types::F64,
         Ty::Bool | Ty::None => types::I8,
+        Ty::Param(..) => unreachable!("`mono.rs` replaces every parameter"),
         Ty::Error => unreachable!("errors stop before the backend"),
     }
 }
@@ -609,6 +610,7 @@ impl Lower<'_, '_> {
             Update::MapSet => runtime.map_set,
             Update::MapRemove => runtime.map_remove,
             Update::FieldSet => runtime.record_set,
+            Update::UnionSet => unreachable!("`mono.rs` replaces these"),
             Update::ListPop => runtime.list_pop,
         };
         let result = self.call(task, &values).expect("it returns the new value");
@@ -695,7 +697,7 @@ impl Lower<'_, '_> {
             ExprKind::Bool(value) => self.body.ins().iconst(types::I8, i64::from(*value)),
             ExprKind::None => self.none(),
             ExprKind::Local(local) => self.body.use_var(self.vars[*local]),
-            ExprKind::Call(task, args) => {
+            ExprKind::Call(task, _, args) => {
                 let args: Vec<Value> = args.iter().map(|arg| self.expr(arg)).collect();
                 self.call(self.ids[*task], &args).expect("every task returns a value")
             }
@@ -845,6 +847,10 @@ impl Lower<'_, '_> {
                 self.store(*local, value);
                 value
             }
+            ExprKind::Member { .. }
+            | ExprKind::Wrap(_)
+            | ExprKind::View(_)
+            | ExprKind::Holds(..) => unreachable!("`mono.rs` replaces these"),
         }
     }
 
