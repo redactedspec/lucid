@@ -8,6 +8,7 @@ mod native;
 mod parser;
 
 use diag::{Diagnostic, Span};
+use std::io::Write;
 use std::process::ExitCode;
 
 const USAGE: &str = "usage: lucid run FILE\n       lucid check [--json] FILE";
@@ -21,7 +22,7 @@ fn main() -> ExitCode {
     match std::thread::Builder::new().stack_size(STACK_BYTES).spawn(move || cli(&args)) {
         Ok(thread) => thread.join().unwrap_or(ExitCode::from(101)),
         Err(e) => {
-            eprintln!("lucid: cannot start compiler thread: {e}");
+            emit(std::io::stderr(), &format!("lucid: cannot start compiler thread: {e}\n"));
             ExitCode::from(101)
         }
     }
@@ -33,14 +34,10 @@ fn cli(args: &[String]) -> ExitCode {
         ["run", path] => (true, false, *path),
         ["check", path] => (false, false, *path),
         ["check", "--json", path] => (false, true, *path),
-        _ => {
-            eprintln!("{USAGE}");
-            return ExitCode::from(2);
-        }
+        _ => return usage(),
     };
     if path.starts_with('-') {
-        eprintln!("{USAGE}");
-        return ExitCode::from(2);
+        return usage();
     }
     let (src, file, mut diags) = load(path);
     if run
@@ -50,11 +47,22 @@ fn cli(args: &[String]) -> ExitCode {
         diags = errors;
     }
     if json {
-        print!("{}", diag::render_json(path, &src, &diags));
+        emit(std::io::stdout(), &diag::render_json(path, &src, &diags));
     } else {
-        eprint!("{}", diag::render_text(path, &src, &diags));
+        emit(std::io::stderr(), &diag::render_text(path, &src, &diags));
     }
     if diags.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+}
+
+fn usage() -> ExitCode {
+    emit(std::io::stderr(), &format!("{USAGE}\n"));
+    ExitCode::from(2)
+}
+
+/// Writes output. If the reader is gone there is no one to tell, and the exit
+/// code still reports the result, so a failure here is ignored.
+fn emit(mut out: impl Write, text: &str) {
+    let _ = out.write_all(text.as_bytes());
 }
 
 /// Reads and parses a file. Returns the text that spans refer to.

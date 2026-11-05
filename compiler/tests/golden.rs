@@ -5,7 +5,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 const LUCID: &str = env!("CARGO_BIN_EXE_lucid");
 
@@ -110,6 +110,29 @@ fn bad_usage_exits_2() {
     assert_eq!(lucid(&repo(), &[]).status.code(), Some(2));
     assert_eq!(lucid(&repo(), &["check", "--json"]).status.code(), Some(2));
     assert_eq!(lucid(&repo(), &["run", "--json", "x.lcd"]).status.code(), Some(2));
+}
+
+/// Runs `lucid` with its output pipes closed, and returns the exit code.
+fn exit_with_closed_pipes(dir: &Path, args: &[&str]) -> Option<i32> {
+    let mut child = Command::new(LUCID)
+        .args(args)
+        .current_dir(dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("cannot start lucid");
+    drop(child.stdout.take());
+    drop(child.stderr.take());
+    child.wait().expect("cannot wait for lucid").code()
+}
+
+#[test]
+fn closed_output_does_not_crash() {
+    let fail = repo().join("tests").join("fail");
+    let run = repo().join("tests").join("run");
+    assert_eq!(exit_with_closed_pipes(&fail, &["check", "--json", "expected_token.lcd"]), Some(1));
+    assert_eq!(exit_with_closed_pipes(&fail, &["check", "expected_token.lcd"]), Some(1));
+    assert_eq!(exit_with_closed_pipes(&run, &["run", "hello.lcd"]), Some(101));
 }
 
 /// AGENTS.md: every compile error needs a stable code and a test. It must

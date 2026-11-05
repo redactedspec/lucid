@@ -92,7 +92,7 @@ cargo fmt                                     # formatting
 | `lucid context MODULE` | Print a compact API | Planned |
 | `lucid doc` | Generate docs | Planned |
 
-Exit codes: 0 for success, 1 for compile errors, 2 for bad usage, and 101 for a trap or a compiler bug.
+Exit codes: 0 for success, 1 for compile errors, 2 for bad usage, and 101 for a trap or a compiler bug. If the reader of compiler output has gone, the output is dropped and the exit code does not change.
 
 ## Testing
 

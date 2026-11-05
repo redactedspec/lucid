@@ -19,6 +19,7 @@ pub unsafe extern "C" fn lucid_print(text: *const u8, len: usize) {
 
 /// Ends the program with the exit code that language.md gives to traps.
 fn trap(message: &str) -> ! {
-    eprintln!("trap: {message}");
+    // Must not panic, since a caller is an `extern "C"` task. The exit code still reports the trap.
+    let _ = writeln!(std::io::stderr(), "trap: {message}");
     std::process::exit(101)
 }
