@@ -1,0 +1,10 @@
+task greet(name: text) -> text
+    return "Hello, {name}!"
+
+let people = ["Ada", "Linus"]
+
+for person in people
+    print greet(person)
+
+if people is empty
+    print "nobody home"

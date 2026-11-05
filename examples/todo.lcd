@@ -1,0 +1,36 @@
+# A small to-do list stored in a JSON file.
+# Usage: lucid run todo.lcd add "buy milk"
+use std.args
+use std.fs
+use std.json
+
+type Todo
+    title: text
+    done: bool = false
+
+task load(path: text) -> list[Todo]
+    let raw = fs.read_text(path) else "[]"
+    return json.parse[list[Todo]](raw) else []
+
+task save(path: text, todos: list[Todo]) -> none or fs.FileError
+    try fs.write_text(path, json.write(todos))
+
+task show(todos: list[Todo])
+    for todo in todos
+        let mark = if todo.done then "x" else " "
+        print "[{mark}] {todo.title}"
+
+let path = "todos.json"
+var todos = load(path)
+let command = args.get(0) else "list"
+
+match command
+    "add" ->
+        let title = args.get(1) else ""
+        if title is empty
+            print "Usage: todo add <title>"
+        else
+            todos.push(Todo(title: title))
+            try save(path, todos)
+    "list" -> show(todos)
+    _ -> print "Unknown command: {command}"
