@@ -494,7 +494,10 @@ mod tests {
     fn numbers_and_ranges() {
         assert_eq!(tokens("0..10"), "0 .. 10 NL EOF");
         assert_eq!(tokens("0..=1_0"), "0 ..= 1_0 NL EOF");
-        assert_eq!(tokens("1.5 1.5e3 1.5E-3 0xFF_ff 0b1_0"), "1.5 1.5e3 1.5E-3 0xFF_ff 0b1_0 NL EOF");
+        assert_eq!(
+            tokens("1.5 1.5e3 1.5E-3 0xFF_ff 0b1_0"),
+            "1.5 1.5e3 1.5E-3 0xFF_ff 0b1_0 NL EOF"
+        );
         assert_eq!(tokens("1.foo"), "1 . foo NL EOF");
         assert_eq!(codes("0x"), ["E0107"]);
         assert_eq!(codes("0b2"), ["E0107"]);
@@ -505,7 +508,10 @@ mod tests {
 
     #[test]
     fn symbols_use_the_longest_match() {
-        assert_eq!(tokens("... ..= .. ./ . => == = -> -= //"), "... ..= .. ./ . => == = -> -= // NL EOF");
+        assert_eq!(
+            tokens("... ..= .. ./ . => == = -> -= //"),
+            "... ..= .. ./ . => == = -> -= // NL EOF"
+        );
     }
 
     #[test]
@@ -533,11 +539,20 @@ mod tests {
 
     #[test]
     fn multi_line_text_removes_common_indentation() {
-        assert_eq!(tokens("\"\"\"\n    a\n      b\n\n    c\n    \"\"\""), "text[\"a\\n  b\\n\\nc\"] NL EOF");
+        assert_eq!(
+            tokens("\"\"\"\n    a\n      b\n\n    c\n    \"\"\""),
+            "text[\"a\\n  b\\n\\nc\"] NL EOF"
+        );
         assert_eq!(tokens("\"\"\"\n    a\n  \"\"\""), "text[\"  a\"] NL EOF");
         assert_eq!(tokens("\"\"\"\n  a\n  b\"\"\""), "text[\"a\\nb\"] NL EOF");
-        assert_eq!(tokens("\"\"\"\n  a \"b\" {x}\n  \"\"\""), "text[\"a \\\"b\\\" \" <x }>] NL EOF");
-        assert_eq!(tokens("x\n    \"\"\"\n    a\n    \"\"\"\ny"), "x NL IN text[\"a\"] NL DE y NL EOF");
+        assert_eq!(
+            tokens("\"\"\"\n  a \"b\" {x}\n  \"\"\""),
+            "text[\"a \\\"b\\\" \" <x }>] NL EOF"
+        );
+        assert_eq!(
+            tokens("x\n    \"\"\"\n    a\n    \"\"\"\ny"),
+            "x NL IN text[\"a\"] NL DE y NL EOF"
+        );
     }
 
     #[test]
