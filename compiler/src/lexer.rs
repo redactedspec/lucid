@@ -155,7 +155,11 @@ impl Lexer<'_> {
                     let rest = self.rest();
                     let Some(sym) = SYMBOLS.iter().copied().find(|s| rest.starts_with(s)) else {
                         self.pos += c.len_utf8();
-                        self.error("E0103", format!("unexpected character `{c}`"), start);
+                        self.error(
+                            "E0103",
+                            format!("unexpected character `{}`", c.escape_debug()),
+                            start,
+                        );
                         continue;
                     };
                     self.pos += sym.len();
@@ -563,6 +567,7 @@ mod tests {
         assert_eq!(codes("a\n    b\n  c"), ["E0102"]);
         assert_eq!(codes("!"), ["E0103"]);
         assert_eq!(codes("é"), ["E0103"]);
+        assert_eq!(lex("\u{1b}").1[0].message, "unexpected character `\\u{1b}`");
         assert_eq!(codes("\"a\0\""), ["E0103"]);
         assert_eq!(codes("\"a"), ["E0104"]);
         assert_eq!(codes("\"a\nb"), ["E0104"]);

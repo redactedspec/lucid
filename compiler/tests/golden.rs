@@ -108,6 +108,7 @@ fn missing_file_is_reported() {
 #[test]
 fn bad_usage_exits_2() {
     assert_eq!(lucid(&repo(), &[]).status.code(), Some(2));
+    assert_eq!(lucid(&repo(), &["check", "--json"]).status.code(), Some(2));
     assert_eq!(lucid(&repo(), &["run", "--json", "x.lcd"]).status.code(), Some(2));
 }
 

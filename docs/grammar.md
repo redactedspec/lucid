@@ -26,7 +26,7 @@ TEXT     = '"' { char | escape | "{" expression "}" | "{{" | "}}" } '"'
 escape   = "\n" | "\t" | "\r" | "\\" | '\"' ;
 ```
 
-`letter` is an ASCII letter and `digit` is an ASCII digit. Names are ASCII only. Text and comments may hold any UTF-8. Outside text, any other character is an error.
+`letter` is an ASCII letter and `digit` is an ASCII digit. Names are ASCII only. Comments may hold any UTF-8. Text may too, except a NUL character, which the compiler uses internally. Outside text, any other character is an error.
 
 A `FLOAT` needs digits on both sides of the point, so `0..10` lexes as a range. A number directly followed by a letter or `_` is an error, so `1e5` is rejected. Write `1.0e5`.
 
@@ -165,6 +165,7 @@ entry       = expression ":" expression ;
 
 ## Disambiguation notes
 
+- **Leading `if`:** a statement that starts with `if` is always an `if_stmt`, so `if a then b else c` alone on a line is an error. One form does this job, and `if_expr` is for values.
 - **`then` branch:** it uses `logic_or`, not `expression`, so the `else` in `if a then b else c` is never read as a fallback.
 - **`is` target:** it is a single `type_term`, so `or` after it stays boolean: `x is text or y > 3`.
 - **`try` scope:** `try` covers the whole postfix chain. `try read(p).trim()` calls `.trim()` first, on the union, and fails type checking. Write `(try read(p)).trim()`.

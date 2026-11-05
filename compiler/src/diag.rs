@@ -41,7 +41,9 @@ impl<'a> Lines<'a> {
     fn position(&self, offset: usize) -> (usize, usize) {
         let line = self.starts.partition_point(|&start| start <= offset);
         let start = self.starts[line - 1];
-        (line, self.src[start..offset].chars().count() + 1)
+        let prefix = &self.src[start..offset];
+        let bom = usize::from(line == 1 && prefix.starts_with('\u{feff}'));
+        (line, prefix.chars().count() + 1 - bom)
     }
 }
 
@@ -124,6 +126,7 @@ mod tests {
         assert_eq!(lines.position(3), (2, 1));
         assert_eq!(lines.position(6), (2, 3));
         assert_eq!(lines.position(8), (3, 1));
+        assert_eq!(Lines::new("\u{feff}ab").position(4), (1, 2));
     }
 
     #[test]

@@ -16,11 +16,14 @@ const USAGE: &str = "usage: lucid run FILE\n       lucid check [--json] FILE";
 const STACK_BYTES: usize = 256 * 1024 * 1024;
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let cli = std::thread::Builder::new().stack_size(STACK_BYTES).spawn(move || cli(&args));
-    match cli.map(std::thread::JoinHandle::join) {
-        Ok(Ok(code)) => code,
-        _ => ExitCode::from(101),
+    // A path that is not Unicode becomes E0001 instead of a panic in `args()`.
+    let args: Vec<String> = std::env::args_os().skip(1).map(|a| a.display().to_string()).collect();
+    match std::thread::Builder::new().stack_size(STACK_BYTES).spawn(move || cli(&args)) {
+        Ok(thread) => thread.join().unwrap_or(ExitCode::from(101)),
+        Err(e) => {
+            eprintln!("lucid: cannot start compiler thread: {e}");
+            ExitCode::from(101)
+        }
     }
 }
 
@@ -35,6 +38,10 @@ fn cli(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    if path.starts_with('-') {
+        eprintln!("{USAGE}");
+        return ExitCode::from(2);
+    }
     let (src, file, mut diags) = load(path);
     if run
         && diags.is_empty()

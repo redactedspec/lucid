@@ -18,7 +18,7 @@ print "Hello, world!"
 - A statement ends at the end of its line.
 - To continue over several lines, wrap the expression in `()`, `[]`, or `{}`. Newlines inside brackets are ignored. There is no other continuation rule.
 - Comments start with `#`. Doc comments start with `##`.
-- Names use ASCII letters, digits, and `_`. Text and comments may hold any Unicode.
+- Names use ASCII letters, digits, and `_`. Text and comments may hold any Unicode, except NUL in text.
 
 ## Variables
 

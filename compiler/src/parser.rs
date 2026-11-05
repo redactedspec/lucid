@@ -9,7 +9,7 @@ use crate::lexer::{MAX_DEPTH, TextPart as RawPart, Token, TokenKind};
 type Parsed<T> = Result<T, ()>;
 
 pub fn parse(tokens: Vec<Token>) -> (File, Vec<Diagnostic>) {
-    let mut parser = Parser { tokens, pos: 0, depth: 0, diags: Vec::new() };
+    let mut parser = Parser { tokens, pos: 0, depth: 0, links: 0, diags: Vec::new() };
     let mut stmts = Vec::new();
     while *parser.kind() != TokenKind::Eof {
         parser.recover(&mut stmts, |p| p.statement(true));
@@ -22,8 +22,13 @@ struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     depth: usize,
+    /// Operators and postfix forms so far in this item. See `link`.
+    links: usize,
     diags: Vec<Diagnostic>,
 }
+
+/// Longest allowed chain of operators and postfix forms in one item.
+const MAX_LINKS: usize = 1024;
 
 const TOP_LEVEL_ONLY: &[&str] = &["use", "test", "public", "type", "choice", "trait"];
 
@@ -118,9 +123,6 @@ impl Parser {
 
     /// Runs `parse` one level deeper, and fails past `MAX_DEPTH`. Every
     /// recursive rule goes through here, so that source cannot overflow the stack.
-    // ponytail: left-deep chains such as `a + a + ...` are loops and are not
-    // counted, so the tree they build relies on main's large stack. Limit them
-    // when fuzzing starts at M5.
     fn nested<T>(&mut self, parse: impl FnOnce(&mut Self) -> Parsed<T>) -> Parsed<T> {
         if self.depth == MAX_DEPTH {
             let span = self.token().span;
@@ -132,9 +134,21 @@ impl Parser {
         result
     }
 
+    /// Counts one link of a chain such as `a + a + ...`. Chains are loops, not
+    /// recursion, but they still build a deep tree that later stages recurse over.
+    fn link(&mut self) -> Parsed<()> {
+        self.links += 1;
+        if self.links > MAX_LINKS {
+            let span = self.token().span;
+            return self.error("E0205", format!("expression has over {MAX_LINKS} operators"), span);
+        }
+        Ok(())
+    }
+
     /// Parses one item into `out`. After an error, skips to the next item.
     fn recover<T>(&mut self, out: &mut Vec<T>, parse: impl FnOnce(&mut Self) -> Parsed<T>) {
         let before = self.pos;
+        self.links = 0;
         match parse(self) {
             Ok(item) => out.push(item),
             Err(()) => {
@@ -560,12 +574,14 @@ impl Parser {
     }
 
     fn match_expr(&mut self, as_value: bool) -> Parsed<Expr> {
-        let start = self.start();
-        self.advance();
-        let subject = Box::new(self.expression()?);
-        self.newline()?;
-        let arms = self.indented(|p| p.arm(as_value))?;
-        Ok(Expr { kind: ExprKind::Match { subject, arms }, span: self.since(start) })
+        self.nested(|p| {
+            let start = p.start();
+            p.advance();
+            let subject = Box::new(p.expression()?);
+            p.newline()?;
+            let arms = p.indented(|p| p.arm(as_value))?;
+            Ok(Expr { kind: ExprKind::Match { subject, arms }, span: p.since(start) })
+        })
     }
 
     fn arm(&mut self, as_value: bool) -> Parsed<Arm> {
@@ -655,6 +671,7 @@ impl Parser {
     }
 
     fn expr_stmt(&mut self) -> Parsed<StmtKind> {
+        let start = self.start();
         let target = self.expression()?;
         let op = match self.kind() {
             TokenKind::Sym("=") => AssignOp::Set,
@@ -667,10 +684,12 @@ impl Parser {
                 return Ok(StmtKind::Expr(target));
             }
         };
-        if !matches!(
+        // A parenthesized target has a span that starts after this statement does.
+        let assignable = matches!(
             target.kind,
             ExprKind::Name(_) | ExprKind::Field { .. } | ExprKind::Index { .. }
-        ) {
+        );
+        if !assignable || target.span.start != start {
             return self.error("E0202", "can only assign to a name, field, or index", target.span);
         }
         self.advance();
@@ -760,6 +779,7 @@ impl Parser {
         let start = self.start();
         let mut left = self.logic_and()?;
         while self.eat("or") {
+            self.link()?;
             let right = self.logic_and()?;
             left = self.binary(BinaryOp::Or, left, right, start);
         }
@@ -770,6 +790,7 @@ impl Parser {
         let start = self.start();
         let mut left = self.logic_not()?;
         while self.eat("and") {
+            self.link()?;
             let right = self.logic_not()?;
             left = self.binary(BinaryOp::And, left, right, start);
         }
@@ -863,6 +884,7 @@ impl Parser {
                 TokenKind::Sym("-") => BinaryOp::Sub,
                 _ => return Ok(left),
             };
+            self.link()?;
             self.advance();
             let right = self.product()?;
             left = self.binary(op, left, right, start);
@@ -880,6 +902,7 @@ impl Parser {
                 TokenKind::Sym("%") => BinaryOp::Rem,
                 _ => return Ok(left),
             };
+            self.link()?;
             self.advance();
             let right = self.unary()?;
             left = self.binary(op, left, right, start);
@@ -904,7 +927,8 @@ impl Parser {
     fn postfix(&mut self) -> Parsed<Expr> {
         let start = self.start();
         let mut expr = self.primary()?;
-        loop {
+        while self.at_any(&["(", "[", "."]) {
+            self.link()?;
             let kind = if self.eat("(") {
                 let args = self.args()?;
                 self.expect(")")?;
@@ -916,13 +940,13 @@ impl Parser {
                 }
                 self.expect("]")?;
                 ExprKind::Index { base: Box::new(expr), indices }
-            } else if self.eat(".") {
-                ExprKind::Field { base: Box::new(expr), name: self.name()? }
             } else {
-                return Ok(expr);
+                self.advance();
+                ExprKind::Field { base: Box::new(expr), name: self.name()? }
             };
             expr = Expr { kind, span: self.since(start) };
         }
+        Ok(expr)
     }
 
     fn args(&mut self) -> Parsed<Vec<Arg>> {
@@ -1175,6 +1199,7 @@ mod tests {
     #[test]
     fn statements_parse() {
         ok("let a: int = 1\nvar b = 2\nb += 1\nb -= 1\nb *= 1\nb /= 1\na.b = 1\na[0] = 2\n");
+        ok("(a).b = 1\n");
         ok("if a\n    b\nelse if c\n    d\nelse\n    e\n");
         ok("while a\n    break\nfor i in 0..3\n    continue\nfor change x in y\n    ...\n");
         ok("unsafe\n    let n = 1\nexpect a == 1\nprint a\n");
@@ -1223,6 +1248,9 @@ mod tests {
         assert_eq!(codes("let = 1\n"), ["E0201"]);
         assert_eq!(codes("1 + 2 = 3\n"), ["E0202"]);
         assert_eq!(codes("f() = 3\n"), ["E0202"]);
+        assert_eq!(codes("(a) = 3\n"), ["E0202"]);
+        assert_eq!(codes("(a.b) += 3\n"), ["E0202"]);
+        assert_eq!(codes("if a then b else c\n"), ["E0201"]);
         assert_eq!(codes("let a = match b\n    _ ->\n        c\n"), ["E0203"]);
         assert_eq!(codes("a < b < c\n"), ["E0204"]);
         assert_eq!(codes("a == b is none\n"), ["E0204"]);

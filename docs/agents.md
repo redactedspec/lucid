@@ -81,7 +81,7 @@ The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and 
 | E0202 | Invalid assignment target |
 | E0203 | `match` used as a value has a block arm |
 | E0204 | Chained comparison or range |
-| E0205 | Nesting is too deep (limit 128) |
+| E0205 | Nesting over 128 levels, or over 1024 operators in one expression |
 | E0206 | Declaration only allowed at top level |
 | E0901 | Parses, but cannot run at this milestone |
 
