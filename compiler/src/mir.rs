@@ -58,6 +58,8 @@ pub struct Task {
 
 pub enum Stmt {
     Set(Local, Expr),
+    /// Statements that one source statement lowers to.
+    Block(Vec<Stmt>),
     /// Branches stay in one flat list, so an `else if` chain of any length
     /// costs no recursion. MAX_DEPTH does not limit its length.
     If {
@@ -119,6 +121,14 @@ pub enum ExprKind {
     /// The number of Unicode characters.
     TextLen(Box<Expr>),
     TextIsEmpty(Box<Expr>),
+    /// A new text from these characters, up to but not including `end`.
+    /// Traps unless `0 <= start <= end <= len`.
+    TextSlice(Box<Expr>, Box<Expr>, Box<Expr>),
+    /// The number of UTF-8 bytes.
+    TextByteLen(Box<Expr>),
+    /// A new one-character text, from this byte offset of a text. The offset
+    /// is below the byte length, and starts a character.
+    TextCharAt(Box<Expr>, Box<Expr>),
     /// Evaluates a new value, and stores its count in this local, whose old
     /// value is released. Added by `ownership.rs`.
     Temp(Local, Box<Expr>),

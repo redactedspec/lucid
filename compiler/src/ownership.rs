@@ -19,6 +19,7 @@ fn stmts(locals: &mut Vec<Ty>, stmts: &mut [Stmt]) {
             Stmt::Set(_, value) | Stmt::Return(value) | Stmt::Print(value) | Stmt::Expr(value) => {
                 expr(locals, value);
             }
+            Stmt::Block(body) => self::stmts(locals, body),
             Stmt::If { branches, otherwise } => {
                 for (condition, then) in branches {
                     expr(locals, condition);
@@ -57,21 +58,27 @@ fn expr(locals: &mut Vec<Ty>, value: &mut Expr) {
         | ExprKind::ToInt(inner)
         | ExprKind::ToText(inner)
         | ExprKind::TextLen(inner)
-        | ExprKind::TextIsEmpty(inner) => expr(locals, inner),
-        ExprKind::Binary(_, left, right) => {
+        | ExprKind::TextIsEmpty(inner)
+        | ExprKind::TextByteLen(inner) => expr(locals, inner),
+        ExprKind::Binary(_, left, right) | ExprKind::TextCharAt(left, right) => {
             expr(locals, left);
             expr(locals, right);
         }
-        ExprKind::If(condition, then, otherwise) => {
-            expr(locals, condition);
-            expr(locals, then);
-            expr(locals, otherwise);
+        ExprKind::If(first, second, third) | ExprKind::TextSlice(first, second, third) => {
+            expr(locals, first);
+            expr(locals, second);
+            expr(locals, third);
         }
         ExprKind::Temp(..) => unreachable!("only this pass adds a `Temp`"),
     }
     let new = matches!(
         value.kind,
-        ExprKind::Text(_) | ExprKind::ToText(_) | ExprKind::Join(_) | ExprKind::Call(..)
+        ExprKind::Text(_)
+            | ExprKind::ToText(_)
+            | ExprKind::Join(_)
+            | ExprKind::Call(..)
+            | ExprKind::TextSlice(..)
+            | ExprKind::TextCharAt(..)
     );
     if new && value.ty.is_counted() {
         locals.push(value.ty);

@@ -1,0 +1,51 @@
+# Slicing and iteration work on Unicode characters, and keep counts right.
+
+task letters(word: text) -> int
+    var count = 0
+    for letter in word
+        if letter == "x"
+            return count
+        count += 1
+    return count
+
+task middle(word: text) -> text
+    return word[1..word.len() - 1]
+
+let word = "héllo€😀"
+print word[0..2]
+print word[1..=2]
+print word[5..7]
+print word[0..0].is_empty()
+print word[7..7].is_empty()
+print word[0..word.len()] == word
+print word[0..=-1].is_empty()
+print "abcdef"[1..5][1..3]
+print "{word[0..1]}-{word[6..7]}"
+print middle("[inner]")
+print if word[0..1] == "h" then word[1..2] else word[2..3]
+
+for character in word
+    print character
+
+for character in ""
+    print "never"
+
+for character in "skip"
+    if character == "k"
+        continue
+    if character == "p"
+        break
+    print character
+
+for outer in "ab"
+    for inner in "{outer}{outer}c"
+        print "{outer}{inner}"
+
+# The loop keeps its own count, so assigning the variable is safe.
+var changing = "abc"
+for character in changing
+    changing = "{changing}{character}"
+print changing
+
+print letters("abcxd")
+print letters("abc")

@@ -98,7 +98,7 @@ The published results for Perceus and Lean come from functional languages, with 
 
 This is the hardest part of the compiler, so it comes with a staged plan:
 
-1. **M3: naive.** Count every use. Correct and slow. Each new value goes to a hidden local, which holds it until overwritten or until the task returns. A store then counts again, so a value is rarely unique yet, and copy-on-write will copy more than it must.
+1. **M3: naive.** Count every use. Correct and slow. Each new value goes to a hidden local, which holds it until overwritten or until the task returns. A `for` over text holds one count on its text in another hidden local, so assigning the variable in the body is safe. A store then counts again, so a value is rarely unique yet, and copy-on-write will copy more than it must.
 2. **M4: last-use moves and borrow elision.** Measure against Rust.
 3. **M4: reuse analysis.** Only after measurements justify it.
 

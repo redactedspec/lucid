@@ -1,0 +1,2 @@
+let start = 3
+print "abcd"[start..1]

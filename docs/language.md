@@ -83,7 +83,24 @@ Interpolated values may be `text`, `int`, `float`, `bool`, or `none`. They read 
 
 `==`, `!=`, `<`, `<=`, `>`, and `>=` work on `text`. Order is by Unicode code point.
 
-Length, slicing, and iteration work on Unicode characters by default. `.bytes()` gives raw bytes. `x.len()` is the number of characters, and `x.is_empty()` tests for none. Slicing, iteration, and `.bytes()` are planned for M3.
+Length, slicing, and iteration work on Unicode characters. A character is one code point. `x.len()` is the number of characters, and `x.is_empty()` tests for none.
+
+```lucid
+let word = "héllo"
+print word[1..3]     # él
+print word[1..=3]    # éll
+
+for letter in word   # h, then é, and so on
+    print letter
+```
+
+`x[a..b]` is a new text with the characters from `a` up to but not including `b`. `x[a..=b]` means `x[a..b + 1]`. Both ends are required. `a..b` traps unless `0 <= a <= b <= x.len()`. So `x[2..2]` and `x[2..=1]` are empty, as the same ranges are in `for`, and `x[3..2]` traps. A single index such as `x[0]` is a compile error: write `x[0..1]`.
+
+`for` visits each character as a one-character `text`. There is no separate character type. The loop keeps the text it started with, so assigning to `x` in the body does not affect it. `for change` does not work on text, which cannot change.
+
+A slice scans and copies, so its cost grows with the length of `x`. A `for` is linear in total, and is the better way to visit every character.
+
+`.bytes()` gives raw bytes as a `list[byte]`. It is planned, and arrives with `list`.
 
 ## Collections
 
@@ -266,7 +283,7 @@ match load("app.toml")
 - `x else y` gives `y` in place of the error.
 - An unused error is a compile error.
 
-A **trap** is an unrecoverable bug: out-of-bounds index, overflow, a zero divisor, a failed conversion, stack overflow, a reached `...`, failed `expect`, a `shared` access conflict, running out of memory, or a failed write to stdout. A trap prints its source position and exits with code 101, except that running out of memory and a failed write to stdout have no position. A stack trace is planned for M5. Traps cannot be caught.
+A **trap** is an unrecoverable bug: out-of-bounds index or text slice, overflow, a zero divisor, a failed conversion, stack overflow, a reached `...`, failed `expect`, a `shared` access conflict, running out of memory, or a failed write to stdout. A trap prints its source position and exits with code 101, except that running out of memory and a failed write to stdout have no position. A stack trace is planned for M5. Traps cannot be caught.
 
 ## Generics
 

@@ -40,6 +40,9 @@ Add new entries at the end of the list. To reverse a decision, add a new entry t
 | 32 | 2026-11-05 | `.len()` and `.is_empty()` are the names for text length and emptiness | The spec fixed `x.is_empty()` and left length unnamed. `len` is the short form that Python and Rust share. |
 | 33 | 2026-11-05 | Naive counting uses task-level ownership: an expression borrows, a local or hidden local owns, and a task releases all its locals on return | No block tracking is needed for `break`, `continue`, or `return`, and hidden locals work inside `if` values and `and`. Trade-off: a value can outlive its block until M4. Judgment call. Decision 2 and `memory-model.md` already chose naive counting first. |
 | 34 | 2026-11-05 | The leak and double-free checks are the debug profile of `lucid_rt` | Every golden test gets them with no flag, and a release build pays nothing. |
+| 35 | 2026-11-05 | A text has no single index and no character type. Iteration gives one-character `text`, and `x[i..i + 1]` reads one character | One way to do it. `int` indexing on text would look O(1) and be O(n). Adding a character type or `x[i]` later breaks nothing. Judgment call, no source read. The M3 agent trial tests whether agents reach for `x[0]`, and E0303 points to the slice. |
+| 36 | 2026-11-05 | A character is one code point. Text slices use character positions, and a bad range traps | `docs/language.md` already counts characters for `.len()`. Grapheme rules need Unicode tables in the runtime, and can arrive as a library. A trap matches list indexing and makes a bug visible, where clamping hides it. Judgment call, no source read. |
+| 37 | 2026-11-05 | `.bytes()` waits for `list`, since its result is `list[byte]` | A stand-in type would be a breaking change once `list` arrives. Scope moved inside M3. |
 
 ## Open questions
 

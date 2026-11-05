@@ -4,7 +4,7 @@ The compiler is written in Rust until M9, when its front end moves to Lucid (dec
 
 ## Status
 
-M3 is in progress. `lucid run` compiles `int`, `float`, `bool`, `none`, and `text`, interpolation, `let`, `var`, `if`, `while`, `for` over ranges, top-level tasks with recursion and defaults, and `print`. It reports E0901 for anything else. `check.rs` binds names, checks types, and lowers to MIR in one pass, because with no modules or generics those stages have nothing to do alone. It splits when they arrive. `ownership.rs` is the naive stage: it gives each new heap value an owner, and "Counting" in `mir.rs` states the rules that a backend follows.
+M3 is in progress. `lucid run` compiles `int`, `float`, `bool`, `none`, and `text`, interpolation, text slices, `let`, `var`, `if`, `while`, `for` over ranges and text, top-level tasks with recursion and defaults, and `print`. It reports E0901 for anything else. `check.rs` binds names, checks types, and lowers to MIR in one pass, because with no modules or generics those stages have nothing to do alone. It splits when they arrive. `ownership.rs` is the naive stage: it gives each new heap value an owner, and "Counting" in `mir.rs` states the rules that a backend follows.
 
 ## Pipeline
 
@@ -54,7 +54,7 @@ benchmarks/        Lucid and Rust versions of each program
 
 A task with counted locals has one exit block, which releases them, so code size does not grow with returns times locals. Every other task returns directly.
 
-A text is one allocation: a count, a byte length, then its UTF-8 bytes. Every text literal allocates when it runs, except directly under `print`.
+A text is one allocation: a count, a byte length, then its UTF-8 bytes. Every text literal allocates when it runs, except directly under `print`. A slice or a loop character is a new text with copied bytes. `check.rs` lowers a `for` over text to a `while` over byte offsets, with `TextCharAt` reading each character.
 
 In a debug build of `lucid_rt`, which is what `cargo test` runs, a released value keeps its memory and is marked dead. So a double free, or a retain of a dead value, traps with `runtime bug`. `lucid run` also traps at exit if any value is still live.
 

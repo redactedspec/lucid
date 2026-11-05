@@ -36,8 +36,8 @@ Build a thin end-to-end path first. Depth comes later.
 ## M3: Data
 
 - [x] `text` values, interpolation, comparison, `.len()`, `.is_empty()`
-- [ ] `text` slicing, iteration, `.bytes()`
-- [ ] `list`, `map`, `set`
+- [x] `text` slicing, iteration
+- [ ] `list`, `map`, `set`, and `text.bytes()`
 - [ ] `type`, `choice`, `match` with exhaustiveness
 - [ ] Unions, `T?`, narrowing, `is`
 - [ ] Generics with monomorphization, traits, derived traits

@@ -1,0 +1,8 @@
+text_index.lcd:2:7: error E0303: text needs a range index
+  note: for one character, use `x[i..i + 1]`
+text_index.lcd:3:7: error E0303: text needs a range index
+  note: for one character, use `x[i..i + 1]`
+text_index.lcd:4:12: error E0303: a range needs `int`, found `float`
+  note: conversions are explicit: use `.to_int()`
+text_index.lcd:5:15: error E0303: a range needs `int`, found `text`
+text_index.lcd:7:22: error E0303: text cannot change

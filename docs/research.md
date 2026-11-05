@@ -23,6 +23,7 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | No `async`, lightweight tasks in browser | Now feasible through JSPI | Snippet | Decide at M7 |
 | ASCII names, text escapes | Judgment call from existing practice | None | Revisit before 1.0 |
 | Division, argument order | Judgment call from existing practice | None | Agent trial at M3 |
+| Text slices, no character type | Judgment call from existing practice | None | Agent trial at M3 |
 
 ## Memory
 

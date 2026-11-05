@@ -346,7 +346,7 @@ impl<'a> Checker<'a> {
                 Stmt::While { condition, body }
             }
             StmtKind::For { change, name, iterable, body } => {
-                return self.for_loop(*change, name, iterable, body);
+                self.for_loop(*change, name, iterable, body)
             }
             StmtKind::Return(value) => {
                 let none = Expr { kind: ExprKind::None, ty: Ty::None, span };
@@ -429,44 +429,81 @@ impl<'a> Checker<'a> {
         Some(Stmt::Set(local, value))
     }
 
+    fn range(&mut self, start: &'a ast::Expr, end: &'a ast::Expr) -> (Expr, Expr) {
+        let start = self.expr(start);
+        let end = self.expr(end);
+        self.expect(&start, Ty::Int, "a range");
+        self.expect(&end, Ty::Int, "a range");
+        (start, end)
+    }
+
+    /// Checks a loop body, in a new scope that holds the loop name.
+    fn loop_body(
+        &mut self,
+        name: &'a ast::Name,
+        ty: Ty,
+        body: &'a [ast::Stmt],
+    ) -> (Local, Vec<Stmt>) {
+        self.scopes.push(HashMap::new());
+        let local = self.bind(name, ty, false);
+        self.loops += 1;
+        let body = self.stmts(body);
+        self.loops -= 1;
+        self.scopes.pop();
+        (local, body)
+    }
+
     fn for_loop(
         &mut self,
         change: bool,
         name: &'a ast::Name,
         iterable: &'a ast::Expr,
         body: &'a [ast::Stmt],
-    ) -> Option<Stmt> {
-        let range = match &iterable.kind {
-            Ast::Binary(op @ (BinaryOp::Range | BinaryOp::RangeInclusive), start, end) => {
-                let start = self.expr(start);
-                let end = self.expr(end);
-                self.expect(&start, Ty::Int, "a range");
-                self.expect(&end, Ty::Int, "a range");
-                if change {
-                    self.fail("E0303", "a range has nothing to change".into(), iterable.span);
-                }
-                Some((start, end, *op == BinaryOp::RangeInclusive))
+    ) -> Stmt {
+        let Ast::Binary(op @ (BinaryOp::Range | BinaryOp::RangeInclusive), start, end) =
+            &iterable.kind
+        else {
+            let mut value = self.expr(iterable);
+            if value.ty != Ty::Text && value.ty != Ty::Error {
+                let message = format!("`for` cannot loop over `{}`", value.ty.name());
+                value = self.fail("E0303", message, value.span);
+            } else if change && value.ty == Ty::Text {
+                value = self.fail("E0303", "text cannot change".into(), value.span);
             }
-            _ => {
-                let value = self.expr(iterable);
-                if value.ty == Ty::Text {
-                    self.unsupported("a `for` over text", value.span);
-                } else if value.ty != Ty::Error {
-                    let message = format!("`for` cannot loop over `{}`", value.ty.name());
-                    self.fail("E0303", message, value.span);
-                }
-                None
-            }
+            return self.for_text(value, name, body);
         };
-        self.scopes.push(HashMap::new());
-        let ty = if range.is_some() { Ty::Int } else { Ty::Error };
-        let local = self.bind(name, ty, false);
-        self.loops += 1;
-        let body = self.stmts(body);
-        self.loops -= 1;
-        self.scopes.pop();
-        let (start, end, inclusive) = range?;
-        Some(Stmt::For { local, start, end, inclusive, body })
+        let (start, end) = self.range(start, end);
+        if change {
+            self.fail("E0303", "a range has nothing to change".into(), iterable.span);
+        }
+        let (local, body) = self.loop_body(name, Ty::Int, body);
+        Stmt::For { local, start, end, inclusive: *op == BinaryOp::RangeInclusive, body }
+    }
+
+    /// Lowers to a `while` over byte offsets. A hidden local keeps the text
+    /// alive, since the body may assign the variable it came from. The offset
+    /// moves before the body, so `continue` needs no separate step.
+    fn for_text(&mut self, text: Expr, name: &'a ast::Name, body: &'a [ast::Stmt]) -> Stmt {
+        let (span, ty) = (text.span, text.ty);
+        let owner = self.new_local(ty, false);
+        let offset = self.new_local(Ty::Int, true);
+        let (character, body) = self.loop_body(name, ty, body);
+
+        let expr = |kind, ty| Expr { kind, ty, span };
+        let local = |id, ty| Box::new(expr(ExprKind::Local(id), ty));
+        let byte_len = |id| Box::new(expr(ExprKind::TextByteLen(local(id, ty)), Ty::Int));
+        let at = local(offset, Ty::Int);
+        let inside = ExprKind::Binary(BinaryOp::Lt, at.clone(), byte_len(owner));
+        let read = ExprKind::TextCharAt(local(owner, ty), at.clone());
+        let advance = ExprKind::Binary(BinaryOp::Add, at, byte_len(character));
+        let mut inner =
+            vec![Stmt::Set(character, expr(read, ty)), Stmt::Set(offset, expr(advance, Ty::Int))];
+        inner.extend(body);
+        Stmt::Block(vec![
+            Stmt::Set(owner, text),
+            Stmt::Set(offset, expr(ExprKind::Int(0), Ty::Int)),
+            Stmt::While { condition: expr(inside, Ty::Bool), body: inner },
+        ])
     }
 
     fn name(&mut self, name: &str, span: Span) -> Expr {
@@ -553,12 +590,42 @@ impl<'a> Checker<'a> {
             Ast::Map(_) => return self.unsupported("a map", span),
             Ast::Is { .. } => return self.unsupported("`is`", span),
             Ast::Lambda { .. } => return self.unsupported("a lambda", span),
-            Ast::Index { .. } => return self.unsupported("indexing", span),
+            Ast::Index { base, indices } => return self.index(base, indices, span),
             Ast::Field { .. } => return self.unsupported("a field", span),
             Ast::Match { .. } => return self.unsupported("`match`", span),
             Ast::SelfValue => return self.unsupported("`self`", span),
         };
         Expr { kind, ty, span }
+    }
+
+    fn index(&mut self, base: &'a ast::Expr, indices: &'a [ast::Expr], span: Span) -> Expr {
+        let value = self.expr(base);
+        match value.ty {
+            Ty::Text => {}
+            Ty::Error => return poisoned(span),
+            _ => return self.unsupported("indexing", span),
+        }
+        let (op, start, end) = match indices {
+            [
+                ast::Expr {
+                    kind: Ast::Binary(op @ (BinaryOp::Range | BinaryOp::RangeInclusive), start, end),
+                    ..
+                },
+            ] => (*op, start, end),
+            _ => {
+                let diag = Diagnostic::new("E0303", "text needs a range index", span);
+                return self.report(diag.note("for one character, use `x[i..i + 1]`"));
+            }
+        };
+        let (start, mut end) = self.range(start, end);
+        if op == BinaryOp::RangeInclusive {
+            let span = end.span;
+            let one = Expr { kind: ExprKind::Int(1), ty: Ty::Int, span };
+            let kind = ExprKind::Binary(BinaryOp::Add, end.into(), one.into());
+            end = Expr { kind, ty: Ty::Int, span };
+        }
+        let kind = ExprKind::TextSlice(value.into(), start.into(), end.into());
+        Expr { kind, ty: Ty::Text, span }
     }
 
     fn text(&mut self, parts: &'a [TextPart], span: Span) -> Expr {

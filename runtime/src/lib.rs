@@ -181,7 +181,12 @@ pub unsafe extern "C" fn lucid_text_compare(a: *const Text, b: *const Text) -> i
     unsafe { bytes(a).cmp(bytes(b)) as i64 }
 }
 
-/// Counts Unicode characters: the bytes that do not continue a UTF-8 sequence.
+/// True if this byte starts a Unicode character, and does not continue one.
+fn starts_character(byte: u8) -> bool {
+    byte & 0xC0 != 0x80
+}
+
+/// Counts Unicode characters.
 ///
 /// # Safety
 ///
@@ -190,7 +195,7 @@ pub unsafe extern "C" fn lucid_text_compare(a: *const Text, b: *const Text) -> i
 pub unsafe extern "C" fn lucid_text_len(text: *const Text) -> i64 {
     // SAFETY: the caller guarantees a live text.
     let bytes = unsafe { bytes(text) };
-    bytes.iter().filter(|&&byte| byte & 0xC0 != 0x80).count() as i64
+    bytes.iter().filter(|&&byte| starts_character(byte)).count() as i64
 }
 
 /// # Safety
@@ -200,6 +205,53 @@ pub unsafe extern "C" fn lucid_text_len(text: *const Text) -> i64 {
 pub unsafe extern "C" fn lucid_text_is_empty(text: *const Text) -> u8 {
     // SAFETY: the caller guarantees a live text.
     u8::from(unsafe { bytes(text) }.is_empty())
+}
+
+/// Copies characters `start` up to but not including `end`. Returns null if
+/// the range is not `0 <= start <= end <= len`, and compiled code then traps.
+///
+/// # Safety
+///
+/// `text` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_slice(text: *const Text, start: i64, end: i64) -> *mut Text {
+    // SAFETY: the caller guarantees a live text.
+    let bytes = unsafe { bytes(text) };
+    if start < 0 || end < start {
+        return std::ptr::null_mut();
+    }
+    // ponytail: a scan and a copy per slice, so a loop of slices is O(n^2).
+    // A view or an ASCII flag can fix this if M4 benchmarks need it.
+    let offset = |character: i64| {
+        let starts = (0..bytes.len()).filter(|&at| starts_character(bytes[at]));
+        starts.chain([bytes.len()]).nth(character as usize)
+    };
+    match (offset(start), offset(end)) {
+        (Some(first), Some(last)) => text_from(&bytes[first..last]),
+        _ => std::ptr::null_mut(),
+    }
+}
+
+/// # Safety
+///
+/// `text` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_byte_len(text: *const Text) -> i64 {
+    // SAFETY: the caller guarantees a live text.
+    unsafe { bytes(text) }.len() as i64
+}
+
+/// Copies the character that starts at byte `offset`.
+///
+/// # Safety
+///
+/// `text` must point to a live text, and `offset` must start a character.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_char_at(text: *const Text, offset: i64) -> *mut Text {
+    // SAFETY: the caller guarantees a live text.
+    let rest = &unsafe { bytes(text) }[offset as usize..];
+    let width = 1 + rest[1..].iter().take_while(|&&byte| !starts_character(byte)).count();
+    text_from(&rest[..width])
 }
 
 #[unsafe(no_mangle)]
@@ -302,5 +354,38 @@ mod tests {
             lucid_release(std::ptr::null_mut());
         }
         assert_eq!(LIVE.load(Ordering::Relaxed), start);
+    }
+
+    #[test]
+    fn slices_count_characters_and_reject_bad_ranges() {
+        let text = text_from("a€😀".as_bytes());
+        // SAFETY: `text` stays live, and each slice is read before its release.
+        unsafe {
+            for (start, end, expected) in [(0, 3, "a€😀"), (1, 2, "€"), (2, 3, "😀"), (3, 3, "")]
+            {
+                let slice = lucid_text_slice(text, start, end);
+                assert_eq!(bytes(slice), expected.as_bytes());
+                lucid_release(slice);
+            }
+            for (start, end) in [(-1, 1), (2, 1), (0, 4), (4, 4), (0, i64::MAX), (i64::MIN, 0)] {
+                assert!(lucid_text_slice(text, start, end).is_null());
+            }
+            lucid_release(text);
+        }
+    }
+
+    #[test]
+    fn characters_are_read_by_byte_offset() {
+        let text = text_from("a€😀".as_bytes());
+        // SAFETY: `text` stays live, and each offset starts a character.
+        unsafe {
+            assert_eq!(lucid_text_byte_len(text), 8);
+            for (offset, expected) in [(0, "a"), (1, "€"), (4, "😀")] {
+                let character = lucid_text_char_at(text, offset);
+                assert_eq!(bytes(character), expected.as_bytes());
+                lucid_release(character);
+            }
+            lucid_release(text);
+        }
     }
 }

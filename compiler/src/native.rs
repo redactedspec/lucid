@@ -72,6 +72,9 @@ struct Runtime {
     text_compare: FuncId,
     text_len: FuncId,
     text_is_empty: FuncId,
+    text_slice: FuncId,
+    text_byte_len: FuncId,
+    text_char_at: FuncId,
     int_text: FuncId,
     float_text: FuncId,
     bool_text: FuncId,
@@ -112,6 +115,9 @@ fn compile(
     builder.symbol("lucid_text_compare", lucid_rt::lucid_text_compare as *const u8);
     builder.symbol("lucid_text_len", lucid_rt::lucid_text_len as *const u8);
     builder.symbol("lucid_text_is_empty", lucid_rt::lucid_text_is_empty as *const u8);
+    builder.symbol("lucid_text_slice", lucid_rt::lucid_text_slice as *const u8);
+    builder.symbol("lucid_text_byte_len", lucid_rt::lucid_text_byte_len as *const u8);
+    builder.symbol("lucid_text_char_at", lucid_rt::lucid_text_char_at as *const u8);
     builder.symbol("lucid_int_text", lucid_rt::lucid_int_text as *const u8);
     builder.symbol("lucid_float_text", lucid_rt::lucid_float_text as *const u8);
     builder.symbol("lucid_bool_text", lucid_rt::lucid_bool_text as *const u8);
@@ -142,6 +148,9 @@ fn compile(
         text_compare: import("lucid_text_compare", &two, &int),
         text_len: import("lucid_text_len", &value, &int),
         text_is_empty: import("lucid_text_is_empty", &value, &[AbiParam::new(types::I8)]),
+        text_slice: import("lucid_text_slice", &[value[0], int[0], int[0]], &value),
+        text_byte_len: import("lucid_text_byte_len", &value, &int),
+        text_char_at: import("lucid_text_char_at", &[value[0], int[0]], &value),
         int_text: import("lucid_int_text", &int, &value),
         float_text: import("lucid_float_text", &float, &value),
         bool_text: import("lucid_bool_text", &byte, &value),
@@ -367,6 +376,7 @@ impl Lower<'_, '_> {
                     self.body.def_var(self.vars[*local], value);
                 }
             }
+            Stmt::Block(stmts) => return self.stmts(stmts),
             Stmt::If { branches, otherwise } => {
                 let done = self.body.create_block();
                 for (condition, then) in branches {
@@ -558,6 +568,25 @@ impl Lower<'_, '_> {
             ExprKind::TextIsEmpty(value) => {
                 let value = self.expr(value);
                 self.call(self.runtime.text_is_empty, &[value]).expect("it returns a bool")
+            }
+            ExprKind::TextSlice(text, start, end) => {
+                let text = self.expr(text);
+                let start = self.expr(start);
+                let end = self.expr(end);
+                let slice = self.call(self.runtime.text_slice, &[text, start, end]);
+                let slice = slice.expect("it returns a text");
+                let outside = self.body.ins().icmp_imm_s(IntCC::Equal, slice, 0);
+                self.trap_if(outside, "text slice out of bounds", expr.span);
+                slice
+            }
+            ExprKind::TextByteLen(value) => {
+                let value = self.expr(value);
+                self.call(self.runtime.text_byte_len, &[value]).expect("it returns an int")
+            }
+            ExprKind::TextCharAt(text, offset) => {
+                let text = self.expr(text);
+                let offset = self.expr(offset);
+                self.call(self.runtime.text_char_at, &[text, offset]).expect("it returns a text")
             }
             ExprKind::Temp(local, value) => {
                 let value = self.expr(value);
