@@ -98,6 +98,25 @@ fn examples_parse() {
 }
 
 #[test]
+fn agent_guide_runs_and_fits() {
+    let source = fs::read_to_string(repo().join("docs/agent-guide.md")).expect("no guide");
+    // About 4 bytes per token. The budget is in docs/vision.md.
+    assert!(source.len() / 4 < 15_000, "guide is over the token budget");
+
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let blocks: Vec<&str> = source.split("```lucid
+").skip(1).collect();
+    assert!(!blocks.is_empty());
+    for (i, block) in blocks.iter().enumerate() {
+        let code = block.split("```").next().expect("split gives one part");
+        let name = format!("guide_{i}.lcd");
+        fs::write(dir.join(&name), code).expect("cannot write test file");
+        let output = lucid(dir, &["run", &name]);
+        assert!(output.status.success(), "block {i}: {}", text(&output.stderr));
+    }
+}
+
+#[test]
 fn check_json_reports_on_stdout() {
     let dir = repo().join("tests").join("fail");
     let output = lucid(&dir, &["check", "--json", "expected_token.lcd"]);
