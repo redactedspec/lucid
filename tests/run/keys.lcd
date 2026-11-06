@@ -100,6 +100,20 @@ print {Tag(id: 1, note: "a"): 1, Tag(id: 1, note: "b"): 2}.len()
 # A hand-written hash reaches into larger values.
 print set([[Name(text: "ab")], [Name(text: "cd")]]).len()
 
+# A written hash can let in a key that is not equal to itself. Walking a map
+# never looks a key up, so showing and hashing it cannot trap.
+type Reading
+    value: float
+
+task hash(self: Reading) -> int
+    return 1
+
+let nan = 0.0 / 0.0
+let odd: map[Reading, int] = {Reading(value: nan): 1}
+print odd
+print odd == odd
+print set([odd]).len()
+
 # Recursive values and generic code.
 choice Tree
     Leaf

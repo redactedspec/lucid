@@ -1103,6 +1103,31 @@ pub unsafe extern "C" fn lucid_map_key(map: *mut Map, position: i64) -> i64 {
     unsafe { entries(map)[position as usize].key }
 }
 
+/// The value at a position from `lucid_map_next` or `lucid_map_position`.
+///
+/// # Safety
+///
+/// `map` must point to a live map, with a live entry at `position`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_map_value(map: *mut Map, position: i64) -> i64 {
+    // SAFETY: the caller guarantees this.
+    unsafe { entries(map)[position as usize].value }
+}
+
+/// The position of a key, or -1 if the key is not there.
+///
+/// # Safety
+///
+/// `map` must point to a live map, and `key` must fit its keys.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_map_position(map: *mut Map, key: i64) -> i64 {
+    // SAFETY: the caller guarantees this.
+    unsafe {
+        let hash = hash_key(map, key);
+        find(map, hash, key).map_or(-1, |at| table(map)[at] as i64 - 1)
+    }
+}
+
 /// A set of a list's values, in order, with each repeat dropped.
 ///
 /// # Safety

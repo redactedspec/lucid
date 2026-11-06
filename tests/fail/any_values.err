@@ -25,3 +25,7 @@ any_values.lcd:45:6: error E0323: `show` replaces a derived task, so it needs th
 any_values.lcd:52:1: error E0320: `any Show` does not have `Order`
 any_values.lcd:53:23: error E0303: this annotation needs `any Describe`, found `list[Dog]`
 any_values.lcd:55:23: error E0303: this annotation needs `any Describe`, found `Dog?`
+any_values.lcd:57:23: error E0303: this annotation needs `any Describe`, found `Dog or Cat`
+any_values.lcd:58:19: error E0303: this annotation needs `any Show`, found `any Describe`
+any_values.lcd:60:22: error E0303: this annotation needs `any Show?`, found `text?`
+any_values.lcd:62:29: error E0303: this annotation needs `text or any Show`, found `text or int`

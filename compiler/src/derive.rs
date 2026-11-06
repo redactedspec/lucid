@@ -20,6 +20,8 @@ pub enum Derived {
     Compare,
     /// `value: T, list: list[T]`, gives `bool`.
     Has,
+    /// `x: T`, gives `text`, with no quotes on a text that `x` holds directly.
+    ShowAlone,
     /// `x: T, state: int`, gives `state` with `x` added.
     Hash,
     /// A task of the trait of an `any`: runs the one that its value has.
@@ -77,6 +79,12 @@ impl Body {
         self.expr(ExprKind::Hash(op, boxed(state), boxed(value)), Ty::Int)
     }
 
+    /// The value at a position in a map.
+    fn value_at(&self, map: Local, position: Local, ty: Ty) -> Expr {
+        let kind = ExprKind::MapValue(boxed(self.read(map)), boxed(self.read(position)));
+        self.expr(kind, ty)
+    }
+
     fn join(&self, parts: Vec<Expr>) -> Expr {
         self.expr(ExprKind::Join(parts), Ty::Text)
     }
@@ -114,12 +122,13 @@ impl Body {
         Stmt::For { local: index, start: self.int(0), end, inclusive: false, body }
     }
 
-    /// Visits the keys of a map or set in `map`. The body may return.
+    /// Visits the keys of a map or set in `map`, with their positions. The body
+    /// may return.
     fn each_key(
         &mut self,
         map: Local,
         key: Ty,
-        body: impl FnOnce(&mut Self, Local) -> Vec<Stmt>,
+        body: impl FnOnce(&mut Self, Local, Local) -> Vec<Stmt>,
     ) -> Vec<Stmt> {
         let position = self.new_local(Ty::Int);
         let held = self.new_local(key);
@@ -130,8 +139,9 @@ impl Body {
         let after = next(self, self.plus_one(self.read(position)));
         let at =
             self.expr(ExprKind::MapKey(boxed(self.read(map)), boxed(self.read(position))), key);
-        let mut inner = vec![Stmt::Set(held, at), Stmt::Set(position, after)];
-        inner.extend(body(self, held));
+        let mut inner = vec![Stmt::Set(held, at)];
+        inner.extend(body(self, held, position));
+        inner.push(Stmt::Set(position, after));
         let condition = self.test(BinaryOp::Ge, self.read(position), self.int(0));
         vec![Stmt::Set(position, first), Stmt::While { condition, body: inner }]
     }
@@ -144,7 +154,7 @@ impl Mono<'_> {
         match ty {
             Ty::Text => Expr { kind: ExprKind::TextQuote(boxed(value)), ty, span },
             _ if ty.is_compound() => {
-                self.written_or(Derived::Show, "show", vec![value], Ty::Text, span)
+                self.call_written_or(Derived::Show, "show", vec![value], Ty::Text, span)
             }
             _ => Expr { kind: ExprKind::ToText(boxed(value)), ty: Ty::Text, span },
         }
@@ -156,24 +166,14 @@ impl Mono<'_> {
         if value.ty == Ty::Text {
             return value;
         }
-        let written = value.ty.is_compound() && self.method("show", value.ty, span).is_some();
-        let may_hold_text =
-            value.ty.members().contains(&Ty::Text) || matches!(value.ty, Ty::Any(_));
+        let ty = value.ty;
+        let written = ty.is_compound() && self.method("show", ty, span).is_some();
+        let may_hold_text = ty.members().iter().any(|m| matches!(m, Ty::Text | Ty::Any(_)));
         if written || !may_hold_text {
             return self.shown(value, span);
         }
-        let ty = value.ty;
-        let local = self.new_local(ty);
-        let read = || Expr { kind: ExprKind::Local(local), ty, span };
-        let held = Expr { kind: ExprKind::Field(boxed(read()), 0), ty: Ty::Text, span };
-        let id = self.types.tag(Ty::Text);
-        let is_text = ExprKind::TagIn(boxed(read()), vec![id]);
-        let is_text = Expr { kind: is_text, ty: Ty::Bool, span };
-        let shown = self.shown(read(), span);
-        let kind = ExprKind::If(boxed(is_text), boxed(held), boxed(shown));
-        let choice = Expr { kind, ty: Ty::Text, span };
-        let kind = ExprKind::Seq(vec![Stmt::Set(local, value)], boxed(choice));
-        Expr { kind, ty: Ty::Text, span }
+        let slot = self.derived(Derived::ShowAlone, ty, span);
+        Expr { kind: ExprKind::Call(slot, &[], vec![value]), ty: Ty::Text, span }
     }
 
     /// `left == right` for any type.
@@ -181,7 +181,7 @@ impl Mono<'_> {
         match left.ty {
             Ty::None => Expr { kind: ExprKind::Bool(true), ty: Ty::Bool, span },
             ty if ty.is_compound() => {
-                self.written_or(Derived::Equal, "equal", vec![left, right], Ty::Bool, span)
+                self.call_written_or(Derived::Equal, "equal", vec![left, right], Ty::Bool, span)
             }
             _ => {
                 let kind = ExprKind::Binary(BinaryOp::Eq, boxed(left), boxed(right));
@@ -194,7 +194,8 @@ impl Mono<'_> {
     /// for a number or text, so they must be plain reads. NaN gives zero.
     fn compared(&mut self, left: Expr, right: Expr, span: Span) -> Expr {
         if left.ty.is_compound() {
-            return self.written_or(Derived::Compare, "compare", vec![left, right], Ty::Int, span);
+            let args = vec![left, right];
+            return self.call_written_or(Derived::Compare, "compare", args, Ty::Int, span);
         }
         let int = |value| Expr { kind: ExprKind::Int(value), ty: Ty::Int, span };
         let test = |op, a: &Expr, b: &Expr| {
@@ -257,9 +258,8 @@ impl Mono<'_> {
         Expr { kind: ExprKind::Call(slot, &[], vec![value, list]), ty: Ty::Bool, span }
     }
 
-    /// A hand-written task for the type of the first argument, or else the
-    /// derived one.
-    fn written_or(
+    /// A call to `written_or`, on the type of the first argument.
+    fn call_written_or(
         &mut self,
         kind: Derived,
         name: &str,
@@ -268,11 +268,16 @@ impl Mono<'_> {
         span: Span,
     ) -> Expr {
         let ty = args[0].ty;
-        let slot = match self.method(name, ty, span) {
+        let slot = self.written_or(kind, name, ty, span);
+        Expr { kind: ExprKind::Call(slot, &[], args), ty: returns, span }
+    }
+
+    /// The task for a trait on a type: a hand-written one, or else the derived.
+    pub fn written_or(&mut self, kind: Derived, name: &str, ty: Ty, span: Span) -> usize {
+        match self.method(name, ty, span) {
             Some(slot) => slot,
             None => self.derived(kind, ty, span),
-        };
-        Expr { kind: ExprKind::Call(slot, &[], args), ty: returns, span }
+        }
     }
 
     /// Each field of a variant of `ty`: its name, type, and slot.
@@ -295,7 +300,7 @@ impl Mono<'_> {
     /// Builds a derived task.
     pub fn derive(&mut self, kind: Derived, ty: Ty, span: Span) -> Task {
         let (locals, returns) = match kind {
-            Derived::Show => (vec![ty], Ty::Text),
+            Derived::Show | Derived::ShowAlone => (vec![ty], Ty::Text),
             Derived::Equal => (vec![ty, ty], Ty::Bool),
             Derived::Compare => (vec![ty, ty], Ty::Int),
             Derived::Has => (vec![ty, Ty::List(crate::mir::inner(ty))], Ty::Bool),
@@ -306,6 +311,16 @@ impl Mono<'_> {
         let mut body = Body { locals, span };
         let stmts = match kind {
             Derived::Show => self.show_body(&mut body, ty),
+            Derived::ShowAlone => {
+                let mut stmts = Vec::new();
+                for member in self.held(ty) {
+                    let id = self.types.id(member);
+                    let value = self.shown_alone(body.slot(0, 0, member), span);
+                    stmts.push(body.return_if(body.holds(0, id), value));
+                }
+                stmts.push(Stmt::Unreachable);
+                stmts
+            }
             Derived::Equal => self.equal_body(&mut body, ty),
             Derived::Compare => self.compare_body(&mut body, ty),
             Derived::Hash => self.hash_body(&mut body, ty),
@@ -319,7 +334,7 @@ impl Mono<'_> {
                     stmts.push(body.return_if(body.holds(0, id), call));
                 }
                 // Every value in an `any` got there through a tag listed above.
-                stmts.push(Stmt::Placeholder(span));
+                stmts.push(Stmt::Unreachable);
                 stmts
             }
             Derived::Has => {
@@ -354,12 +369,11 @@ impl Mono<'_> {
                     if matches!(ty, Ty::Set(_)) { ("set([", "])") } else { ("{", "}") };
                 let out = body.new_local(Ty::Text);
                 let count = body.new_local(Ty::Int);
-                let walk = body.each_key(X, *key, |body, held| {
+                let walk = body.each_key(X, *key, |body, held, at| {
                     let key_text = self.shown(body.read(held), span);
                     let mut parts = vec![key_text];
                     if let Ty::Map(_, value) = ty {
-                        let kind = ExprKind::MapGet(boxed(body.read(X)), boxed(body.read(held)));
-                        let value = body.expr(kind, *value);
+                        let value = body.value_at(X, at, *value);
                         parts.push(body.text(": "));
                         parts.push(self.shown(value, span));
                     }
@@ -432,16 +446,17 @@ impl Mono<'_> {
             Ty::Set(key) | Ty::Map(key, _) => {
                 let same = body.test(BinaryOp::Eq, body.len(body.read(A)), body.len(body.read(B)));
                 stmts.push(no(body, same));
-                stmts.extend(body.each_key(A, *key, |body, held| {
-                    let (a, b) = (body.read(A), body.read(B));
-                    let has = ExprKind::MapHas(boxed(body.read(held)), boxed(b.clone()));
-                    let mut inner = vec![no(body, body.expr(has, Ty::Bool))];
+                stmts.extend(body.each_key(A, *key, |body, held, at| {
+                    let found = body.new_local(Ty::Int);
+                    let kind = ExprKind::MapFind(boxed(body.read(B)), boxed(body.read(held)));
+                    let missing = body.test(BinaryOp::Lt, body.read(found), body.int(0));
+                    let mut inner = vec![
+                        Stmt::Set(found, body.expr(kind, Ty::Int)),
+                        body.return_if(missing, body.flag(false)),
+                    ];
                     if let Ty::Map(_, value) = ty {
-                        let get = |map: Expr| {
-                            let kind = ExprKind::MapGet(boxed(map), boxed(body.read(held)));
-                            body.expr(kind, *value)
-                        };
-                        let same = self.equal(get(a), get(b), span);
+                        let left = body.value_at(A, at, *value);
+                        let same = self.equal(left, body.value_at(B, found, *value), span);
                         inner.push(no(body, same));
                     }
                     inner
@@ -553,11 +568,10 @@ impl Mono<'_> {
             Ty::Set(key) | Ty::Map(key, _) => {
                 let sum = body.new_local(Ty::Int);
                 stmts.push(Stmt::Set(sum, body.int(0)));
-                stmts.extend(body.each_key(X, *key, |body, held| {
+                stmts.extend(body.each_key(X, *key, |body, held, at| {
                     let mut entry = self.hashed(body.int(0), body.read(held), span);
                     if let Ty::Map(_, value) = ty {
-                        let kind = ExprKind::MapGet(boxed(body.read(X)), boxed(body.read(held)));
-                        entry = self.hashed(entry, body.expr(kind, *value), span);
+                        entry = self.hashed(entry, body.value_at(X, at, *value), span);
                     }
                     vec![Stmt::Set(sum, body.hash(HashOp::Sum, body.read(sum), entry))]
                 }));

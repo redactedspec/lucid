@@ -97,7 +97,10 @@ if found is not none
 let scale: any Scale = Cat(lives: 2)
 print scale.scaled(21)
 
-# A union goes in as it is, if every member fits.
+# A union goes in whole, if the union has the trait.
+task describe(self: Dog or Cat) -> text
+    return "either"
+
 let either: Dog or Cat = Cat(lives: 6)
 let from_union: any Describe = either
 print from_union.describe()
@@ -144,6 +147,23 @@ task next(self: B) -> any Next
 
 let start: any Next = A(n: 0)
 print start.next().next().next()
+
+# A generic value goes in whole too, and the task of its union runs.
+print boxed(either).describe()
+
+# Text directly in an `any` has no quotes, on every path.
+let quiet: (any Show)? = "hi"
+print quiet
+print "{quiet}"
+let texts: list[any Show] = ["x"]
+print texts[0]
+print texts.get(0)
+print texts
+
+task again[T: Show](value: T) -> any Show
+    return value
+
+print again(word)
 
 # A task can take an `any` as its receiver.
 task twice(self: any Describe) -> text

@@ -191,10 +191,7 @@ impl Mono<'_> {
         if key.is_key() {
             return None;
         }
-        let equal = match self.method("equal", key, span) {
-            Some(slot) => slot,
-            None => self.derived(Derived::Equal, key, span),
-        };
+        let equal = self.written_or(Derived::Equal, "equal", key, span);
         Some((self.derived(Derived::Hash, key, span), equal))
     }
 
@@ -254,27 +251,19 @@ impl Mono<'_> {
         (slot, total)
     }
 
-    /// A hidden local of the task being rewritten.
-    pub fn new_local(&mut self, ty: Ty) -> usize {
-        self.locals.push(ty);
-        self.locals.len() - 1
-    }
-
     /// A value as the wider type `to`.
     fn wrap(&mut self, value: Expr, to: Ty, span: Span) -> Expr {
         if value.ty == to {
             return value;
         }
-        if matches!(to, Ty::Any(_)) {
+        // A union goes in an `any` whole, since its trait may be on the union
+        // and not on its members.
+        if let Ty::Any(_) = to {
             let held = self.boxed.entry(to).or_default();
-            for &member in value.ty.members() {
-                if !held.contains(&member) {
-                    held.push(member);
-                }
+            if !held.contains(&value.ty) {
+                held.push(value.ty);
             }
-        }
-        let wider = matches!(to, Ty::Union(_) | Ty::Any(_));
-        if !wider || matches!(value.ty, Ty::Union(_)) {
+        } else if !matches!(to, Ty::Union(_)) || matches!(value.ty, Ty::Union(_)) {
             return Expr { ty: to, ..value };
         }
         let (tag, counted) = (self.types.tag(value.ty), usize::from(value.ty.is_counted()));

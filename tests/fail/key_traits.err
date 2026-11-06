@@ -14,4 +14,7 @@ key_traits.lcd:42:6: error E0323: `hash` replaces a derived task, so it needs th
   note: write `task hash(self: T) -> int`, for a `type`, `choice`, or collection `T`
 key_traits.lcd:48:1: error E0320: `Reading` does not have `Hash`
 key_traits.lcd:49:7: error E0303: `in` needs `list[int]`, found `list[float]`
+key_traits.lcd:49:16: error E0320: `list[int]` does not have `Hash`
 key_traits.lcd:50:8: error E0303: `none` cannot be a key
+key_traits.lcd:58:8: error E0320: `Loop` does not have `Hash`
+key_traits.lcd:66:8: error E0320: `Round` does not have `Hash`

@@ -48,3 +48,19 @@ task needs[T: Hash](a: T)
 needs(Reading(value: 1.0))
 print [1.0] in {[1]: 2}
 let g: set[none] = set([])
+
+type Loop
+    a: int
+
+task hash(self: Loop) -> Loop
+    return self
+
+let h: set[Loop] = set([])
+
+type Round
+    a: int
+
+task hash(self: Round) -> list[Round]
+    return [self]
+
+let i: set[Round] = set([])

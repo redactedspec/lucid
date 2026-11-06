@@ -100,6 +100,8 @@ struct Runtime {
     map_find: FuncId,
     map_next: FuncId,
     map_key: FuncId,
+    map_value: FuncId,
+    map_position: FuncId,
     set_from: FuncId,
     hash_int: FuncId,
     hash_text: FuncId,
@@ -164,6 +166,8 @@ fn compile(
     builder.symbol("lucid_map_find", lucid_rt::lucid_map_find as *const u8);
     builder.symbol("lucid_map_next", lucid_rt::lucid_map_next as *const u8);
     builder.symbol("lucid_map_key", lucid_rt::lucid_map_key as *const u8);
+    builder.symbol("lucid_map_value", lucid_rt::lucid_map_value as *const u8);
+    builder.symbol("lucid_map_position", lucid_rt::lucid_map_position as *const u8);
     builder.symbol("lucid_set_from", lucid_rt::lucid_set_from as *const u8);
     builder.symbol("lucid_hash_int", lucid_rt::lucid_hash_int as *const u8);
     builder.symbol("lucid_hash_text", lucid_rt::lucid_hash_text as *const u8);
@@ -219,6 +223,8 @@ fn compile(
         map_find: import("lucid_map_find", &two, &value),
         map_next: import("lucid_map_next", &two, &int),
         map_key: import("lucid_map_key", &two, &int),
+        map_value: import("lucid_map_value", &two, &int),
+        map_position: import("lucid_map_position", &two, &int),
         set_from: import("lucid_set_from", &with_two, &value),
         hash_int: import("lucid_hash_int", &[int[0], int[0]], &int),
         hash_text: import("lucid_hash_text", &[int[0], value[0]], &int),
@@ -536,6 +542,10 @@ impl Lower<'_, '_> {
             }
             Stmt::Print(value) => self.print(value),
             Stmt::PrintText(text) => self.print_text(text),
+            Stmt::Unreachable => {
+                self.body.ins().trap(UNREACHABLE);
+                return true;
+            }
             Stmt::Placeholder(span) => {
                 self.trap("reached a `...` placeholder", *span);
                 return true;
@@ -862,6 +872,17 @@ impl Lower<'_, '_> {
                 let position = self.expr(position);
                 let key = self.call(self.runtime.map_key, &[map, position]);
                 self.read_slot(key.expect("it returns a key"), expr.ty)
+            }
+            ExprKind::MapValue(map, position) => {
+                let map = self.expr(map);
+                let position = self.expr(position);
+                let value = self.call(self.runtime.map_value, &[map, position]);
+                self.read_slot(value.expect("it returns a value"), expr.ty)
+            }
+            ExprKind::MapFind(map, key) => {
+                let map = self.expr(map);
+                let key = self.slot(key);
+                self.call(self.runtime.map_position, &[map, key]).expect("it returns an int")
             }
             ExprKind::New { tag, counted, fields } => self.new_record(*tag, *counted, fields),
             ExprKind::Field(value, slot) => {

@@ -26,6 +26,9 @@ set([Name(text: "ab"), Name(text: "e")])
 1
 2
 1
+{Reading(value: NaN): 1}
+false
+1
 2
 {Pair(left: 1, right: "a"): [2.5]}
 {"k": [1]}

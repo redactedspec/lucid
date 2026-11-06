@@ -397,6 +397,8 @@ pub enum Stmt {
     Print(Expr),
     PrintText(String),
     Placeholder(Span),
+    /// A path that no value can take. Reaching it is a compiler bug.
+    Unreachable,
     Expr(Expr),
 }
 
@@ -506,6 +508,11 @@ pub enum ExprKind {
     MapNext(Box<Expr>, Box<Expr>),
     /// The key at a position from `MapNext`.
     MapKey(Box<Expr>, Box<Expr>),
+    /// The value at a position from `MapNext` or `MapFind`. Reading by position
+    /// runs no key task, so a derived task stays linear in nested maps.
+    MapValue(Box<Expr>, Box<Expr>),
+    /// The position of a key, or -1. The map comes first.
+    MapFind(Box<Expr>, Box<Expr>),
     /// A new record. Values run in this order, each going to its slot, and
     /// together they fill every slot. Slots below `counted` hold counted values.
     /// Before `mono.rs`, each position is a field and `counted` means nothing.
@@ -581,7 +588,8 @@ pub trait Visit {
             | Stmt::Break
             | Stmt::Continue
             | Stmt::PrintText(_)
-            | Stmt::Placeholder(_) => {}
+            | Stmt::Placeholder(_)
+            | Stmt::Unreachable => {}
         }
     }
 
@@ -636,7 +644,9 @@ pub trait Visit {
             | ExprKind::MapGet(left, right)
             | ExprKind::MapHas(left, right)
             | ExprKind::MapNext(left, right)
-            | ExprKind::MapKey(left, right) => {
+            | ExprKind::MapKey(left, right)
+            | ExprKind::MapValue(left, right)
+            | ExprKind::MapFind(left, right) => {
                 self.expr(left);
                 self.expr(right);
             }

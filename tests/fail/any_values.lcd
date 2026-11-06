@@ -53,3 +53,10 @@ sort_all(items)
 let m: any Describe = [Dog(name: "a")]
 let n: Dog? = none
 let o: any Describe = n
+let either: Dog or Cat = Dog(name: "a")
+let p: any Describe = either
+let q: any Show = dog
+let t: text? = none
+let r: (any Show)? = t
+let u: int or text = 1
+let s: (any Show) or text = u

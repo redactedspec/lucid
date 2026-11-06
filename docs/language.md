@@ -134,7 +134,7 @@ seen.add(3)
 seen.remove(1)
 ```
 
-An index is an `int` from 0, and a negative index traps. A key of a map or set needs the `Hash` trait: `int`, `bool`, `byte`, `text`, or a value made of those. A `float` cannot be a key, nor can a value that holds one, because NaN does not equal itself. A key is a value like any other, so changing the variable it came from never changes the key.
+An index is an `int` from 0, and a negative index traps. A key of a map or set needs the `Hash` trait: `int`, `bool`, `byte`, `text`, or a value made of those. A `float` cannot be a key, nor can a value that holds one with no hand-written `hash`, because NaN does not equal itself. A key is a value like any other, so changing the variable it came from never changes the key.
 
 All three have `.len()` and `.is_empty()`. `x in items` and `x not in items` test a list, or the keys of a map or set. A list test is linear, and compares with `==`, so it finds no NaN.
 
@@ -450,9 +450,9 @@ for pet in pets
     print pet.describe()
 ```
 
-`any` names one trait, of your own or `Show`. The other built-in traits ask for two values of one type, so `any Order` and the like are errors. A value goes in wherever `any Describe` is expected, if its type has `Describe`. A union goes in if all its members do, and `T?` as an expected type takes such a value too. As with unions, this needs an expected type, and there is no conversion between collections or between two `any` types.
+`any` names one trait, of your own or `Show`. The other built-in traits ask for two values of one type, so `any Order` and the like are errors. A value goes in wherever `any Describe` is expected, if its type has `Describe`. A union counts as one type here: it needs a task of its own, or `any Show`, which every type has. An expected union with an `any` member takes a single value, and never a union. As with unions, this needs an expected type, and there is no conversion between collections or between two `any` types.
 
-An `any Describe` has only the tasks of `Describe`, and it meets a `Describe` bound. It shows as what it holds, and text in it has no quotes unless it is inside another value. `==` is true if both hold equal values of one type. It has no `Order` or `Hash`. No test gets the value back out: `is` and typed arms do not work on it. Use a union if the code must know the type.
+An `any Describe` has only the tasks of `Describe`, and it meets a `Describe` bound. It shows as what it holds, and text in it has no quotes unless it is inside another value, which also holds for an `any` in a union. `==` is true if both hold equal values of one type. It has no `Order` or `Hash`. No test gets the value back out: `is` and typed arms do not work on it. Use a union if the code must know the type.
 
 A trait with type parameters, and a generic task in a trait, are planned.
 
@@ -486,7 +486,7 @@ task hash(self: Money) -> int                       # any result with `Hash`
 
 These names replace derived tasks or give an operator, so each must have this form, on a `type`, `choice`, or collection. Any other form is error E0323.
 
-`hash` gives what stands for the value in a key. It may be any type with `Hash`, and it often names the fields that `equal` reads. Equal values must give equal results, or a key may not be found again. A breach is a bug in the program, and it stays memory safe. A type with a hand-written `equal` has no `Hash` unless it also has a hand-written `hash`, since a derived hash would not match it.
+`hash` gives what stands for the value in a key. It may be any type with `Hash`, and it often names the fields that `equal` reads. Equal values must give equal results, or a key may not be found again. A breach is a bug in the program, and it stays memory safe. The result cannot lead back to the same type, even through a list or a field, since hashing it would never end, and such a type has no `Hash`. A type with a hand-written `equal` has no `Hash` unless it also has a hand-written `hash`, since a derived hash would not match it.
 
 Operators are defined by the traits `Add`, `Sub`, `Mul`, `Div`, `Equal`, and `Order`. No other operators can be overloaded, and no new operators can be defined.
 

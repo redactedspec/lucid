@@ -179,6 +179,8 @@ struct Checker<'a> {
     datas: Vec<Data<'a>>,
     /// A type or variant name, with its data and variant index.
     constructors: HashMap<&'a str, (usize, usize)>,
+    /// The types whose written `hash` a trait check is inside.
+    written_hashes: Vec<Ty>,
     /// The aliases being resolved, innermost last.
     resolving: Vec<&'a str>,
     top: HashMap<&'a str, Top<'a>>,
@@ -250,7 +252,7 @@ impl Place {
 /// through `break` or `continue` counts.
 fn ends(stmts: &[Stmt], jumps: bool) -> bool {
     stmts.iter().any(|stmt| match stmt {
-        Stmt::Return(_) | Stmt::Placeholder(_) => true,
+        Stmt::Return(_) | Stmt::Placeholder(_) | Stmt::Unreachable => true,
         Stmt::Break | Stmt::Continue => jumps,
         Stmt::Block(stmts) => ends(stmts, jumps),
         Stmt::If { branches, otherwise } => {
@@ -361,7 +363,9 @@ impl<'a> Checker<'a> {
         if value.ty.members().iter().all(|member| members.contains(member)) {
             return wrap(value, want);
         }
-        let boxes = members.iter().find(|&&member| self.fits_any(value.ty, member));
+        // A union stays out: a test could not then find the members it holds.
+        let single = !matches!(value.ty, Ty::Union(_));
+        let boxes = members.iter().find(|&&member| single && self.fits_any(value.ty, member));
         match boxes {
             Some(&member) => wrap(wrap(value, member), want),
             None => value,
@@ -369,9 +373,10 @@ impl<'a> Checker<'a> {
     }
 
     /// True if a value of type `ty` can go in `target`, which must be an `any`.
+    /// One `any` does not go in another.
     fn fits_any(&mut self, ty: Ty, target: Ty) -> bool {
         let Ty::Any(name) = target else { return false };
-        ty != target && ty.members().iter().all(|&member| self.satisfies(member, name))
+        !matches!(ty, Ty::Any(_)) && self.satisfies(ty, name)
     }
 
     /// Splits a union by a test for `want`: what a true test leaves, then what
@@ -829,6 +834,9 @@ impl<'a> Checker<'a> {
         if let Ty::Param(_, index) = ty {
             return self.bounds.get(index).is_some_and(|traits| traits.contains(&name));
         }
+        if name == "Hash" && self.written_hashes.contains(&ty) {
+            return false;
+        }
         if let Ty::Any(held) = ty
             && (held == name || matches!(name, "Show" | "Equal"))
         {
@@ -909,7 +917,8 @@ impl<'a> Checker<'a> {
 
     /// Whether a type's own tasks give it `Hash`, or `None` if they say nothing.
     /// A written `hash` needs a result with `Hash`. A written `equal` alone
-    /// gives no `Hash`, since a derived hash would not match it. See decision 77.
+    /// gives no `Hash`, since a derived hash would not match it. A result that
+    /// leads back to the same type would never end. See decision 77.
     fn written_hash(&mut self, ty: Ty, seen: &mut Vec<(Ty, String)>) -> Option<bool> {
         let Some(found) = self.written_task("hash", ty, seen) else {
             return self.find_method("equal", ty).map(|_| false);
@@ -918,7 +927,10 @@ impl<'a> Checker<'a> {
         let args: Option<Vec<Ty>> = known.into_iter().collect();
         let (Some(args), true) = (args, found) else { return Some(false) };
         let result = self.table.subst(self.signatures[id].returns, &args);
-        Some(self.satisfied(result, "Hash", seen))
+        self.written_hashes.push(ty);
+        let found = self.satisfied(result, "Hash", seen);
+        self.written_hashes.pop();
+        Some(found)
     }
 
     /// True if `ty` has a task that matches a task of a trait.

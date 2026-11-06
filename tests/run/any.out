@@ -31,7 +31,7 @@ owl
 cat 5
 dog Rex
 42
-cat 6
+either
 none
 ["dog Rex", "cat 9", "hen 2", "number 7", "owl"]
 ["owl"]
@@ -39,6 +39,13 @@ dog g
 owl
 Dog(name: "Rex")
 B(n: 3)
+either
+hi
+hi
+x
+x
+["x"]
+alone
 cat 1 cat 1
 [[1]]
 [[1], 2]
