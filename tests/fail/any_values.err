@@ -1,0 +1,27 @@
+any_values.lcd:20:23: error E0303: this annotation needs `any Describe`, found `Cat`
+any_values.lcd:21:12: error E0302: trait `Int` is not defined
+any_values.lcd:22:12: error E0302: `Dog` is a type, not a trait
+any_values.lcd:23:12: error E0302: this must name a trait
+any_values.lcd:24:8: error E0303: `any Order` cannot be a type
+  note: its tasks need two values of one type, so use a bound
+any_values.lcd:25:8: error E0303: `any Hash` cannot be a type
+  note: its tasks need two values of one type, so use a bound
+any_values.lcd:26:8: error E0303: `any Add` cannot be a type
+  note: its tasks need two values of one type, so use a bound
+any_values.lcd:27:8: error E0303: `any Equal` cannot be a type
+  note: its tasks need two values of one type, so use a bound
+any_values.lcd:30:11: error E0303: `any Describe` has no field `name`
+any_values.lcd:31:7: error E0303: `other` does not work on `any Describe`
+any_values.lcd:32:7: error E0303: `is Dog` gives one answer for every `any Describe`
+  note: `is` tests what a union holds, and `==` tests equality
+any_values.lcd:33:7: error E0320: `any Describe` does not have `Order`
+any_values.lcd:34:14: error E0303: this annotation needs `Dog`, found `any Describe`
+any_values.lcd:35:20: error E0303: this annotation needs `any Other`, found `any Describe`
+any_values.lcd:36:8: error E0320: `any Show` does not have `Hash`
+any_values.lcd:37:8: error E0320: `list[any Describe]` does not have `Hash`
+any_values.lcd:42:6: error E0304: `describe` is already defined
+any_values.lcd:45:6: error E0323: `show` replaces a derived task, so it needs this form
+  note: write `task show(self: T) -> text`, for a `type`, `choice`, or collection `T`
+any_values.lcd:52:1: error E0320: `any Show` does not have `Order`
+any_values.lcd:53:23: error E0303: this annotation needs `any Describe`, found `list[Dog]`
+any_values.lcd:55:23: error E0303: this annotation needs `any Describe`, found `Dog?`

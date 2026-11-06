@@ -173,6 +173,7 @@ entry       = expression ":" expression ;
 - **`_` in patterns:** `_` alone is the wildcard, and it skips a field in a variant pattern. It is not a name in `NAME ":" type`, so `_: int` is an error.
 - **`try` scope:** `try` covers the whole postfix chain. `try read(p).trim()` calls `.trim()` first, on the union, and fails type checking. Write `(try read(p)).trim()`.
 - **Negative numbers:** in `unary`, a `-` before a number with no postfix after it joins the literal, which does not change the value. It lets `-9223372036854775808` fit. Parentheses keep them apart, so `-(1)` negates a literal.
+- **`any`:** the grammar takes any type after `any`. The checker needs one trait name there.
 - **Name patterns:** the grammar has one form for `Point` and `n`. The checker decides from the type of the subject: on a `choice` a name must be a variant, and on any other type it binds the value. On a union it binds what earlier arms left.
 - **Type arguments:** `f[int?](x)` parses as an index followed by a call, by decision 65. `typed`, and the `type_prefix` form of `primary`, parse anywhere, in one pass, with no lookahead past the current token. The checker reads a bracket as type arguments if its base is a task or constructor. It rejects a type form anywhere else with E0322. Placing `?` above the prefix operators keeps `weak Node?` as `(weak Node)?`, as in types.
 - **Lambdas:** recognize with one token of lookahead past `NAME`, or by scanning to the matching `)` and checking for `=>`.

@@ -273,7 +273,7 @@ if ada.is_adult()
     print "welcome"
 ```
 
-`x.f(a)` runs the task `f` whose `self` type is the type of `x`. So one name can have one task per type, and such a name stays out of the shared namespace of "Choices". `f(x, a)` is an error, since one job has one form. `self` needs a type, which cannot be a bare type parameter, and `self: list[T]` covers every list. Two tasks of one name whose receivers can overlap are an error, counting each type parameter as free, and so is a built-in name on a built-in type, such as `len` on `text`. A dot call does not widen its receiver: an `int` does not reach `self: int?`. `x is empty` calls `x.is_empty()`.
+`x.f(a)` runs the task `f` whose `self` type is the type of `x`. A `self` type can be an `any`, except for a task of its own trait. So one name can have one task per type, and such a name stays out of the shared namespace of "Choices". `f(x, a)` is an error, since one job has one form. `self` needs a type, which cannot be a bare type parameter, and `self: list[T]` covers every list. Two tasks of one name whose receivers can overlap are an error, counting each type parameter as free, and so is a built-in name on a built-in type, such as `len` on `text`. A dot call does not widen its receiver: an `int` does not reach `self: int?`. `x is empty` calls `x.is_empty()`.
 
 The receiver must be a `var` when `self` is `change`, which arrives with parameter modes. The `change` keyword is not repeated on a dot call.
 
@@ -442,12 +442,24 @@ task show_all[T: Describe](items: list[T])
 
 A task of a trait takes `self` first, with no type. A type has the trait if it has a task of that name with the same other parameters and the same return type. A bound names a trait, and `and` joins several: `[T: Show and Equal]`. Generic types take bounds too, as in `type Sorted[T: Order]`. A type that lacks a bound is error E0320 at the call, or in the type that names it.
 
-Bounds use static dispatch. Planned: `any Describe` is a boxed value with dynamic dispatch, which allows mixed lists. A trait with type parameters, and a generic task in a trait, are planned too.
+Bounds use static dispatch. `any Describe` is a boxed value with dynamic dispatch, which allows mixed lists:
+
+```lucid
+let pets: list[any Describe] = [Dog(name: "Rex"), Cat(lives: 9)]
+for pet in pets
+    print pet.describe()
+```
+
+`any` names one trait, of your own or `Show`. The other built-in traits ask for two values of one type, so `any Order` and the like are errors. A value goes in wherever `any Describe` is expected, if its type has `Describe`. A union goes in if all its members do, and `T?` as an expected type takes such a value too. As with unions, this needs an expected type, and there is no conversion between collections or between two `any` types.
+
+An `any Describe` has only the tasks of `Describe`, and it meets a `Describe` bound. It shows as what it holds, and text in it has no quotes unless it is inside another value. `==` is true if both hold equal values of one type. It has no `Order` or `Hash`. No test gets the value back out: `is` and typed arms do not work on it. Use a union if the code must know the type.
+
+A trait with type parameters, and a generic task in a trait, are planned.
 
 | Trait | Lets a `T` | Who has it |
 | --- | --- | --- |
-| `Show` | `print` and interpolation | every type |
-| `Equal` | `==`, `!=`, `in` on a list | every type |
+| `Show` | `print` and interpolation | every type, `any` included |
+| `Equal` | `==`, `!=`, `in` on a list | every type, `any` included |
 | `Order` | `<`, `<=`, `>`, `>=` | numbers, `text`, and lists and `type` or `choice` values made of those |
 | `Hash` | be a key of a map or set | `int`, `bool`, `byte`, `text`, and lists, maps, sets, unions, and `type` or `choice` values made of those. A `none` counts only inside such a value |
 | `Add`, `Sub`, `Mul` | `+`, `-`, `*` | `int`, `float` |

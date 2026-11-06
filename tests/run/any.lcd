@@ -1,0 +1,159 @@
+# `any Trait` values: mixed lists and dynamic dispatch.
+trait Describe
+    task describe(self) -> text
+
+trait Scale
+    task scaled(self, by: int) -> int
+
+type Dog
+    name: text
+
+type Cat
+    lives: int
+
+choice Bird
+    Owl
+    Hen(eggs: int)
+
+task describe(self: Dog) -> text
+    return "dog {self.name}"
+
+task describe(self: Cat) -> text
+    return "cat {self.lives}"
+
+task describe(self: Bird) -> text
+    return match self
+        Owl -> "owl"
+        Hen(eggs) -> "hen {eggs}"
+
+task describe(self: int) -> text
+    return "number {self}"
+
+task scaled(self: Cat, by: int) -> int
+    return self.lives * by
+
+var pets: list[any Describe] = [Dog(name: "Rex"), Cat(lives: 9), Hen(eggs: 2), 7]
+pets.push(Owl)
+for pet in pets
+    print pet.describe()
+print pets
+print pets.len()
+
+# Values show as what they hold, and compare by type and value.
+let one: any Describe = Cat(lives: 1)
+let same: any Describe = Cat(lives: 1)
+let other: any Describe = Cat(lives: 2)
+let dog: any Describe = Dog(name: "a")
+print one
+print "{one}"
+print one == same
+print one == other
+print one != dog
+print same in pets
+print one in [same]
+
+# Show boxes anything. Text alone has no quotes, as in a union.
+let shown: list[any Show] = [1, "two", 3.5, true, none, [1], Dog(name: "b")]
+for item in shown
+    print item
+print shown
+let word: any Show = "alone"
+print word
+print "<{word}>"
+
+# Passing, returning, and storing.
+task pick(first: bool) -> any Describe
+    if first
+        return Dog(name: "first")
+    return Cat(lives: 3)
+
+task tell(pet: any Describe) -> text
+    return pet.describe()
+
+print tell(pick(true))
+print tell(pick(false))
+print tell(Owl)
+
+type Owner
+    pet: any Describe
+    spare: (any Describe)?
+
+var owner = Owner(pet: Cat(lives: 4), spare: none)
+print owner
+owner.pet = Dog(name: "new")
+owner.spare = Owl
+print owner.pet.describe()
+let spare = owner.spare
+if spare is not none
+    print spare.describe()
+
+let table: map[text, any Describe] = {"a": Owl, "b": Cat(lives: 5)}
+print table["b"].describe()
+let found = pets.get(0)
+if found is not none
+    print found.describe()
+
+# Arguments reach the task.
+let scale: any Scale = Cat(lives: 2)
+print scale.scaled(21)
+
+# A union goes in as it is, if every member fits.
+let either: Dog or Cat = Cat(lives: 6)
+let from_union: any Describe = either
+print from_union.describe()
+let maybe: int? = none
+let shown_none: any Show = maybe
+print shown_none
+
+# An `any` has its trait, so it meets a bound. Generics box too.
+task all_of[T: Describe](items: list[T]) -> list[text]
+    var out: list[text] = []
+    for item in items
+        out.push(item.describe())
+    return out
+
+print all_of(pets)
+print all_of([Owl])
+
+task boxed[T: Describe](value: T) -> any Describe
+    return value
+
+print boxed(Dog(name: "g")).describe()
+print boxed(boxed(Owl)).describe()
+
+task first[T](items: list[T]) -> T?
+    return items.get(0)
+
+print first(pets)
+
+# A task that a boxed value reaches may box a new type: the set must settle.
+trait Next
+    task next(self) -> any Next
+
+type A
+    n: int
+
+type B
+    n: int
+
+task next(self: A) -> any Next
+    return B(n: self.n + 1)
+
+task next(self: B) -> any Next
+    return A(n: self.n + 1)
+
+let start: any Next = A(n: 0)
+print start.next().next().next()
+
+# A task can take an `any` as its receiver.
+task twice(self: any Describe) -> text
+    return "{self.describe()} {self.describe()}"
+
+print one.twice()
+
+# Copies stay independent.
+var left: list[any Show] = [[1]]
+var right = left
+right.push(2)
+print left
+print right

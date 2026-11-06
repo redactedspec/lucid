@@ -1,0 +1,44 @@
+dog Rex
+cat 9
+hen 2
+number 7
+owl
+[Dog(name: "Rex"), Cat(lives: 9), Hen(eggs: 2), 7, Owl]
+5
+Cat(lives: 1)
+Cat(lives: 1)
+true
+false
+true
+false
+true
+1
+two
+3.5
+true
+none
+[1]
+Dog(name: "b")
+[1, "two", 3.5, true, none, [1], Dog(name: "b")]
+alone
+<alone>
+dog first
+cat 3
+owl
+Owner(pet: Cat(lives: 4), spare: none)
+dog new
+owl
+cat 5
+dog Rex
+42
+cat 6
+none
+["dog Rex", "cat 9", "hen 2", "number 7", "owl"]
+["owl"]
+dog g
+owl
+Dog(name: "Rex")
+B(n: 3)
+cat 1 cat 1
+[[1]]
+[[1], 2]

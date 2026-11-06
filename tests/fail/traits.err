@@ -19,7 +19,7 @@ traits.lcd:56:12: error E0320: `T` does not have `Equal`
   note: add a bound, as in `[T: Equal]`
 traits.lcd:58:17: error E0302: trait `Nope` is not defined
 traits.lcd:61:15: error E0302: `Dog` is a type, not a trait
-traits.lcd:64:17: error E0302: a bound must name a trait
+traits.lcd:64:17: error E0302: this must name a trait
 traits.lcd:67:29: error E0320: `T` does not have `Hash`
   note: add a bound, as in `[T: Hash]`
 traits.lcd:74:19: error E0303: `Describe` is a trait, not a type

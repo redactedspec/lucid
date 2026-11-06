@@ -30,6 +30,7 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | Text slices, no character type | Judgment call from existing practice | None | Agent trial at M3 |
 | Compact ordered map, SipHash with random keys | Supported by Python and Rust practice | Snippet | Benchmark at M4 |
 | A written `equal` removes derived `Hash` | Python and Clippy both guard this rule | Snippet | None |
+| `any` by tag tests over the whole program, not a vtable | Differs from Rust and Swift, and no benchmark yet | Snippet | Measure at M4 |
 
 ## Memory
 
@@ -212,6 +213,14 @@ Sources: [PEP 238](https://peps.python.org/pep-0238/), [Python expressions](http
 - **Hash of an unordered value.** CPython's `frozenset_hash` shuffles each entry's hash and joins them with XOR, so order does not matter. A CPython report (issue 150134) says that its shuffle spreads changes only upward, which raises collisions. Lucid's entries are already keyed SipHash output, so it needs no shuffle. It adds them, by judgment: no benchmark yet. Level: Snippet.
 
 Sources: [Python data model](https://docs.python.org/3.3/reference/datamodel.html), [Clippy derive lints](https://rust.googlesource.com/rust-clippy/+/refs/heads/master/clippy_lints/src/derive/mod.rs), [CPython issue 150134](https://github.com/python/cpython/issues/150134), [setobject.c](https://chromium.googlesource.com/external/github.com/python/cpython/+/04d497c284ac933488cc747b3f7082beab300848/Objects/setobject.c), [PEP 456](https://peps.python.org/pep-0456/), [Rust HashMap docs change](https://github.com/rust-lang/rust/pull/35371), [CPython dictobject.c](https://chromium.googlesource.com/external/github.com/python/cpython/+/e92ac0a741b125f1cffe8c07b054d1dea7b0a05a/Objects/dictobject.c).
+
+## Boxed trait values
+
+- **Rust.** The Reference says that a pointer to a trait object holds a pointer to the value and one to a vtable, with one vtable per trait implementation. The `std::dyn` page says that dynamic dispatch generally cannot be inlined. Only dyn-compatible traits can be trait objects, per E0038.
+- **Swift.** SE-0335 makes existential types explicit with `any`, so that programmers opt into their cost. It was accepted with modifications. A newer proposal, SE-0521, may let `any P?` cover the whole existential: one secondary source, not verified.
+- **Lucid.** A vtable pays for separate compilation, which Lucid does not have before modules, and may not need after, since monomorphization is whole-program. Tag tests need no backend work, and a table is a local change. The cost of a long chain is unmeasured. Level: Snippet for the sources, none for the trade-off.
+
+Sources: [Rust trait objects](https://doc.rust-lang.org/reference/types/trait-object.html), [Rust `dyn`](https://doc.rust-lang.org/std/keyword.dyn.html), [E0038](https://doc.rust-lang.org/error_codes/E0038.html), [SE-0335](https://github.com/apple/swift-evolution/blob/main/proposals/0335-existential-any.md).
 
 ## Narrowing
 

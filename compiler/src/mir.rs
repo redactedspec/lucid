@@ -27,6 +27,9 @@ pub enum Ty {
     /// spellings of a union are equal. Tags mean the same in every union, so a
     /// value keeps its record when it moves to a wider or narrower union.
     Union(&'static [Ty]),
+    /// `any Trait`: the same record as a union, so a union or a member becomes
+    /// one with no new code. `mono.rs` lists the types that each one holds.
+    Any(&'static str),
     /// A type parameter, by its name and its position in the list of the task
     /// or type that declares it. `mono.rs` replaces every one.
     Param(&'static str, usize),
@@ -61,6 +64,7 @@ impl Ty {
                 format!("{name}[{}]", args.join(", "))
             }
             Ty::Param(name, _) => name.into(),
+            Ty::Any(name) => format!("any {name}"),
             Ty::Union(members) => {
                 let mut names: Vec<String> =
                     members.iter().filter(|&&ty| ty != Ty::None).map(|ty| ty.name()).collect();
@@ -148,7 +152,7 @@ impl Ty {
     /// True for a value made of other values, whose comparing, showing, and
     /// hashing are derived tasks.
     pub fn is_compound(self) -> bool {
-        self.is_collection() || matches!(self, Ty::Data(..) | Ty::Union(_))
+        self.is_collection() || matches!(self, Ty::Data(..) | Ty::Union(_) | Ty::Any(_))
     }
 
     pub fn is_collection(self) -> bool {
@@ -181,6 +185,14 @@ impl Types {
     /// The tag of a member of a union.
     pub fn id(&self, ty: Ty) -> usize {
         self.ids.iter().position(|&known| known == ty).expect("a union lists its members")
+    }
+
+    /// The tag of a type that an `any` holds, which may be in no union.
+    pub fn tag(&mut self, ty: Ty) -> usize {
+        if !self.ids.contains(&ty) {
+            self.ids.push(ty);
+        }
+        self.id(ty)
     }
 
     /// Flattens and orders members into one type. One member is that member.
@@ -523,8 +535,9 @@ pub enum ExprKind {
     View(Box<Expr>),
     /// True if a union holds one of these types. `mono.rs` makes this a `TagIn`.
     Holds(Box<Expr>, Vec<Ty>),
-    /// A task from a trait bound. `mono.rs` makes this a `Call` to the task
-    /// with this name for the type of the first argument.
+    /// A task from a trait. `mono.rs` makes this a `Call` to the task with this
+    /// name for the type of the first argument, which may look at what an
+    /// `any` holds.
     Method(&'static str, Vec<Expr>),
     /// Adds the second value to the `int` hash state in the first.
     Hash(HashOp, Box<Expr>, Box<Expr>),

@@ -346,15 +346,32 @@ impl<'a> Checker<'a> {
         self.table.union(members)
     }
 
-    /// Makes `value` a `want`, if `want` is a union that accepts it. Any other
-    /// value comes back as it was, for `expect` to report.
-    fn widen(&self, value: Expr, want: Ty) -> Expr {
-        let Ty::Union(members) = want else { return value };
-        if value.ty.members().iter().any(|member| !members.contains(member)) {
+    /// Makes `value` a `want`, if `want` is a union or an `any` that accepts
+    /// it. Any other value comes back as it was, for `expect` to report.
+    fn widen(&mut self, value: Expr, want: Ty) -> Expr {
+        let span = value.span;
+        let wrap = |value: Expr, want| Expr { kind: ExprKind::Wrap(value.into()), ty: want, span };
+        if value.ty == want || value.ty == Ty::Error {
             return value;
         }
-        let span = value.span;
-        Expr { kind: ExprKind::Wrap(value.into()), ty: want, span }
+        if matches!(want, Ty::Any(_)) {
+            return if self.fits_any(value.ty, want) { wrap(value, want) } else { value };
+        }
+        let Ty::Union(members) = want else { return value };
+        if value.ty.members().iter().all(|member| members.contains(member)) {
+            return wrap(value, want);
+        }
+        let boxes = members.iter().find(|&&member| self.fits_any(value.ty, member));
+        match boxes {
+            Some(&member) => wrap(wrap(value, member), want),
+            None => value,
+        }
+    }
+
+    /// True if a value of type `ty` can go in `target`, which must be an `any`.
+    fn fits_any(&mut self, ty: Ty, target: Ty) -> bool {
+        let Ty::Any(name) = target else { return false };
+        ty != target && ty.members().iter().all(|&member| self.satisfies(member, name))
     }
 
     /// Splits a union by a test for `want`: what a true test leaves, then what
@@ -505,7 +522,24 @@ impl<'a> Checker<'a> {
                 }
                 _ => self.unsupported("this type", ty.span).ty,
             },
+            TypeKind::Any(held) => self.any_type(held, ty.span),
             _ => self.unsupported("this type", ty.span).ty,
+        }
+    }
+
+    /// `any Trait`. A built-in trait other than `Show` asks for two values of
+    /// one type, which two boxes may not be.
+    fn any_type(&mut self, held: &'a ast::Type, span: Span) -> Ty {
+        match self.trait_named(held) {
+            Some(name) if !BUILT_IN_TRAITS.contains(&name) || name == "Show" => {
+                Ty::Any(name.to_string().leak())
+            }
+            Some(name) => {
+                let message = format!("`any {name}` cannot be a type");
+                let note = "its tasks need two values of one type, so use a bound";
+                self.report(Diagnostic::new("E0303", message, span).note(note)).ty
+            }
+            None => Ty::Error,
         }
     }
 
@@ -713,36 +747,38 @@ impl<'a> Checker<'a> {
     fn bounds_of(&mut self, params: &'a [ast::TypeParam]) -> Bounds<'a> {
         let mut all = Vec::with_capacity(params.len());
         for param in params {
-            let mut traits = Vec::with_capacity(param.bounds.len());
-            for bound in &param.bounds {
-                let name = match &bound.kind {
-                    TypeKind::Named { path, args } if args.is_empty() => match path.as_slice() {
-                        [name] => Some(name.text.as_str()),
-                        _ => None,
-                    },
-                    _ => None,
-                };
-                match name {
-                    Some(name) if self.is_trait(name) => traits.push(name),
-                    Some(name) if LATER_TRAITS.contains(&name) => {
-                        self.unsupported(&format!("trait `{name}`"), bound.span);
-                    }
-                    Some(name) if self.types.contains_key(name) => {
-                        let message = format!("`{name}` is a type, not a trait");
-                        self.fail("E0302", message, bound.span);
-                    }
-                    Some(name) => {
-                        let message = format!("trait `{name}` is not defined");
-                        self.fail("E0302", message, bound.span);
-                    }
-                    None => {
-                        self.fail("E0302", "a bound must name a trait".into(), bound.span);
-                    }
-                }
-            }
-            all.push(traits);
+            let traits = param.bounds.iter().filter_map(|bound| self.trait_named(bound));
+            all.push(traits.collect());
         }
         all
+    }
+
+    /// The trait that a bound or `any` names. Reports anything else.
+    fn trait_named(&mut self, written: &'a ast::Type) -> Option<&'a str> {
+        let span = written.span;
+        let name = match &written.kind {
+            TypeKind::Named { path, args } if args.is_empty() => match path.as_slice() {
+                [name] => Some(name.text.as_str()),
+                _ => None,
+            },
+            _ => None,
+        };
+        match name {
+            Some(name) if self.is_trait(name) => return Some(name),
+            Some(name) if LATER_TRAITS.contains(&name) => {
+                self.unsupported(&format!("trait `{name}`"), span);
+            }
+            Some(name) if self.types.contains_key(name) => {
+                self.fail("E0302", format!("`{name}` is a type, not a trait"), span);
+            }
+            Some(name) => {
+                self.fail("E0302", format!("trait `{name}` is not defined"), span);
+            }
+            None => {
+                self.fail("E0302", "this must name a trait".into(), span);
+            }
+        }
+        None
     }
 
     /// Checks the bounds of a generic `type` or `choice`, now or once every
@@ -793,6 +829,11 @@ impl<'a> Checker<'a> {
         if let Ty::Param(_, index) = ty {
             return self.bounds.get(index).is_some_and(|traits| traits.contains(&name));
         }
+        if let Ty::Any(held) = ty
+            && (held == name || matches!(name, "Show" | "Equal"))
+        {
+            return true;
+        }
         if ty.too_large() || seen.len() == MAX_FINITE_CHECK {
             return false;
         }
@@ -837,7 +878,7 @@ impl<'a> Checker<'a> {
         };
         let holds = match name {
             "Show" | "Equal" => true,
-            "Hash" => ty.is_key() || ty.is_compound(),
+            "Hash" => ty.is_key() || (ty.is_compound() && !matches!(ty, Ty::Any(_))),
             "Order" => {
                 matches!(ty, Ty::Int | Ty::Float | Ty::Byte | Ty::Text | Ty::List(_))
                     || matches!(ty, Ty::Data(..))
@@ -1151,7 +1192,10 @@ impl<'a> Checker<'a> {
             let earlier: Vec<usize> =
                 self.methods[name].iter().copied().filter(|&o| o < id).collect();
             let overlaps = earlier.into_iter().any(|other| self.overlap(id, other));
-            if overlaps || builtin_method(receiver, name) {
+            if overlaps
+                || builtin_method(receiver, name)
+                || self.trait_task(receiver, name).is_some()
+            {
                 self.fail("E0304", format!("`{name}` is already defined"), span);
             }
             self.check_written_shape(id);
@@ -1183,7 +1227,8 @@ impl<'a> Checker<'a> {
         let fits = signature.params.len() == others + 1
             && signature.params[1..].iter().all(|p| p.ty == receiver)
             && signature.returns == returns
-            && receiver.is_compound();
+            && receiver.is_compound()
+            && !matches!(receiver, Ty::Any(_));
         let mut known = vec![None; count];
         self.table.unify(receiver, receiver, &mut known);
         let fits = fits && known.iter().all(Option::is_some);
@@ -3359,18 +3404,23 @@ impl<'a> Checker<'a> {
         Expr { kind: ExprKind::Call(id, types, lowered), ty, span }
     }
 
-    /// `x.f(a)` for a task with a `self` parameter. On a type parameter it
-    /// looks in the traits of its bounds, and `mono.rs` finds the real task.
+    /// The task of this name in the traits of a type parameter or an `any`.
+    fn trait_task(&self, ty: Ty, name: &str) -> Option<usize> {
+        let traits = match ty {
+            Ty::Param(_, index) => self.bounds.get(index).cloned().unwrap_or_default(),
+            Ty::Any(held) => vec![held],
+            _ => Vec::new(),
+        };
+        let tasks = traits.iter().filter_map(|t| self.traits.get(t)).flatten();
+        tasks.copied().find(|&id| self.signatures[id].name.text == name)
+    }
+
+    /// `x.f(a)` for a task with a `self` parameter. On a type parameter or an
+    /// `any` it looks in their traits, and `mono.rs` finds the real task.
     fn method_call(&mut self, value: Expr, name: &str, args: &'a [ast::Arg], span: Span) -> Expr {
         let ty = value.ty;
-        if let Ty::Param(_, index) = ty {
-            let traits = self.bounds.get(index).cloned().unwrap_or_default();
-            let tasks = traits.iter().flat_map(|t| self.traits.get(t).cloned().unwrap_or_default());
-            let tasks: Vec<usize> = tasks.collect();
-            let found = tasks.into_iter().find(|&id| self.signatures[id].name.text == name);
-            if let Some(id) = found {
-                return self.task_call(id, name, None, Some((value, Vec::new())), args, span);
-            }
+        if let Some(id) = self.trait_task(ty, name) {
+            return self.task_call(id, name, None, Some((value, Vec::new())), args, span);
         }
         if let Some((id, known)) = self.find_method(name, ty) {
             return self.task_call(id, name, None, Some((value, known)), args, span);

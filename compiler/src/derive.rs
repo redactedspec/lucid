@@ -22,6 +22,11 @@ pub enum Derived {
     Has,
     /// `x: T, state: int`, gives `state` with `x` added.
     Hash,
+    /// A task of the trait of an `any`: runs the one that its value has.
+    ///
+    /// ponytail: a linear test of each type held, with no new backend code. A
+    /// table indexed by tag can follow if M4 measures a slow call.
+    Task(&'static str),
 }
 
 /// What a derived task is building.
@@ -152,14 +157,16 @@ impl Mono<'_> {
             return value;
         }
         let written = value.ty.is_compound() && self.method("show", value.ty, span).is_some();
-        if written || !value.ty.members().contains(&Ty::Text) {
+        let may_hold_text =
+            value.ty.members().contains(&Ty::Text) || matches!(value.ty, Ty::Any(_));
+        if written || !may_hold_text {
             return self.shown(value, span);
         }
         let ty = value.ty;
         let local = self.new_local(ty);
         let read = || Expr { kind: ExprKind::Local(local), ty, span };
         let held = Expr { kind: ExprKind::Field(boxed(read()), 0), ty: Ty::Text, span };
-        let id = self.types.id(Ty::Text);
+        let id = self.types.tag(Ty::Text);
         let is_text = ExprKind::TagIn(boxed(read()), vec![id]);
         let is_text = Expr { kind: is_text, ty: Ty::Bool, span };
         let shown = self.shown(read(), span);
@@ -293,6 +300,7 @@ impl Mono<'_> {
             Derived::Compare => (vec![ty, ty], Ty::Int),
             Derived::Has => (vec![ty, Ty::List(crate::mir::inner(ty))], Ty::Bool),
             Derived::Hash => (vec![ty, Ty::Int], Ty::Int),
+            Derived::Task(name) => self.calls[&(name, ty)].clone(),
         };
         let params = locals.len();
         let mut body = Body { locals, span };
@@ -301,6 +309,19 @@ impl Mono<'_> {
             Derived::Equal => self.equal_body(&mut body, ty),
             Derived::Compare => self.compare_body(&mut body, ty),
             Derived::Hash => self.hash_body(&mut body, ty),
+            Derived::Task(name) => {
+                let mut stmts = Vec::new();
+                for member in self.held(ty) {
+                    let id = self.types.id(member);
+                    let mut values = vec![body.slot(0, 0, member)];
+                    values.extend((1..params).map(|local| body.read(local)));
+                    let call = self.trait_call(name, values, returns, span);
+                    stmts.push(body.return_if(body.holds(0, id), call));
+                }
+                // Every value in an `any` got there through a tag listed above.
+                stmts.push(Stmt::Placeholder(span));
+                stmts
+            }
             Derived::Has => {
                 let walk = body.each_item(1, |body, index| {
                     let item = body.item(body.read(1), index, ty);
@@ -354,9 +375,9 @@ impl Mono<'_> {
                 stmts.push(Stmt::Return(body.join(vec![body.read(out), body.text(close)])));
                 stmts
             }
-            Ty::Union(members) => {
-                let mut stmts = Vec::with_capacity(members.len());
-                for &member in members {
+            Ty::Union(_) | Ty::Any(_) => {
+                let mut stmts = Vec::new();
+                for member in self.held(ty) {
                     let id = self.types.id(member);
                     let value = self.shown(body.slot(X, 0, member), span);
                     stmts.push(body.return_if(body.holds(X, id), value));
@@ -426,10 +447,10 @@ impl Mono<'_> {
                     inner
                 }));
             }
-            Ty::Union(members) => {
+            Ty::Union(_) | Ty::Any(_) => {
                 let same = body.test(BinaryOp::Eq, body.tag(A), body.tag(B));
                 stmts.push(no(body, same));
-                for &member in members {
+                for member in self.held(ty) {
                     let id = self.types.id(member);
                     let (left, right) = (body.slot(A, 0, member), body.slot(B, 0, member));
                     let same = self.equal(left, right, span);

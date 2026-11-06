@@ -59,7 +59,8 @@ fn clif(ty: Ty) -> Type {
         | Ty::Map(..)
         | Ty::Set(_)
         | Ty::Data(..)
-        | Ty::Union(_) => types::I64,
+        | Ty::Union(_)
+        | Ty::Any(_) => types::I64,
         Ty::Float => types::F64,
         Ty::Bool | Ty::None => types::I8,
         Ty::Param(..) => unreachable!("`mono.rs` replaces every parameter"),

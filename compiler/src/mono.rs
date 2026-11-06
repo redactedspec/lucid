@@ -25,6 +25,9 @@ pub fn run(program: &mut Program) -> Vec<Diagnostic> {
         types: &mut program.types,
         instances: HashMap::new(),
         derived: HashMap::new(),
+        boxed: HashMap::new(),
+        open: Vec::new(),
+        calls: HashMap::new(),
         done: Vec::new(),
         generated: 0,
         queue: Vec::new(),
@@ -39,19 +42,34 @@ pub fn run(program: &mut Program) -> Vec<Diagnostic> {
         }
     }
     mono.task(&mut program.main, &[]);
-    while let Some((slot, job)) = mono.queue.pop() {
-        if !mono.diags.is_empty() {
+    // A task that looks inside an `any` needs every type that goes in one, and
+    // building those tasks can box more. So it is built again until nothing
+    // new appears.
+    let mut built = None;
+    loop {
+        while let Some((slot, job)) = mono.queue.pop() {
+            if !mono.diags.is_empty() {
+                break;
+            }
+            let task = match job {
+                Job::Task(id, args) => {
+                    let mut task = source[id].clone();
+                    mono.task(&mut task, args);
+                    task
+                }
+                Job::Derived(kind, ty, span) => mono.derive(kind, ty, span),
+            };
+            mono.done[slot] = Some(task);
+        }
+        let seen = (mono.open.len(), mono.boxed.values().map(Vec::len).sum::<usize>());
+        if !mono.diags.is_empty() || built == Some(seen) {
             break;
         }
-        let task = match job {
-            Job::Task(id, args) => {
-                let mut task = source[id].clone();
-                mono.task(&mut task, args);
-                task
-            }
-            Job::Derived(kind, ty, span) => mono.derive(kind, ty, span),
-        };
-        mono.done[slot] = Some(task);
+        built = Some(seen);
+        for index in 0..mono.open.len() {
+            let (slot, kind, ty, span) = mono.open[index];
+            mono.done[slot] = Some(mono.derive(kind, ty, span));
+        }
     }
     let (done, diags) = (mono.done, mono.diags);
     if diags.is_empty() {
@@ -76,6 +94,12 @@ pub struct Mono<'a> {
     instances: HashMap<(usize, &'static [Ty]), usize>,
     /// A derived task for a type, and its place in `done`.
     derived: HashMap<(Derived, Ty), usize>,
+    /// The types that go in each `any`.
+    boxed: HashMap<Ty, Vec<Ty>>,
+    /// Derived tasks on an `any`, which `run` builds last.
+    open: Vec<(usize, Derived, Ty, Span)>,
+    /// What each `Derived::Task` takes, and gives.
+    pub calls: HashMap<(&'static str, Ty), (Vec<Ty>, Ty)>,
     done: Vec<Option<Task>>,
     /// How many generic instances and derived tasks exist.
     generated: usize,
@@ -128,8 +152,38 @@ impl Mono<'_> {
         }
         let Some(slot) = self.reserve(&[ty], span) else { return 0 };
         self.derived.insert((kind, ty), slot);
-        self.queue.push((slot, Job::Derived(kind, ty, span)));
+        if matches!(ty, Ty::Any(_)) {
+            self.open.push((slot, kind, ty, span));
+        } else {
+            self.queue.push((slot, Job::Derived(kind, ty, span)));
+        }
         slot
+    }
+
+    /// A call to a task of a trait, on the type of the first value.
+    pub fn trait_call(
+        &mut self,
+        name: &'static str,
+        values: Vec<Expr>,
+        returns: Ty,
+        span: Span,
+    ) -> Expr {
+        let ty = values[0].ty;
+        let slot = self.method(name, ty, span).unwrap_or_else(|| {
+            assert!(matches!(ty, Ty::Any(_)), "a bound was checked at the call");
+            let params = values.iter().map(|value| value.ty).collect();
+            self.calls.insert((name, ty), (params, returns));
+            self.derived(Derived::Task(name), ty, span)
+        });
+        Expr { kind: ExprKind::Call(slot, &[], values), ty: returns, span }
+    }
+
+    /// The types that a union or `any` holds.
+    pub fn held(&self, ty: Ty) -> Vec<Ty> {
+        match ty {
+            Ty::Any(_) => self.boxed.get(&ty).cloned().unwrap_or_default(),
+            _ => ty.members().to_vec(),
+        }
     }
 
     /// The tasks that a map with this key keeps.
@@ -207,11 +261,23 @@ impl Mono<'_> {
     }
 
     /// A value as the wider type `to`.
-    fn wrap(&self, value: Expr, to: Ty, span: Span) -> Expr {
-        if !matches!(to, Ty::Union(_)) || matches!(value.ty, Ty::Union(_)) {
+    fn wrap(&mut self, value: Expr, to: Ty, span: Span) -> Expr {
+        if value.ty == to {
+            return value;
+        }
+        if matches!(to, Ty::Any(_)) {
+            let held = self.boxed.entry(to).or_default();
+            for &member in value.ty.members() {
+                if !held.contains(&member) {
+                    held.push(member);
+                }
+            }
+        }
+        let wider = matches!(to, Ty::Union(_) | Ty::Any(_));
+        if !wider || matches!(value.ty, Ty::Union(_)) {
             return Expr { ty: to, ..value };
         }
-        let (tag, counted) = (self.types.id(value.ty), usize::from(value.ty.is_counted()));
+        let (tag, counted) = (self.types.tag(value.ty), usize::from(value.ty.is_counted()));
         Expr { kind: ExprKind::New { tag, counted, fields: vec![(0, value)] }, ty: to, span }
     }
 
@@ -307,8 +373,8 @@ impl Visit for Mono<'_> {
                 return;
             }
             ExprKind::Method(name, values) => {
-                let slot = self.method(name, values[0].ty, span);
-                ExprKind::Call(slot.expect("a bound was checked at the call"), &[], values)
+                *value = self.trait_call(name, values, ty, span);
+                return;
             }
             ExprKind::MapOf(entries, _) => {
                 let Ty::Map(key, _) = ty else { unreachable!("it has a map type") };

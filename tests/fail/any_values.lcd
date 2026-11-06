@@ -1,0 +1,55 @@
+# What `any` does not allow.
+trait Describe
+    task describe(self) -> text
+
+trait Other
+    task other(self) -> text
+
+type Dog
+    name: text
+
+type Cat
+    lives: int
+
+task describe(self: Dog) -> text
+    return self.name
+
+task other(self: Dog) -> text
+    return self.name
+
+let a: any Describe = Cat(lives: 1)
+let b: any Int = 1
+let c: any Dog = Dog(name: "a")
+let d: any list[int] = 1
+let e: any Order = 1
+let f: any Hash = 1
+let g: any Add = 1
+let h: any Equal = 1
+
+let dog: any Describe = Dog(name: "a")
+print dog.name
+print dog.other()
+print dog is Dog
+print dog < dog
+let i: Dog = dog
+let j: any Other = dog
+let k: set[any Show] = set([])
+let l: map[list[any Describe], int] = {}
+
+task lost(self: any Describe) -> text
+    return "x"
+
+task describe(self: any Describe) -> text
+    return "y"
+
+task show(self: any Describe) -> text
+    return "z"
+
+task sort_all[T: Order](items: list[T])
+    return
+
+let items: list[any Show] = [1]
+sort_all(items)
+let m: any Describe = [Dog(name: "a")]
+let n: Dog? = none
+let o: any Describe = n
