@@ -1,0 +1,8 @@
+# Quotes follow the real type, behind a parameter or in a union.
+task same[T: Equal and Show](a: T, b: T)
+    expect a == b
+
+let x: text? = "a b"
+let y: text? = "a b"
+expect x == y
+same("a b", "a  b")

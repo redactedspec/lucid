@@ -392,6 +392,10 @@ impl Visit for Mono<'_> {
                 *value = self.shown_alone(*inner, span);
                 return;
             }
+            ExprKind::TextQuote(inner) if inner.ty != Ty::Text => {
+                *value = self.shown(*inner, span);
+                return;
+            }
             ExprKind::Binary(op, left, right) if left.ty.is_compound() => {
                 *value = self.compare(op, *left, *right, ty, span);
                 return;

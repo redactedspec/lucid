@@ -149,7 +149,7 @@ impl Body {
 
 impl Mono<'_> {
     /// The text of a value inside a larger value, where text has quotes.
-    fn shown(&mut self, value: Expr, span: Span) -> Expr {
+    pub fn shown(&mut self, value: Expr, span: Span) -> Expr {
         let ty = value.ty;
         match ty {
             Ty::Text => Expr { kind: ExprKind::TextQuote(boxed(value)), ty, span },

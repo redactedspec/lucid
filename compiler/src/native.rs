@@ -11,6 +11,7 @@ use cranelift_codegen::ir::{
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module, default_libcall_names};
+use lucid_rt::CallSite;
 use std::collections::HashMap;
 
 const CODEGEN: &str = "code generation failed";
@@ -50,8 +51,9 @@ pub fn run(
     Ok(())
 }
 
-/// Compiles the program and runs its tests from place `from`, each after a NUL
-/// and a line break, which no `print` can give. See `test` in `main.rs`.
+/// Compiles the program and runs its tests from place `from`. A NUL line, which
+/// no `print` can give, comes before each test and after the last. See `test`
+/// in `main.rs`.
 pub fn run_tests(
     program: &Program,
     path: &str,
@@ -62,12 +64,16 @@ pub fn run_tests(
     let here = 0u8;
     let stack_limit = (&raw const here) as usize - (stack_bytes - STACK_MARGIN);
     let (_, tests) = compile(program, path, src, stack_limit, stack_bytes / 2)?;
-    for entry in tests.into_iter().skip(from) {
+    let mark = || {
         let mark = b"\0";
         // SAFETY: the range is `mark`.
         unsafe { lucid_rt::lucid_print(mark.as_ptr(), mark.len()) };
+    };
+    for entry in tests.into_iter().skip(from) {
+        mark();
         run_entry(entry);
     }
+    mark();
     Ok(())
 }
 
@@ -327,13 +333,12 @@ fn compile(
     let mut builder_context = FunctionBuilderContext::new();
     let mut statics = HashMap::new();
     let mut sites = Vec::new();
-    let mut missing = Vec::new();
     let tasks = program.tasks.iter().zip(&ids).map(|(task, id)| (task, *id));
     for (task, id) in tasks.chain([(&program.main, main)]) {
         context.func.signature = signature_of(&module, task);
         let body = FunctionBuilder::new(&mut context.func, &mut builder_context);
         let (module, runtime, ids, lines) = (&mut module, &runtime, &ids, &lines);
-        let (statics, missing) = (&mut statics, &mut missing);
+        let statics = &mut statics;
         let data_id = module.declare_anonymous_data(false, false).expect(CODEGEN);
         let data = module.declare_data_in_func(data_id, body.func);
         let (vars, loops, funcs, text) = (Vec::new(), Vec::new(), HashMap::new(), Vec::new());
@@ -354,7 +359,6 @@ fn compile(
             data,
             text,
             statics,
-            missing,
             path,
             lines,
         }
@@ -366,12 +370,13 @@ fn compile(
             // The location that holds the call's last byte, if any.
             let after = locs.partition_point(|loc| loc.end < call.ret_addr);
             let held = locs.get(after).filter(|loc| loc.start < call.ret_addr);
-            let line =
+            let held = held.filter(|_| !task.name.is_empty());
+            let site =
                 held.map(|loc| loc.loc.as_abs()).filter(|loc| !loc.is_default()).map(|loc| {
                     let (line, column) = lines.position(loc.bits() as usize);
-                    format!("{path}:{line}:{column} in {}", task.name)
+                    CallSite { task: task.name, line, column }
                 });
-            sites.push((id, call.ret_addr, line.filter(|_| !task.name.is_empty())));
+            sites.push((id, call.ret_addr, site));
         }
         let frame = code.buffer.frame_layout().expect(CODEGEN).frame_to_fp_offset as usize;
         if frame > if id == main { max_main_frame } else { MAX_FRAME } {
@@ -379,11 +384,6 @@ fn compile(
             diags.push(Diagnostic::new("E0902", "this task is too large", task.span).note(note));
         }
         module.clear_context(&mut context);
-    }
-    for (name, span) in missing {
-        let message = format!("cannot find the foreign task `{name}`");
-        let note = "it must be in the C runtime or `kernel32`";
-        diags.push(Diagnostic::new("E0904", message, span).note(note));
     }
     if !diags.is_empty() {
         return Err(diags);
@@ -394,7 +394,7 @@ fn compile(
     let tests = tests.map(|test| module.get_finalized_function(ids[test.task])).collect();
     let address =
         |(id, offset, line)| (module.get_finalized_function(id) as usize + offset as usize, line);
-    lucid_rt::set_call_sites(sites.into_iter().map(address).collect());
+    lucid_rt::set_call_sites(path, sites.into_iter().map(address).collect());
     // Leaked on purpose: `entry` points into memory that the module owns.
     std::mem::forget(module);
     Ok((entry, tests))
@@ -403,7 +403,7 @@ fn compile(
 /// Finds a foreign task in the libraries that every Lucid program has loaded.
 /// `lucid build` and other systems need their own answer, at M5 and M8.
 #[cfg(windows)]
-fn find_symbol(name: &str) -> Option<*const u8> {
+pub fn find_symbol(name: &str) -> Option<*const u8> {
     use std::ffi::{CString, c_char, c_void};
     unsafe extern "system" {
         fn GetModuleHandleA(name: *const c_char) -> *mut c_void;
@@ -425,7 +425,7 @@ fn find_symbol(name: &str) -> Option<*const u8> {
 }
 
 #[cfg(not(windows))]
-fn find_symbol(_name: &str) -> Option<*const u8> {
+pub fn find_symbol(_name: &str) -> Option<*const u8> {
     None
 }
 
@@ -452,8 +452,6 @@ struct Lower<'a, 'b> {
     data: GlobalValue,
     text: Vec<u8>,
     /// Values in static data, each once in the program.
-    /// Foreign tasks that no library has.
-    missing: &'a mut Vec<(String, Span)>,
     statics: &'a mut HashMap<Vec<u8>, DataId>,
     path: &'a str,
     lines: &'a Lines<'a>,
@@ -1314,7 +1312,7 @@ impl Lower<'_, '_> {
                 self.new_record(code, *counted, fields)
             }
             ExprKind::CallValue(callee, args) => self.call_value(callee, args, expr.span),
-            ExprKind::Foreign(name, args) => self.foreign(name, args, expr.ty, expr.span),
+            ExprKind::Foreign(name, args) => self.foreign(name, args, expr.ty),
             ExprKind::ListPointer(list) => {
                 let list = self.expr(list);
                 self.body.ins().iadd_imm_s(list, i64::from(lucid_rt::SLOTS_OFFSET))
@@ -1398,10 +1396,7 @@ impl Lower<'_, '_> {
 
     /// Compiled code keeps every integer in 64 bits, which C reads the low part
     /// of. A C result has only its own width, so it widens here.
-    fn foreign(&mut self, name: &str, args: &[Expr], returns: Ty, span: Span) -> Value {
-        if find_symbol(name).is_none() {
-            self.missing.push((name.to_string(), span));
-        }
+    fn foreign(&mut self, name: &str, args: &[Expr], returns: Ty) -> Value {
         let values: Vec<Value> = args.iter().map(|arg| self.expr(arg)).collect();
         let mut signature = self.module.make_signature();
         for arg in args {

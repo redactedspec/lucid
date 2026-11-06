@@ -610,9 +610,9 @@ test "adds numbers"
     expect add(2, 3) == 5
 ```
 
-A test sits at top level, and its name is plain text, new in the file, with no `{}`. It is a task with no parameters, so it sees what a task sees. `lucid test` runs each test in file order, and runs no top-level statements. A test fails if it traps or a `try` in it fails, as at top level. A failure does not stop the tests after it, and a test shares no values with another. Output of a passing test is hidden.
+A test sits at top level, and its name is plain text, new in the file, with no `{}`. It is a task with no parameters, so it sees what a task sees. `lucid test` runs each test in file order, and runs no top-level statements. A test fails if it traps, if a `try` in it fails, as at top level, or if foreign code ends the program. A failure does not stop the tests after it, and a test shares no values with another. Output of a passing test is hidden.
 
-`expect` takes a `bool`, traps when it is false, and also works outside tests. On a comparison such as `==` or `<`, each side runs once, and the trap shows both values: `expect failed: 5 < 4`. Text has quotes. Any other condition, or a side with no `Show`, gives `expect failed`. What passes narrows what follows, as an `if` that ends does: after `expect x is int`, `x` is an `int`.
+`expect` takes a `bool`, traps when it is false, and also works outside tests. On a comparison such as `==` or `<`, each side runs once, and the trap shows both values: `expect failed: 5 < 4`. Text has quotes, as it does inside a list. Any other condition, or a side with no `Show`, gives `expect failed`. What passes narrows what follows, as an `if` that ends does: after `expect x is int`, `x` is an `int`.
 
 ## Foreign code
 
@@ -629,7 +629,7 @@ unsafe
 
 An `extern` task is a C function, found by its name in the C runtime or `kernel32`, or else error E0904. It takes and gives numbers, `bool`, and `pointer[byte]`, and may give nothing. It sits at top level, and it has no `change`, `take`, `self`, defaults, or type parameters. A C type must match the declared width: a C `int` is `i32`. A name that starts with `lucid_` is kept for the runtime.
 
-Only an `unsafe` block can use an `extern` task, as a call or as a value, or call `.pointer()`, or else error E0330. A lambda or nested task inside the block is outside it. The block is a block like the body of an `if`, with its own scope. It needs a `#` comment on the line above, or at the end of its line, or else error E0332, and the comment says why it is sound.
+Only an `unsafe` block can call an `extern` task or `.pointer()`, or else error E0330. An `extern` task is not a value, since a task type says nothing of `unsafe`. A lambda or nested task inside the block is outside it. The block is a block like the body of an `if`, with its own scope. It needs a `#` comment on the line above, or at the end of its line, or else error E0332, and the comment says why it is sound.
 
 `pointer[byte]` is a raw address. It has no traits, so it does not print or compare, and it holds no count. `items.pointer()` gives the address of the first element of a `list[byte]` held in a name. The address is valid while that name is in scope and until the list changes or moves. C code that writes through it changes every holder of the list. Text has no pointer: use `.bytes()`, and push a zero byte for a C string.
 

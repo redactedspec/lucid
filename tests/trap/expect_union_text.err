@@ -1,0 +1,1 @@
+expect_union_text.lcd:3:1: trap: expect failed: "a b" == "a  b"

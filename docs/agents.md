@@ -115,8 +115,8 @@ The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and 
 | E0327 | `try` or `else` on a value with no error type or `none` to act on, or with nothing left after it |
 | E0328 | An error that nothing uses: a statement drops it, or a name holds it and is never read |
 | E0329 | A `test` name holds `{}`, or repeats |
-| E0330 | An `extern` task or `.pointer()` is used outside an `unsafe` block |
-| E0331 | An `extern` task has a form that C cannot take, a pointer type is not `pointer[byte]`, or `.pointer()` is not on a name |
+| E0330 | A call to an `extern` task or `.pointer()` is outside an `unsafe` block |
+| E0331 | An `extern` task has a form that C cannot take, sits below top level, or is used as a value, a pointer type is not `pointer[byte]`, or `.pointer()` is not on a name |
 | E0332 | An `unsafe` block has no comment |
 | E0901 | Parses, but cannot run at this milestone |
 | E0904 | No library has this foreign task |

@@ -119,6 +119,7 @@ Add new entries at the end of the list. To reverse a decision, add a new entry t
 | 111 | 2026-11-06 | An `unsafe` block without a `#` comment is error E0332, and `lucid check --unsafe` lists sites | `security.md` already required both. Rust leaves this to an off-by-default Clippy lint, but Lucid has one tool and no lint levels. See "Unsafe code" in `research.md`. |
 | 112 | 2026-11-06 | `pointer[byte]` is the only pointer, from `.pointer()` on a named `list[byte]`. Text has no pointer, and there is no pointer math, read, or write for now | A list slot is 8 bytes except for bytes, so other element types would expose layout. A C string needs its zero byte pushed by hand, so text layout stays free. C can fill a list directly, which covers calls such as `strlen` and `memset`. Add more when `std` needs it. Weak evidence, see `research.md`. |
 | 113 | 2026-11-06 | An `extern` task is a normal task whose body is one foreign call. Symbols come from `ucrtbase` and `kernel32`, and a missing one is E0904 | Calls, arguments, and errors reuse one path. No linking of other libraries until a real need appears. |
+| 114 | 2026-11-06 | An `extern` task is not a value | A value could carry it out of an `unsafe` block, and safe code could then call C, which `security.md` rules out. Marking task types would add a second kind of task for no known need. |
 
 ## Open questions
 

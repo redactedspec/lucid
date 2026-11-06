@@ -6,11 +6,14 @@ unsafe extern task e(x: int = 1)
 unsafe extern task f(self: int)
 unsafe extern task lucid_print(x: int)
 let p: pointer[int]? = none
+unsafe extern task strlen(s: pointer[byte]) -> u64
 
 task g() -> pointer[byte]
     var items = [1, 2]
     var bytes = "x".bytes()
-    # Neither of these has a pointer.
+    unsafe extern task nested(x: int)
+    # None of these works.
     unsafe
+        let f = strlen
         print items.pointer()
         return "x".bytes().pointer()

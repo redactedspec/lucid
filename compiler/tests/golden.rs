@@ -222,6 +222,28 @@ fn unsafe_sites_are_reported() {
     assert!(text(&output.stdout).starts_with(wanted), "{}", text(&output.stdout));
     let output = lucid(&dir, &["check", "--unsafe", "hello.lcd"]);
     assert_eq!((output.status.code(), text(&output.stdout).as_str()), (Some(0), ""));
+    // An unbuilt feature does not hide a site, as it does not fail `check`.
+    let scratch = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let source = "use foo\n# It runs nothing.\nunsafe\n    print 1\n";
+    fs::write(scratch.join("unbuilt_unsafe.lcd"), source).expect("cannot write test file");
+    let output = lucid(scratch, &["check", "--unsafe", "unbuilt_unsafe.lcd"]);
+    assert_eq!(text(&output.stdout), "unbuilt_unsafe.lcd:3:1: unsafe: block\n");
+    // A missing foreign task needs no compiled code to find.
+    let dir = repo().join("tests").join("fail");
+    let output = lucid(&dir, &["check", "extern_missing.lcd"]);
+    assert!(text(&output.stderr).contains("E0904"), "{}", text(&output.stderr));
+}
+
+/// E0902 shows only in the child, and must still be data.
+#[test]
+fn test_compile_errors_stay_json() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let parts = "{a}".repeat(70_000);
+    let source = format!("task f(a: text)\n    print \"{parts}\"\ntest \"x\"\n    f(\"x\")\n");
+    fs::write(dir.join("huge_test.lcd"), source).expect("cannot write test file");
+    let output = lucid(dir, &["test", "--json", "huge_test.lcd"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(text(&output.stdout).starts_with("[{\"code\":\"E0902\""), "{}", text(&output.stdout));
 }
 
 #[test]

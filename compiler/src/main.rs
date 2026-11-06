@@ -93,6 +93,15 @@ fn cli(args: &[String]) -> ExitCode {
     if diags.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
 
+/// Reports compile errors, as data on stdout with `json`.
+fn report_errors(path: &str, src: &str, diags: &[Diagnostic], json: bool) {
+    if json {
+        emit(std::io::stdout(), &diag::render_json(path, src, diags));
+    } else {
+        emit(std::io::stderr(), &diag::render_text(path, src, diags));
+    }
+}
+
 /// `lucid check --unsafe`: each `unsafe` block and `extern` task, in file order.
 fn unsafe_sites(path: &str, json: bool) -> ExitCode {
     let (src, file, mut diags) = load(path);
@@ -102,14 +111,12 @@ fn unsafe_sites(path: &str, json: bool) -> ExitCode {
     {
         let (program, errors) = check::check(file, &src, true);
         diags = errors;
+        // As in `check`: an unbuilt feature is not an error in the program.
+        diags.retain(|d| d.code != "E0901");
         sites = program.unsafe_sites;
     }
     if !diags.is_empty() {
-        if json {
-            emit(std::io::stdout(), &diag::render_json(path, &src, &diags));
-        } else {
-            emit(std::io::stderr(), &diag::render_text(path, &src, &diags));
-        }
+        report_errors(path, &src, &diags, json);
         return ExitCode::FAILURE;
     }
     sites.sort_by_key(|(_, span)| span.start);
@@ -156,24 +163,27 @@ fn test(path: &str, json: bool) -> ExitCode {
                 diags = native::run_tests(&program, path, &src, STACK_BYTES, from)
                     .err()
                     .unwrap_or_default();
-                emit(std::io::stderr(), &diag::render_text(path, &src, &diags));
-                return if diags.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE };
+                if !diags.is_empty() {
+                    report_errors(path, &src, &diags, json);
+                    return ExitCode::FAILURE;
+                }
+                return ExitCode::SUCCESS;
             }
             tests = std::mem::take(&mut program.tests);
         }
     }
     if !diags.is_empty() {
-        if json {
-            emit(std::io::stdout(), &diag::render_json(path, &src, &diags));
-        } else {
-            emit(std::io::stderr(), &diag::render_text(path, &src, &diags));
-        }
+        report_errors(path, &src, &diags, json);
         return ExitCode::FAILURE;
     }
-    let outcomes = match run_tests(path, tests.len()) {
+    let outcomes = match run_tests(path, tests.len(), json) {
         Ok(outcomes) => outcomes,
         Err(problem) => {
-            emit(std::io::stderr(), &problem);
+            if json {
+                emit(std::io::stdout(), &problem);
+            } else {
+                emit(std::io::stderr(), &problem);
+            }
             return ExitCode::FAILURE;
         }
     };
@@ -191,28 +201,39 @@ fn test(path: &str, json: bool) -> ExitCode {
 }
 
 /// Runs `count` tests in child processes. Each child gives a NUL before each
-/// test it starts, and stops at the first that does not pass. An error means
-/// that a child did not start a test, and holds what it said.
-fn run_tests(path: &str, count: usize) -> Result<Vec<Outcome>, String> {
+/// test it starts and after its last, and stops at the first that fails. So a
+/// test that ends the process, even with exit code 0, shows as not finished.
+/// An error means that a child did not start a test, and holds what it said.
+fn run_tests(path: &str, count: usize, json: bool) -> Result<Vec<Outcome>, String> {
     let lucid = std::env::current_exe().map_err(|e| format!("lucid: {e}\n"))?;
     let mut outcomes = Vec::with_capacity(count);
     while outcomes.len() < count {
+        let flags: &[&str] = if json { &["test", "--json"] } else { &["test"] };
         let child = std::process::Command::new(&lucid)
-            .args(["test", path])
+            .args(flags)
+            .arg(path)
             .env(TEST_FROM, outcomes.len().to_string())
             .output()
             .map_err(|e| format!("lucid: cannot start a test process: {e}\n"))?;
         let stdout = String::from_utf8_lossy(&child.stdout);
         let stderr = String::from_utf8_lossy(&child.stderr);
-        let parts: Vec<&str> = stdout.split('\0').skip(1).collect();
+        let mut parts: Vec<&str> = stdout.split('\0').skip(1).collect();
         if parts.is_empty() {
-            return Err(stderr.into_owned());
+            return Err(format!("{stdout}{stderr}"));
+        }
+        let finished = child.status.success() && parts.len() == count - outcomes.len() + 1;
+        if finished {
+            parts.pop();
         }
         for (place, part) in parts.iter().enumerate() {
-            let failed = !child.status.success() && place + 1 == parts.len();
+            let failed = !finished && place + 1 == parts.len();
             let printed = part.strip_prefix('\n').unwrap_or(part);
-            let output = format!("{printed}{}", if failed { stderr.as_ref() } else { "" });
-            outcomes.push(Outcome { failed, output });
+            let why = match failed {
+                true if stderr.is_empty() => "the test ended the program\n",
+                true => stderr.as_ref(),
+                false => "",
+            };
+            outcomes.push(Outcome { failed, output: format!("{printed}{why}") });
         }
     }
     Ok(outcomes)

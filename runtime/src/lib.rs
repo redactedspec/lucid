@@ -1467,14 +1467,21 @@ pub unsafe extern "C" fn lucid_trap_text(
 
 /// Where each call in compiled code returns to, with its place in the source
 /// if a stack trace shows it. See `add_trace`.
-static CALL_SITES: OnceLock<HashMap<usize, Option<String>>> = OnceLock::new();
+static CALL_SITES: OnceLock<(String, HashMap<usize, Option<CallSite>>)> = OnceLock::new();
+
+/// A call that a stack trace shows.
+pub struct CallSite {
+    pub task: &'static str,
+    pub line: usize,
+    pub column: usize,
+}
 
 /// How many calls a stack trace shows. A stack overflow has millions.
 const MAX_TRACE: usize = 16;
 
-/// Records the call sites of the one compiled program.
-pub fn set_call_sites(sites: HashMap<usize, Option<String>>) {
-    let _ = CALL_SITES.set(sites);
+/// Records the file and call sites of the one compiled program.
+pub fn set_call_sites(path: &str, sites: HashMap<usize, Option<CallSite>>) {
+    let _ = CALL_SITES.set((path.to_string(), sites));
 }
 
 /// Adds a line for each call on the way to `frame`, innermost first. A return
@@ -1485,7 +1492,7 @@ pub fn set_call_sites(sites: HashMap<usize, Option<String>>) {
 ///
 /// `frame` must be the frame pointer of a compiled task.
 unsafe fn add_trace(report: &mut Vec<u8>, mut frame: *const usize) {
-    let Some(sites) = CALL_SITES.get() else { return };
+    let Some((path, sites)) = CALL_SITES.get() else { return };
     let mut shown = 0;
     // SAFETY: a compiled frame holds its caller's frame pointer, then its
     // return address. So a return address in compiled code makes the saved
@@ -1496,7 +1503,9 @@ unsafe fn add_trace(report: &mut Vec<u8>, mut frame: *const usize) {
                 report.extend_from_slice(b"\n    ...");
                 break;
             }
-            report.extend_from_slice(format!("\n    at {site}").as_bytes());
+            let CallSite { task, line, column } = site;
+            let text = format!("\n    at {path}:{line}:{column} in {task}");
+            report.extend_from_slice(text.as_bytes());
             shown += 1;
         }
         frame = unsafe { *frame } as *const usize;

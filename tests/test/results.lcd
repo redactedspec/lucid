@@ -38,6 +38,14 @@ test "a test can return"
     return
     expect false
 
+unsafe extern task ExitProcess(code: u32)
+
+test "exit code 0 is not a pass"
+    # Leaving the process early must not count as passing.
+    unsafe
+        ExitProcess(0.to_u32())
+    expect false
+
 test "last one still runs"
     let counts = [1, 2]
     expect counts.len() == 2

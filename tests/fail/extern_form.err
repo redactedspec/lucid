@@ -14,5 +14,8 @@ extern_form.lcd:7:20: error E0331: `lucid_print` cannot be `extern`
   note: the runtime keeps names that start with `lucid_`
 extern_form.lcd:8:8: error E0331: this pointer type does not exist
   note: the only one is `pointer[byte]`
-extern_form.lcd:15:15: error E0303: `pointer` does not work on `list[int]`
-extern_form.lcd:16:16: error E0331: `.pointer()` needs a name
+extern_form.lcd:14:5: error E0331: an `extern` task must be at top level
+extern_form.lcd:17:17: error E0331: `strlen` is an `extern` task, which is not a value
+  note: call it in an `unsafe` block
+extern_form.lcd:18:15: error E0303: `pointer` does not work on `list[int]`
+extern_form.lcd:19:16: error E0331: `.pointer()` needs a name

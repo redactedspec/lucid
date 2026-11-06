@@ -1,0 +1,2 @@
+expect_generic_text.lcd:3:5: trap: expect failed: "a b" == "a  b"
+    at expect_generic_text.lcd:8:1 in top level

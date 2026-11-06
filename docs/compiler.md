@@ -8,7 +8,7 @@ M4 is done, and M5 is in progress. `lucid run` compiles `int`, `float`, the size
 
 ## `unsafe`
 
-An `extern` task has a signature and a place in `Program::tasks`, like any task, so calls need no new path. `check.rs` writes its body: one `return` of `ExprKind::Foreign`, which `native.rs` lowers to a call in the C ABI. Parameters stay 64-bit, since C reads the low part, and a result widens from its declared width. `find_symbol` looks in `ucrtbase` and `kernel32`, so a missing name is E0904 and not a panic in Cranelift. `.pointer()` needs a name so that the list outlives the statement: `Stmt::Clear` releases it at the end of its block, not at its last use.
+An `extern` task has a signature and a place in `Program::tasks`, like any task, so calls need no new path. `check.rs` writes its body: one `return` of `ExprKind::Foreign`, which `native.rs` lowers to a call in the C ABI. Parameters stay 64-bit, since C reads the low part, and a result widens from its declared width. `find_symbol` looks in `ucrtbase` and `kernel32`, and `check.rs` calls it, so a missing name is E0904 under `lucid check` too, and not a panic in Cranelift. `.pointer()` needs a name so that the list outlives the statement: `Stmt::Clear` releases it at the end of its block, not at its last use.
 
 `lucid build` needs its own answer for finding symbols, and Linux and macOS need one at M8.
 
@@ -16,7 +16,7 @@ An `extern` task has a signature and a place in `Program::tasks`, like any task,
 
 `check.rs` lowers a `test` to a task of its own, placed after the written tasks, only if the build keeps tests. `Frame::in_test` sends a failed `try` to `Stmt::Exit`, as at top level. `Program::tests` lists them.
 
-A trap ends the process, and Cranelift frames have no unwind tables. So `lucid test` checks the file, then starts itself with `LUCID_TEST_FROM` set to the place of the first test to run. That child prints a NUL line before each test, and runs them in one process. The parent splits stdout at each NUL, so it knows the last test that started, and starts a new child after it if the exit code is not 0. Passing tests cost one compile in total, and each failure costs one more.
+A trap ends the process, and Cranelift frames have no unwind tables. So `lucid test` checks the file, then starts itself with `LUCID_TEST_FROM` set to the place of the first test to run. That child prints a NUL line before each test and after the last, and runs them in one process. The parent splits stdout at each NUL. With no final NUL, or an exit code that is not 0, the last test that started failed, and the parent starts a new child after it. A compile error that only code generation finds, E0902, comes from the child, in the form `--json` asks for. Passing tests cost one compile in total, and each failure costs one more.
 
 ## `expect`
 
@@ -113,7 +113,7 @@ A union value is a record with one slot, and its tag is a type id: a position in
 
 In a debug build of `lucid_rt`, which is what `cargo test` runs, a released value keeps its memory and is marked dead. So a double free, or a retain of a dead value, traps with `runtime bug`. `lucid run` also traps at exit if any value is still live.
 
-A trap site is a cold block that passes `lucid_trap` a message holding its source position, and its frame pointer. Every task keeps frame pointers (`preserve_frame_pointers`), so a trace walks saved pointers and return addresses. `native.rs` hands the runtime a table from each call's return address to its source position, built from Cranelift's call sites and source locations. A task with no name, which `derive.rs` wrote, has a row with no text, so the walk goes through it and prints nothing. An address that is not in the table is a Rust frame, whose saved pointer cannot be trusted, so the walk stops. Every task checks the stack pointer on entry, after its prologue, so its frame must fit in the 1 MiB margin. E0902 reads the compiled frame size, and rejects a task over half the margin. At M2 the limit is a constant in the code, because `lucid run` has one thread with a known stack. `lucid build` and `spawn` need a limit per thread.
+A trap site is a cold block that passes `lucid_trap` a message holding its source position, and its frame pointer. Every task keeps frame pointers (`preserve_frame_pointers`), so a trace walks saved pointers and return addresses. `native.rs` hands the runtime a table from each call's return address to its task, line, and column, built from Cranelift's call sites and source locations, and text is made only on a trap. A task with no name, which `derive.rs` wrote, has a row with no text, so the walk goes through it and prints nothing. An address that is not in the table is a Rust frame, whose saved pointer cannot be trusted, so the walk stops. Every task checks the stack pointer on entry, after its prologue, so its frame must fit in the 1 MiB margin. E0902 reads the compiled frame size, and rejects a task over half the margin. At M2 the limit is a constant in the code, because `lucid run` has one thread with a known stack. `lucid build` and `spawn` need a limit per thread.
 
 - `lucid run` links it directly, since the JIT runs inside the compiler process.
 - `lucid build` embeds a prebuilt `lucid_rt` static library in the compiler and passes it to the system linker.

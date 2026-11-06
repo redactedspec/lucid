@@ -1,2 +1,2 @@
-extern_missing.lcd:1:1: error E0904: cannot find the foreign task `no_such_symbol_anywhere`
+extern_missing.lcd:1:20: error E0904: cannot find the foreign task `no_such_symbol_anywhere`
   note: it must be in the C runtime or `kernel32`

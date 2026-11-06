@@ -39,6 +39,13 @@ task length(items: list[byte]) -> u64
 
 print length(raw)
 
+# A narrowed name has a pointer too.
+var maybe: list[byte]? = raw
+if maybe is list[byte]
+    # `maybe` stays unchanged for the call.
+    unsafe
+        print strlen(maybe.pointer())
+
 # A name narrowed before an `unsafe` block loses that if the block writes it.
 var value: int? = 1
 if value is int

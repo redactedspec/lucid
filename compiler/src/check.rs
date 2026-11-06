@@ -11,6 +11,7 @@ use crate::mir::{
     Expr, ExprKind, Local, Program, Shape, ShapeVariant, Stmt, Task, TestCase, Ty, Types, Update,
     Visit, inner,
 };
+use crate::native::find_symbol;
 use std::collections::{HashMap, HashSet};
 
 /// Built-in type names with one form of their own, which `named` checks.
@@ -423,23 +424,19 @@ fn ends(stmts: &[Stmt], jumps: bool) -> bool {
     })
 }
 
-/// True if the line of `start` ends in a comment, or the last line above it
-/// that is not blank is one.
+/// True if the line of `start` ends in a comment, or the line above it is one.
 fn has_comment(src: &str, start: usize) -> bool {
     let line_start = src[..start].rfind('\n').map_or(0, |at| at + 1);
     let line_end = src[start..].find('\n').map_or(src.len(), |at| start + at);
-    let above = src[..line_start].lines().rev().find(|line| !line.trim().is_empty());
+    let above = src[..line_start].lines().next_back();
     src[start..line_end].contains('#') || above.is_some_and(|l| l.trim_start().starts_with('#'))
 }
 
 /// One side of a failed `expect`. Text has quotes, so that a space shows.
+/// `mono.rs` picks the code, since text may be behind a parameter or a union.
 fn shown_side(value: Expr) -> Expr {
     let span = value.span;
-    let kind = match value.ty {
-        Ty::Text => ExprKind::TextQuote(value.into()),
-        _ => ExprKind::ToText(value.into()),
-    };
-    Expr { kind, ty: Ty::Text, span }
+    Expr { kind: ExprKind::TextQuote(value.into()), ty: Ty::Text, span }
 }
 
 /// A union value as a narrower type.
@@ -1773,6 +1770,11 @@ impl<'a> Checker<'a> {
         } else if !plain(signature.returns) && !matches!(signature.returns, Ty::None | Ty::Error) {
             Some("the result must be a number, `bool`, `pointer[byte]`, or nothing")
         } else {
+            if find_symbol(name).is_none() {
+                let message = format!("cannot find the foreign task `{name}`");
+                let note = "it must be in the C runtime or `kernel32`";
+                self.report(Diagnostic::new("E0904", message, span).note(note));
+            }
             None
         };
         if let Some(problem) = problem {
@@ -2225,7 +2227,9 @@ impl<'a> Checker<'a> {
     /// own name as its own record, which keeps it from holding itself.
     fn nested_task(&mut self, def: &'a ast::TaskDef, span: Span) -> Option<Stmt> {
         let Some(body) = &def.body else {
-            return self.later("`unsafe extern task`", span);
+            let diag = Diagnostic::new("E0331", "an `extern` task must be at top level", span);
+            self.report(diag);
+            return None;
         };
         let sig = &def.sig;
         if def.public {
@@ -2364,7 +2368,10 @@ impl<'a> Checker<'a> {
     /// first, like a lambda, and calls the real one.
     fn task_value(&mut self, id: usize, name: &str, explicit: Option<&[Ty]>, span: Span) -> Expr {
         if self.foreign.contains(&id) {
-            self.need_unsafe(&format!("`{name}`, an `extern` task,"), span);
+            // A task type says nothing of `unsafe`, so a value could leave the block.
+            let message = format!("`{name}` is an `extern` task, which is not a value");
+            let diag = Diagnostic::new("E0331", message, span);
+            self.report(diag.note("call it in an `unsafe` block"));
         }
         let params: Vec<&str> =
             self.signatures[id].type_params.iter().map(|&(name, _)| name).collect();
@@ -5064,7 +5071,11 @@ impl<'a> Checker<'a> {
             (_, "len") => int(ExprKind::Len(boxed)),
             (_, "pointer") => {
                 self.need_unsafe("`.pointer()`", span);
-                if !matches!(value.kind, ExprKind::Local(_)) {
+                let name = match &value.kind {
+                    ExprKind::View(inner) => &inner.kind,
+                    kind => kind,
+                };
+                if !matches!(name, ExprKind::Local(_)) {
                     // A temporary would be gone by the time the address is used.
                     self.fail("E0331", "`.pointer()` needs a name".into(), span);
                 }

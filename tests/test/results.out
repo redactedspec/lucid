@@ -8,5 +8,7 @@ FAIL a trap in a task
 FAIL try ends a test
     oops: negative
 ok a test can return
+FAIL exit code 0 is not a pass
+    the test ended the program
 ok last one still runs
-6 tests, 3 failed
+7 tests, 4 failed

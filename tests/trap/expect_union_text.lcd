@@ -1,0 +1,3 @@
+let x: text? = "a b"
+let y: text? = "a  b"
+expect x == y

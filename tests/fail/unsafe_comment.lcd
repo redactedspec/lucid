@@ -2,3 +2,8 @@ print 1
 
 unsafe
     print 2
+
+# Only the line above counts, so a blank line breaks this one.
+
+unsafe
+    print 3
