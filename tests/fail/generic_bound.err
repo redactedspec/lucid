@@ -5,7 +5,6 @@ generic_bound.lcd:28:7: error E0320: `text` does not have `Add`
 generic_bound.lcd:29:7: error E0320: `Dog` does not have `Add`
 generic_bound.lcd:33:7: error E0320: `int` does not have `Div`
 generic_bound.lcd:37:7: error E0320: `float` does not have `Hash`
-generic_bound.lcd:38:7: error E0320: `Dog` does not have `Hash`
 generic_bound.lcd:42:7: error E0320: `bool` does not have `Order`
 generic_bound.lcd:43:7: error E0320: `none` does not have `Order`
 generic_bound.lcd:51:10: error E0320: `bool` does not have `Order`

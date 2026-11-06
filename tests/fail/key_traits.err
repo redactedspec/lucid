@@ -1,0 +1,17 @@
+key_traits.lcd:2:8: error E0320: `list[float]` does not have `Hash`
+key_traits.lcd:3:8: error E0320: `float?` does not have `Hash`
+key_traits.lcd:8:8: error E0320: `Reading` does not have `Hash`
+key_traits.lcd:16:8: error E0320: `Money` does not have `Hash`
+  note: a hand-written `equal` needs a hand-written `hash` to match it
+key_traits.lcd:17:8: error E0320: `list[Money]` does not have `Hash`
+key_traits.lcd:20:11: error E0320: `Reading` does not have `Hash`
+key_traits.lcd:28:8: error E0320: `Wrong` does not have `Hash`
+key_traits.lcd:33:6: error E0323: `hash` replaces a derived task, so it needs this form
+  note: write `task hash(self: T) -> int`, for a `type`, `choice`, or collection `T`
+key_traits.lcd:36:6: error E0323: `hash` replaces a derived task, so it needs this form
+  note: write `task hash(self: T) -> int`, for a `type`, `choice`, or collection `T`
+key_traits.lcd:42:6: error E0323: `hash` replaces a derived task, so it needs this form
+  note: write `task hash(self: T) -> int`, for a `type`, `choice`, or collection `T`
+key_traits.lcd:48:1: error E0320: `Reading` does not have `Hash`
+key_traits.lcd:49:7: error E0303: `in` needs `list[int]`, found `list[float]`
+key_traits.lcd:50:8: error E0303: `none` cannot be a key

@@ -1,0 +1,138 @@
+# Compound keys: lists, values, choices, unions, and sets.
+type Point
+    x: int
+    y: int
+
+choice Shape
+    Dot
+    Line(from: Point, to: Point)
+    Label(name: text, bold: bool)
+
+var grid: map[Point, text] = {Point(x: 1, y: 2): "a"}
+grid[Point(x: 3, y: 4)] = "b"
+grid[Point(x: 1, y: 2)] = "c"
+print grid
+print grid[Point(x: 3, y: 4)]
+print grid.get(Point(x: 9, y: 9))
+print Point(x: 1, y: 2) in grid
+grid.remove(Point(x: 1, y: 2))
+print grid.len()
+
+# A key keeps its value when the original changes.
+var path = [1, 2]
+var seen = set([path])
+path.push(3)
+print [1, 2] in seen
+print path in seen
+seen.add(path)
+print seen
+
+var shapes = set([Dot, Line(from: Point(x: 0, y: 0), to: Point(x: 1, y: 1)), Dot])
+shapes.add(Label(name: "n", bold: true))
+shapes.add(Label(name: "n", bold: false))
+shapes.add(Label(name: "n", bold: true))
+print shapes.len()
+print Line(from: Point(x: 0, y: 0), to: Point(x: 1, y: 1)) in shapes
+print Line(from: Point(x: 0, y: 0), to: Point(x: 1, y: 2)) in shapes
+
+let maybe: map[int?, text] = {1: "one", none: "nothing"}
+print maybe[none]
+print maybe[1]
+print 2 in maybe
+
+let mixed: set[int or text] = set([1, "1", 1])
+print mixed.len()
+
+# Equal sets and maps with another order are one key.
+let a = set([1, 2, 3])
+let b = set([3, 2, 1])
+let by_set = {a: "first", b: "second"}
+print by_set
+let c = {"x": 1, "y": 2}
+let d = {"y": 2, "x": 1}
+var by_map = {c: 1}
+by_map[d] = 2
+print by_map
+print {"x": 1, "y": 3} in by_map
+
+# Lengths keep nested lists apart.
+var nested = set([[[1], [2]]])
+nested.add([[1, 2], []])
+print nested.len()
+
+# Many keys force a rebuild, which must not ask for a hash again.
+var many: map[list[int], int] = {}
+for i in 0..1000
+    many[[i, i + 1]] = i
+print many[[500, 501]]
+print many.len()
+for i in 0..990
+    many.remove([i, i + 1])
+print many
+var copy = many
+copy[[0]] = 0
+print many.len()
+print copy.len()
+
+# Hand-written tasks replace the derived ones.
+type Name
+    text: text
+
+task equal(self: Name, other: Name) -> bool
+    return self.text.len() == other.text.len()
+
+task hash(self: Name) -> int
+    return self.text.len()
+
+let names = set([Name(text: "ab"), Name(text: "cd"), Name(text: "e")])
+print names
+
+type Tag
+    id: int
+    note: text
+
+task hash(self: Tag) -> text
+    return "{self.id}"
+
+print {Tag(id: 1, note: "a"): 1, Tag(id: 1, note: "a"): 2}.len()
+print {Tag(id: 1, note: "a"): 1, Tag(id: 1, note: "b"): 2}.len()
+
+# A hand-written hash reaches into larger values.
+print set([[Name(text: "ab")], [Name(text: "cd")]]).len()
+
+# Recursive values and generic code.
+choice Tree
+    Leaf
+    Node(left: Tree, right: Tree)
+
+print set([Node(left: Leaf, right: Leaf), Node(left: Leaf, right: Leaf), Leaf]).len()
+
+type Pair[A, B]
+    left: A
+    right: B
+
+task group[K: Hash, V](key: K, value: V) -> map[K, list[V]]
+    var out: map[K, list[V]] = {}
+    out[key] = [value]
+    return out
+
+print group(Pair(left: 1, right: "a"), 2.5)
+print group("k", 1)
+
+task pairs[T: Hash](value: T) -> set[list[T?]]
+    let blank: list[T?] = [none]
+    let full: list[T?] = [value]
+    return set([blank, full, blank])
+
+print pairs(1).len()
+print pairs(Point(x: 1, y: 1)).len()
+
+# A key can hold the very map that it is looked up in.
+type Holder
+    held: map[Holder, int]
+
+var inner: map[Holder, int] = {}
+inner[Holder(held: inner)] = 1
+print inner.len()
+print Holder(held: {}) in inner
+print inner.get(Holder(held: inner))

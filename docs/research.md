@@ -29,6 +29,7 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | Union narrowing by control flow | Follows TypeScript and Kotlin, tightened for memory safety | Read | Agent trial at M3 |
 | Text slices, no character type | Judgment call from existing practice | None | Agent trial at M3 |
 | Compact ordered map, SipHash with random keys | Supported by Python and Rust practice | Snippet | Benchmark at M4 |
+| A written `equal` removes derived `Hash` | Python and Clippy both guard this rule | Snippet | None |
 
 ## Memory
 
@@ -207,7 +208,10 @@ Sources: [PEP 238](https://peps.python.org/pep-0238/), [Python expressions](http
 - **Rust default.** The `HashMap` docs name SipHash 1-3 with random seeds, and say that the algorithm may change. A 2016 docs change said that DoS resistance is not guaranteed, because of how randomness is acquired. Check the current wording. Level: Snippet.
 - **Compact layout.** CPython's `dictobject.c` describes a table of indices alongside an entries array that is mostly append only, so iterating the entries gives insertion order. Level: Snippet, from source comments.
 
-Sources: [PEP 456](https://peps.python.org/pep-0456/), [Rust HashMap docs change](https://github.com/rust-lang/rust/pull/35371), [CPython dictobject.c](https://chromium.googlesource.com/external/github.com/python/cpython/+/e92ac0a741b125f1cffe8c07b054d1dea7b0a05a/Objects/dictobject.c).
+- **Equal and hash.** The Python 3.3 data model says that a class that overrides `__eq__` and does not define `__hash__` has its `__hash__` set to `None`, so its instances raise `TypeError` when hashed. The snippet of the current page did not repeat that sentence, so check it before relying on the wording. Clippy's `derived_hash_with_manual_eq` is in the `correctness` group, states the rule as `k1 == k2` implies `hash(k1) == hash(k2)`, and accepts a manual `Hash` with a derived `PartialEq`. Lucid takes the same one-way rule. Level: Snippet, and the rule's wording came from a third-party copy of the lint docs.
+- **Hash of an unordered value.** CPython's `frozenset_hash` shuffles each entry's hash and joins them with XOR, so order does not matter. A CPython report (issue 150134) says that its shuffle spreads changes only upward, which raises collisions. Lucid's entries are already keyed SipHash output, so it needs no shuffle. It adds them, by judgment: no benchmark yet. Level: Snippet.
+
+Sources: [Python data model](https://docs.python.org/3.3/reference/datamodel.html), [Clippy derive lints](https://rust.googlesource.com/rust-clippy/+/refs/heads/master/clippy_lints/src/derive/mod.rs), [CPython issue 150134](https://github.com/python/cpython/issues/150134), [setobject.c](https://chromium.googlesource.com/external/github.com/python/cpython/+/04d497c284ac933488cc747b3f7082beab300848/Objects/setobject.c), [PEP 456](https://peps.python.org/pep-0456/), [Rust HashMap docs change](https://github.com/rust-lang/rust/pull/35371), [CPython dictobject.c](https://chromium.googlesource.com/external/github.com/python/cpython/+/e92ac0a741b125f1cffe8c07b054d1dea7b0a05a/Objects/dictobject.c).
 
 ## Narrowing
 

@@ -2,7 +2,7 @@
 
 use crate::ast::BinaryOp;
 use crate::diag::{Diagnostic, Lines, Span};
-use crate::mir::{Expr, ExprKind, Local, Program, Stmt, Task, Ty, Update};
+use crate::mir::{Expr, ExprKind, HashOp, KeyTasks, Local, Program, Stmt, Task, Ty, Update};
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
     AbiParam, Block, FuncRef, GlobalValue, InstBuilder, MemFlagsData, Signature, StackSlotData,
@@ -100,6 +100,9 @@ struct Runtime {
     map_next: FuncId,
     map_key: FuncId,
     set_from: FuncId,
+    hash_int: FuncId,
+    hash_text: FuncId,
+    hash_sum: FuncId,
     record_new: FuncId,
     record_set: FuncId,
     int_text: FuncId,
@@ -161,6 +164,9 @@ fn compile(
     builder.symbol("lucid_map_next", lucid_rt::lucid_map_next as *const u8);
     builder.symbol("lucid_map_key", lucid_rt::lucid_map_key as *const u8);
     builder.symbol("lucid_set_from", lucid_rt::lucid_set_from as *const u8);
+    builder.symbol("lucid_hash_int", lucid_rt::lucid_hash_int as *const u8);
+    builder.symbol("lucid_hash_text", lucid_rt::lucid_hash_text as *const u8);
+    builder.symbol("lucid_hash_sum", lucid_rt::lucid_hash_sum as *const u8);
     builder.symbol("lucid_record_new", lucid_rt::lucid_record_new as *const u8);
     builder.symbol("lucid_record_set", lucid_rt::lucid_record_set as *const u8);
     builder.symbol("lucid_int_text", lucid_rt::lucid_int_text as *const u8);
@@ -206,13 +212,16 @@ fn compile(
         list_swap: import("lucid_list_swap", &with_two, &value),
         list_has: import("lucid_list_has", &two, &[AbiParam::new(types::I8)]),
         list_slice: import("lucid_list_slice", &with_two, &value),
-        map_new: import("lucid_map_new", &[byte[0], byte[0]], &value),
+        map_new: import("lucid_map_new", &[byte[0], byte[0], value[0], value[0]], &value),
         map_set: import("lucid_map_set", &with_two, &value),
         map_remove: import("lucid_map_remove", &two, &value),
         map_find: import("lucid_map_find", &two, &value),
         map_next: import("lucid_map_next", &two, &int),
         map_key: import("lucid_map_key", &two, &int),
-        set_from: import("lucid_set_from", &value, &value),
+        set_from: import("lucid_set_from", &with_two, &value),
+        hash_int: import("lucid_hash_int", &[int[0], int[0]], &int),
+        hash_text: import("lucid_hash_text", &[int[0], value[0]], &int),
+        hash_sum: import("lucid_hash_sum", &[int[0], int[0]], &int),
         record_new: import("lucid_record_new", &[int[0], int[0], int[0]], &value),
         record_set: import("lucid_record_set", &with_two, &value),
         int_text: import("lucid_int_text", &int, &value),
@@ -379,16 +388,32 @@ impl Lower<'_, '_> {
         self.body.ins().iconst(types::I8, 0)
     }
 
-    fn call(&mut self, id: FuncId, args: &[Value]) -> Option<Value> {
-        let func = match self.funcs.get(&id) {
+    fn func(&mut self, id: FuncId) -> FuncRef {
+        match self.funcs.get(&id) {
             Some(&func) => func,
             None => {
                 let func = self.module.declare_func_in_func(id, self.body.func);
                 *self.funcs.entry(id).or_insert(func)
             }
-        };
+        }
+    }
+
+    fn call(&mut self, id: FuncId, args: &[Value]) -> Option<Value> {
+        let func = self.func(id);
         let call = self.body.ins().call(func, args);
         self.body.inst_results(call).first().copied()
+    }
+
+    /// The addresses of the tasks that a map keeps, or null for each.
+    fn key_tasks(&mut self, tasks: KeyTasks) -> [Value; 2] {
+        let Some((hash, equal)) = tasks else {
+            let null = self.body.ins().iconst(self.pointer, 0);
+            return [null, null];
+        };
+        [hash, equal].map(|task| {
+            let func = self.func(self.ids[task]);
+            self.body.ins().func_addr(self.pointer, func)
+        })
     }
 
     /// Returns the address and length of `text`, kept in static data.
@@ -637,10 +662,12 @@ impl Lower<'_, '_> {
         list
     }
 
-    fn map_of(&mut self, entries: &[(Expr, Expr)], key: Ty, value: Ty) -> Value {
+    fn map_of(&mut self, entries: &[(Expr, Expr)], key: Ty, value: Ty, tasks: KeyTasks) -> Value {
         let keys = self.body.ins().iconst(types::I8, i64::from(key.is_counted()));
         let values = self.body.ins().iconst(types::I8, i64::from(value.is_counted()));
-        let mut map = self.call(self.runtime.map_new, &[keys, values]).expect("it returns a map");
+        let [hash, equal] = self.key_tasks(tasks);
+        let new = self.call(self.runtime.map_new, &[keys, values, hash, equal]);
+        let mut map = new.expect("it returns a map");
         for (key, value) in entries {
             let key = self.slot(key);
             let value = self.slot(value);
@@ -775,13 +802,24 @@ impl Lower<'_, '_> {
                 let Ty::List(item) = expr.ty else { unreachable!("it has a list type") };
                 self.list_of(items, *item)
             }
-            ExprKind::MapOf(entries) => {
+            ExprKind::MapOf(entries, tasks) => {
                 let Ty::Map(key, value) = expr.ty else { unreachable!("it has a map type") };
-                self.map_of(entries, *key, *value)
+                self.map_of(entries, *key, *value, *tasks)
             }
-            ExprKind::SetOf(list) => {
+            ExprKind::SetOf(list, tasks) => {
                 let list = self.expr(list);
-                self.call(self.runtime.set_from, &[list]).expect("it returns a set")
+                let [hash, equal] = self.key_tasks(*tasks);
+                self.call(self.runtime.set_from, &[list, hash, equal]).expect("it returns a set")
+            }
+            ExprKind::Hash(op, state, value) => {
+                let state = self.expr(state);
+                let value = self.slot(value);
+                let task = match op {
+                    HashOp::Int => self.runtime.hash_int,
+                    HashOp::Text => self.runtime.hash_text,
+                    HashOp::Sum => self.runtime.hash_sum,
+                };
+                self.call(task, &[state, value]).expect("it returns a hash")
             }
             ExprKind::Len(value) => {
                 let value = self.expr(value);

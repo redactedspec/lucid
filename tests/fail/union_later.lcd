@@ -1,3 +1,0 @@
-let a: int? = 1
-let b: map[int?, int] = {}
-let c: set[int?] = set([])

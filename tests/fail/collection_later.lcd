@@ -1,6 +1,6 @@
 # Features of collections that wait for later roadmap items.
 let a = [1]
-let b: set[list[int]] = set([])
+let b = 1
 var c = [1]
 for change d in c
     print d

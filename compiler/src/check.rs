@@ -650,16 +650,17 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// A compound key needs the derived `Hash` trait, which is not built yet.
-    /// A `float` never gets it, since NaN is not equal to itself.
+    /// A compound key needs `Hash`, which depends on tasks that may not be
+    /// declared yet. A `float` never has it, since NaN is not equal to itself.
     fn check_key(&mut self, ty: Ty, span: Span) {
         match ty {
             Ty::Error => {}
-            Ty::Param(..) => {
-                self.require(ty, "Hash", span);
-            }
-            _ if ty.is_compound() => {
-                self.unsupported(&format!("`{}` as a key", ty.name()), span);
+            _ if ty.is_compound() || matches!(ty, Ty::Param(..)) => {
+                if self.ready {
+                    self.require(ty, "Hash", span);
+                } else {
+                    self.deferred.push((ty, "Hash", span, self.bounds.clone()));
+                }
             }
             _ if ty.is_key() => {}
             _ => {
@@ -765,8 +766,11 @@ impl<'a> Checker<'a> {
         if !found {
             let message = format!("`{}` does not have `{name}`", ty.name());
             let diag = Diagnostic::new("E0320", message, span);
+            let written_equal = name == "Hash" && self.find_method("equal", ty).is_some();
             self.report(if let Ty::Param(param, _) = ty {
                 diag.note(format!("add a bound, as in `[{param}: {name}]`"))
+            } else if written_equal {
+                diag.note("a hand-written `equal` needs a hand-written `hash` to match it")
             } else {
                 diag
             });
@@ -809,6 +813,11 @@ impl<'a> Checker<'a> {
         if let Some(found) = self.written_task(written, ty, seen) {
             return found;
         }
+        if name == "Hash"
+            && let Some(found) = self.written_hash(ty, seen)
+        {
+            return found;
+        }
         if !BUILT_IN_TRAITS.contains(&name) {
             let tasks = self.traits.get(name).cloned().unwrap_or_default();
             return tasks.into_iter().all(|task| self.fits_trait_task(ty, task, seen));
@@ -820,9 +829,15 @@ impl<'a> Checker<'a> {
             Ty::Data(..) => self.variants_of(ty).into_iter().flatten().collect(),
             _ => Vec::new(),
         };
+        let parts = if name == "Hash" {
+            // A `none` inside a value hashes as nothing. Alone it is no key.
+            parts.into_iter().filter(|&part| part != Ty::None).collect()
+        } else {
+            parts
+        };
         let holds = match name {
             "Show" | "Equal" => true,
-            "Hash" => return ty.is_key(),
+            "Hash" => ty.is_key() || ty.is_compound(),
             "Order" => {
                 matches!(ty, Ty::Int | Ty::Float | Ty::Byte | Ty::Text | Ty::List(_))
                     || matches!(ty, Ty::Data(..))
@@ -849,6 +864,20 @@ impl<'a> Checker<'a> {
             }
         }
         Some(true)
+    }
+
+    /// Whether a type's own tasks give it `Hash`, or `None` if they say nothing.
+    /// A written `hash` needs a result with `Hash`. A written `equal` alone
+    /// gives no `Hash`, since a derived hash would not match it. See decision 77.
+    fn written_hash(&mut self, ty: Ty, seen: &mut Vec<(Ty, String)>) -> Option<bool> {
+        let Some(found) = self.written_task("hash", ty, seen) else {
+            return self.find_method("equal", ty).map(|_| false);
+        };
+        let (id, known) = self.find_method("hash", ty)?;
+        let args: Option<Vec<Ty>> = known.into_iter().collect();
+        let (Some(args), true) = (args, found) else { return Some(false) };
+        let result = self.table.subst(self.signatures[id].returns, &args);
+        Some(self.satisfied(result, "Hash", seen))
     }
 
     /// True if `ty` has a task that matches a task of a trait.
@@ -1145,6 +1174,9 @@ impl<'a> Checker<'a> {
             "equal" => (1, Ty::Bool),
             "compare" => (1, Ty::Int),
             "add" | "sub" | "mul" | "div" => (1, receiver),
+            // Any result with `Hash` will do, which the trait check tests.
+            "hash" if signature.returns == Ty::None => (0, Ty::Int),
+            "hash" => (0, signature.returns),
             _ => return,
         };
         let count = signature.type_params.len();
@@ -1160,7 +1192,11 @@ impl<'a> Checker<'a> {
             let message = format!("`{name}` replaces a derived task, so it needs this form");
             let note = format!(
                 "write `task {name}(self: T{other}) -> {}`, for a `type`, `choice`, or collection `T`",
-                if returns == receiver { "T".into() } else { returns.name() }
+                match name {
+                    "hash" => "int".into(),
+                    _ if returns == receiver => "T".into(),
+                    _ => returns.name(),
+                }
             );
             self.report(Diagnostic::new("E0323", message, span).note(note));
         }
@@ -2624,7 +2660,7 @@ impl<'a> Checker<'a> {
                 if item.is_none() {
                     self.check_key(*listed, list.span);
                 }
-                Expr { kind: ExprKind::SetOf(list.into()), ty: Ty::Set(listed), span }
+                Expr { kind: ExprKind::SetOf(list.into(), None), ty: Ty::Set(listed), span }
             }
             ty => {
                 let message = format!("`set` needs a list, found `{}`", ty.name());
@@ -2696,7 +2732,7 @@ impl<'a> Checker<'a> {
                     self.check_key(key, span);
                 }
                 let ty = Ty::Map(inner(key), inner(value));
-                Expr { kind: ExprKind::MapOf(lowered), ty, span }
+                Expr { kind: ExprKind::MapOf(lowered, None), ty, span }
             }
             _ => self.untyped_empty("map", want, "let x: map[text, int] = {}", span),
         }

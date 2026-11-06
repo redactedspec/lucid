@@ -7,7 +7,7 @@
 
 use crate::ast::BinaryOp;
 use crate::diag::Span;
-use crate::mir::{Expr, ExprKind, Local, Stmt, Task, Ty};
+use crate::mir::{Expr, ExprKind, HashOp, Local, Stmt, Task, Ty};
 use crate::mono::Mono;
 
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
@@ -20,6 +20,8 @@ pub enum Derived {
     Compare,
     /// `value: T, list: list[T]`, gives `bool`.
     Has,
+    /// `x: T, state: int`, gives `state` with `x` added.
+    Hash,
 }
 
 /// What a derived task is building.
@@ -64,6 +66,10 @@ impl Body {
 
     fn plus_one(&self, value: Expr) -> Expr {
         self.expr(ExprKind::Binary(BinaryOp::Add, boxed(value), boxed(self.int(1))), Ty::Int)
+    }
+
+    fn hash(&self, op: HashOp, state: Expr, value: Expr) -> Expr {
+        self.expr(ExprKind::Hash(op, boxed(state), boxed(value)), Ty::Int)
     }
 
     fn join(&self, parts: Vec<Expr>) -> Expr {
@@ -223,6 +229,21 @@ impl Mono<'_> {
         }
     }
 
+    /// `state` with `value` added. Nothing is added for a `none`.
+    fn hashed(&mut self, state: Expr, value: Expr, span: Span) -> Expr {
+        let op = match value.ty {
+            Ty::None => return state,
+            Ty::Text => HashOp::Text,
+            ty if ty.is_compound() => {
+                let slot = self.derived(Derived::Hash, ty, span);
+                let kind = ExprKind::Call(slot, &[], vec![value, state]);
+                return Expr { kind, ty: Ty::Int, span };
+            }
+            _ => HashOp::Int,
+        };
+        Expr { kind: ExprKind::Hash(op, boxed(state), boxed(value)), ty: Ty::Int, span }
+    }
+
     /// `value in list` for a type that the runtime cannot compare.
     pub fn list_has(&mut self, value: Expr, list: Expr, span: Span) -> Expr {
         let slot = self.derived(Derived::Has, value.ty, span);
@@ -271,6 +292,7 @@ impl Mono<'_> {
             Derived::Equal => (vec![ty, ty], Ty::Bool),
             Derived::Compare => (vec![ty, ty], Ty::Int),
             Derived::Has => (vec![ty, Ty::List(crate::mir::inner(ty))], Ty::Bool),
+            Derived::Hash => (vec![ty, Ty::Int], Ty::Int),
         };
         let params = locals.len();
         let mut body = Body { locals, span };
@@ -278,6 +300,7 @@ impl Mono<'_> {
             Derived::Show => self.show_body(&mut body, ty),
             Derived::Equal => self.equal_body(&mut body, ty),
             Derived::Compare => self.compare_body(&mut body, ty),
+            Derived::Hash => self.hash_body(&mut body, ty),
             Derived::Has => {
                 let walk = body.each_item(1, |body, index| {
                     let item = body.item(body.read(1), index, ty);
@@ -478,6 +501,71 @@ impl Mono<'_> {
             }
             _ => unreachable!("the checker allows `Order` on no other compound value"),
         }
+        stmts
+    }
+
+    /// Lengths and tags go in first, so that no two different values read
+    /// the same. Only equal maps and sets may differ in order, so their entries
+    /// add up, as CPython's `frozenset` joins its entries with XOR.
+    fn hash_body(&mut self, body: &mut Body, ty: Ty) -> Vec<Stmt> {
+        const X: Local = 0;
+        const STATE: Local = 1;
+        let span = body.span;
+        if let Some((slot, result)) = self.method_and_result("hash", ty, span) {
+            let kind = ExprKind::Call(slot, &[], vec![body.read(X)]);
+            let written = body.expr(kind, result);
+            return vec![Stmt::Return(self.hashed(body.read(STATE), written, span))];
+        }
+        let out = body.new_local(Ty::Int);
+        let start = |body: &Body, value: Expr| {
+            Stmt::Set(out, body.hash(HashOp::Int, body.read(STATE), value))
+        };
+        let mut stmts = Vec::new();
+        match ty {
+            Ty::List(item) => {
+                stmts.push(start(body, body.len(body.read(X))));
+                stmts.push(body.each_item(X, |body, index| {
+                    let value = body.item(body.read(X), index, *item);
+                    vec![Stmt::Set(out, self.hashed(body.read(out), value, span))]
+                }));
+            }
+            Ty::Set(key) | Ty::Map(key, _) => {
+                let sum = body.new_local(Ty::Int);
+                stmts.push(Stmt::Set(sum, body.int(0)));
+                stmts.extend(body.each_key(X, *key, |body, held| {
+                    let mut entry = self.hashed(body.int(0), body.read(held), span);
+                    if let Ty::Map(_, value) = ty {
+                        let kind = ExprKind::MapGet(boxed(body.read(X)), boxed(body.read(held)));
+                        entry = self.hashed(entry, body.expr(kind, *value), span);
+                    }
+                    vec![Stmt::Set(sum, body.hash(HashOp::Sum, body.read(sum), entry))]
+                }));
+                stmts.push(start(body, body.read(sum)));
+            }
+            Ty::Union(members) => {
+                stmts.push(start(body, body.tag(X)));
+                for &member in members {
+                    let id = self.types.id(member);
+                    let value = self.hashed(body.read(out), body.slot(X, 0, member), span);
+                    stmts.push(body.return_if(body.holds(X, id), value));
+                }
+            }
+            Ty::Data(..) => {
+                stmts.push(start(body, body.tag(X)));
+                for variant in 0..self.variant_count(ty) {
+                    let mut then = Vec::new();
+                    for (_, field, slot) in self.fields_of(ty, variant) {
+                        let value = self.hashed(body.read(out), body.slot(X, slot, field), span);
+                        then.push(Stmt::Set(out, value));
+                    }
+                    then.push(Stmt::Return(body.read(out)));
+                    let here = body.test(BinaryOp::Eq, body.tag(X), body.int(variant as i64));
+                    stmts.push(Stmt::If { branches: vec![(here, then)], otherwise: Vec::new() });
+                }
+            }
+            _ => unreachable!("only compound values derive `Hash`"),
+        }
+        stmts.push(Stmt::Return(body.read(out)));
         stmts
     }
 

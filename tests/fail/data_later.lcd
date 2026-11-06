@@ -1,8 +1,2 @@
 public type Open
     a: int
-
-type Plain
-    a: int
-
-let p = Plain(a: 1)
-let m: map[Plain, int] = {}

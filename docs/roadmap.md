@@ -43,7 +43,8 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] Generics with monomorphization, list slices
 - [x] Derived `Show`, `Equal`, and `Order`, showing and comparing collections
 - [x] Traits, bounds, hand-written overrides, `self` and dot calls
-- [ ] `Hash` on compound keys, `any` values
+- [x] `Hash` on compound keys
+- [ ] `any` values
 - [ ] Sized numbers, wrapping math tasks, nested tasks, lambdas, task values
 - [ ] Parameter modes, exclusivity checks, `for change` over lists
 - [x] Naive reference counting, leak-checking debug runtime

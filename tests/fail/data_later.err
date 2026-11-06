@@ -1,4 +1,2 @@
 data_later.lcd:1:1: error E0901: `public` parses, but cannot run yet
   note: see docs/roadmap.md for the milestone that adds it
-data_later.lcd:8:8: error E0901: `Plain` as a key parses, but cannot run yet
-  note: see docs/roadmap.md for the milestone that adds it

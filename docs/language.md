@@ -134,7 +134,7 @@ seen.add(3)
 seen.remove(1)
 ```
 
-An index is an `int` from 0, and a negative index traps. A map or set has `int`, `bool`, `byte`, or `text` keys. A `float` cannot be a key, because NaN does not equal itself.
+An index is an `int` from 0, and a negative index traps. A key of a map or set needs the `Hash` trait: `int`, `bool`, `byte`, `text`, or a value made of those. A `float` cannot be a key, nor can a value that holds one, because NaN does not equal itself. A key is a value like any other, so changing the variable it came from never changes the key.
 
 All three have `.len()` and `.is_empty()`. `x in items` and `x not in items` test a list, or the keys of a map or set. A list test is linear, and compares with `==`, so it finds no NaN.
 
@@ -161,7 +161,7 @@ while top is int
 
 `print` shows a list as `[1, 2]`, a map as `{"a": 1}`, and a set as `set([1, 2])`. Text inside a value has quotes and escapes, so what prints reads back as a literal. `==` and `!=` compare two values of one type. Lists compare in order. Maps and sets compare what they hold, whatever its order. `<` and the like work on a list if they work on its elements: the first difference decides, and a shorter list comes first.
 
-Planned: tasks that take a lambda such as `.map`. Collections as keys wait for `Hash`.
+Planned: tasks that take a lambda such as `.map`.
 
 ## Control flow
 
@@ -256,7 +256,7 @@ type UserId = int
 
 Types may refer to each other in any order. A type that always holds another value of itself has no finite value, and is error E0315. So `next: Node` needs a list, a union such as `Node?`, or a `choice` with a variant that ends the chain.
 
-`print` shows a value as `User(name: "Ada", age: 36)`, in the order the fields are written. `==` and `!=` compare every field. `<` and the like compare fields in that order, and need every field to have an order. A value as a key waits for `Hash`.
+`print` shows a value as `User(name: "Ada", age: 36)`, in the order the fields are written. `==` and `!=` compare every field. `<` and the like compare fields in that order, and need every field to have an order.
 
 ## Methods
 
@@ -363,7 +363,7 @@ while node is not none
 
 Only a local name or parameter narrows. A field or a call may not hold the same value when read again, so `if a.b is not none` does not narrow `a.b`. Write `let b = a.b`, then test `b`. The same goes for a top-level `let` read in a task.
 
-A union shows what it holds, and text in it has no quotes unless the union is inside another value. `==` on two values of one union type is true if they hold equal values of one type. `x == 1` on an `int?` is an error, since the sides differ in type: test it first. A union has no order. A union as a key waits for `Hash`.
+A union shows what it holds, and text in it has no quotes unless the union is inside another value. `==` on two values of one union type is true if they hold equal values of one type. `x == 1` on an `int?` is an error, since the sides differ in type: test it first. A union has no order.
 
 ## Errors
 
@@ -449,11 +449,11 @@ Bounds use static dispatch. Planned: `any Describe` is a boxed value with dynami
 | `Show` | `print` and interpolation | every type |
 | `Equal` | `==`, `!=`, `in` on a list | every type |
 | `Order` | `<`, `<=`, `>`, `>=` | numbers, `text`, and lists and `type` or `choice` values made of those |
-| `Hash` | be a key of a map or set | `int`, `bool`, `byte`, `text` |
+| `Hash` | be a key of a map or set | `int`, `bool`, `byte`, `text`, and lists, maps, sets, unions, and `type` or `choice` values made of those. A `none` counts only inside such a value |
 | `Add`, `Sub`, `Mul` | `+`, `-`, `*` | `int`, `float` |
 | `Div` | `/`, which gives a `T` | `float`. An `int` does not have it, since `/` on `int` gives `float` |
 
-The compiler derives `Equal`, `Hash`, `Order`, `Show`, `Copy`, and `Json` for a type when all its fields support them. Writing the task by hand overrides the derived version, and works inside larger values too. There are no macros. So far `Equal`, `Order`, and `Show` are derived, by the rules in "Collections", "Types", and "Choices". In a derived order a NaN compares as neither less nor more, so it counts as a tie. Planned: `Hash` on compound values, `Copy`, and `Json`.
+The compiler derives `Equal`, `Hash`, `Order`, `Show`, `Copy`, and `Json` for a type when all its fields support them. Writing the task by hand overrides the derived version, and works inside larger values too. There are no macros. So far `Equal`, `Hash`, `Order`, and `Show` are derived, by the rules in "Collections", "Types", and "Choices". In a derived order a NaN compares as neither less nor more, so it counts as a tie. Planned: `Copy` and `Json`.
 
 ```lucid
 task show(self: Money) -> text
@@ -467,9 +467,14 @@ task compare(self: Money, other: Money) -> int      # negative, zero, or positiv
 
 task add(self: Money, other: Money) -> Money        # also sub, mul, and div
     return Money(cents: self.cents + other.cents)
+
+task hash(self: Money) -> int                       # any result with `Hash`
+    return self.cents
 ```
 
 These names replace derived tasks or give an operator, so each must have this form, on a `type`, `choice`, or collection. Any other form is error E0323.
+
+`hash` gives what stands for the value in a key. It may be any type with `Hash`, and it often names the fields that `equal` reads. Equal values must give equal results, or a key may not be found again. A breach is a bug in the program, and it stays memory safe. A type with a hand-written `equal` has no `Hash` unless it also has a hand-written `hash`, since a derived hash would not match it.
 
 Operators are defined by the traits `Add`, `Sub`, `Mul`, `Div`, `Equal`, and `Order`. No other operators can be overloaded, and no new operators can be defined.
 

@@ -8,7 +8,7 @@
 
 use crate::derive::Derived;
 use crate::diag::{Diagnostic, Span};
-use crate::mir::{Expr, ExprKind, Program, Shape, Stmt, Task, Ty, Types, Update, Visit};
+use crate::mir::{Expr, ExprKind, KeyTasks, Program, Shape, Stmt, Task, Ty, Types, Update, Visit};
 use std::collections::HashMap;
 
 /// Generic instances and derived tasks past this stop as E0903. See also
@@ -103,12 +103,18 @@ impl Mono<'_> {
     /// The task with a `self` parameter that takes this type, if any. The
     /// checker keeps receivers from overlapping, so one fits at most.
     pub fn method(&mut self, name: &str, ty: Ty, span: Span) -> Option<usize> {
+        self.method_and_result(name, ty, span).map(|(slot, _)| slot)
+    }
+
+    /// Like `method`, with the type that the task returns.
+    pub fn method_and_result(&mut self, name: &str, ty: Ty, span: Span) -> Option<(usize, Ty)> {
         let ids = self.methods.get(name)?;
         for &id in ids {
             let task = &self.source[id];
             if let Some(known) = self.types.fit(task.locals[0], ty, task.type_params) {
                 let args: Vec<Ty> = known.into_iter().collect::<Option<_>>()?;
-                return Some(self.instance(id, args.leak(), span));
+                let result = self.types.subst(task.returns, &args);
+                return Some((self.instance(id, args.leak(), span), result));
             }
         }
         None
@@ -124,6 +130,18 @@ impl Mono<'_> {
         self.derived.insert((kind, ty), slot);
         self.queue.push((slot, Job::Derived(kind, ty, span)));
         slot
+    }
+
+    /// The tasks that a map with this key keeps.
+    fn key_tasks(&mut self, key: Ty, span: Span) -> KeyTasks {
+        if key.is_key() {
+            return None;
+        }
+        let equal = match self.method("equal", key, span) {
+            Some(slot) => slot,
+            None => self.derived(Derived::Equal, key, span),
+        };
+        Some((self.derived(Derived::Hash, key, span), equal))
     }
 
     /// Reports E0903 for a type too large to hash. Slot 0 then stands in, and
@@ -291,6 +309,14 @@ impl Visit for Mono<'_> {
             ExprKind::Method(name, values) => {
                 let slot = self.method(name, values[0].ty, span);
                 ExprKind::Call(slot.expect("a bound was checked at the call"), &[], values)
+            }
+            ExprKind::MapOf(entries, _) => {
+                let Ty::Map(key, _) = ty else { unreachable!("it has a map type") };
+                ExprKind::MapOf(entries, self.key_tasks(*key, span))
+            }
+            ExprKind::SetOf(list, _) => {
+                let Ty::Set(key) = ty else { unreachable!("it has a set type") };
+                ExprKind::SetOf(list, self.key_tasks(*key, span))
             }
             ExprKind::ListHas(item, list) if !item.ty.is_key() => {
                 *value = self.list_has(*item, *list, span);

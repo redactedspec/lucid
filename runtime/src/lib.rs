@@ -48,13 +48,29 @@ pub struct List {
 /// A counted map, or a set, whose values are unused. `cap` entries follow this
 /// header in insertion order, then a table of `2 * cap` indexes, the layout of
 /// Python's compact dict. `len` counts live entries, and `used` counts those
-/// and the removed ones. `cap` is a power of two.
+/// and the removed ones. `cap` is a power of two. `keys` is set if a key is a
+/// value made of other values.
 #[repr(C)]
 pub struct Map {
     head: Head,
     len: usize,
     used: usize,
     cap: usize,
+    keys: Option<KeyTasks>,
+}
+
+/// A compiled task that hashes a key, given a starting state.
+pub type HashTask = extern "C" fn(i64, i64) -> i64;
+
+/// A compiled task that gives 1 if two keys are equal, and otherwise 0.
+pub type EqualTask = extern "C" fn(i64, i64) -> u8;
+
+/// What the runtime cannot do alone for a compound key. Keys are borrowed, and
+/// these tasks only read them, so they may run during a search of a map.
+#[derive(Clone, Copy)]
+struct KeyTasks {
+    hash: HashTask,
+    equal: EqualTask,
 }
 
 /// A counted `type` or `choice` value. `tag` is its variant. `len` 8-byte slots
@@ -759,30 +775,63 @@ fn hasher() -> &'static RandomState {
     HASHER.get_or_init(RandomState::new)
 }
 
+/// Adds an `int`-sized value to a hash in progress. A compound key is a chain
+/// of these, so all of it depends on the keys of the process.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_hash_int(state: i64, value: i64) -> i64 {
+    hasher().hash_one((state, value)) as i64
+}
+
+/// Adds a text to a hash in progress.
+///
 /// # Safety
 ///
-/// If `counted` is true, `key` must hold a live text.
-unsafe fn hash_key(counted: bool, key: i64) -> u64 {
-    let hash = if counted {
-        // SAFETY: the caller guarantees this.
-        hasher().hash_one(unsafe { bytes(key as *const Text) })
-    } else {
-        hasher().hash_one(key)
+/// `text` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_hash_text(state: i64, text: *const Text) -> i64 {
+    // SAFETY: the caller guarantees this.
+    hasher().hash_one((state, unsafe { bytes(text) })) as i64
+}
+
+/// Joins the hashes of a map's or set's entries. Equal maps may differ in
+/// order, so this must not depend on it.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_hash_sum(a: i64, b: i64) -> i64 {
+    a.wrapping_add(b)
+}
+
+/// # Safety
+///
+/// `map` must point to a live map, and `key` must fit its keys.
+unsafe fn hash_key(map: *const Map, key: i64) -> u64 {
+    // SAFETY: the caller guarantees this.
+    let hash = unsafe {
+        match (*map).keys {
+            Some(tasks) => (tasks.hash)(key, 0) as u64,
+            None if key_counted(map) => hasher().hash_one(bytes(key as *const Text)),
+            None => hasher().hash_one(key),
+        }
     };
     hash | LIVE_HASH
 }
 
 /// # Safety
 ///
-/// If `counted` is true, `a` and `b` must hold live texts.
+/// If `counted` is true, `a` and `b` must hold live texts. A compound key
+/// never reaches this.
 unsafe fn same_key(counted: bool, a: i64, b: i64) -> bool {
     // SAFETY: the caller guarantees this.
     a == b || (counted && unsafe { bytes(a as *const Text) == bytes(b as *const Text) })
 }
 
-fn map_alloc(cap: usize, key_counted: bool, value_counted: bool) -> *mut Map {
+fn map_alloc(
+    cap: usize,
+    key_counted: bool,
+    value_counted: bool,
+    keys: Option<KeyTasks>,
+) -> *mut Map {
     let head = Head { count: 1, kind: Kind::Map { key_counted, value_counted } };
-    let map = object(map_size(cap), Map { head, len: 0, used: 0, cap });
+    let map = object(map_size(cap), Map { head, len: 0, used: 0, cap, keys });
     // SAFETY: `object` made room for the table, and zero is `TABLE_EMPTY`.
     unsafe { table_start(map).write_bytes(0, 2 * cap) };
     map
@@ -830,23 +879,33 @@ fn value_counted(map: *const Map) -> bool {
 /// Finds a key's table position. The probe always ends at an empty position:
 /// the table has `2 * cap` positions, and at most `cap` are ever filled.
 ///
+/// This holds no reference into the map across a key task, since a key may
+/// hold this same map, and the task then reads it too. A task that breaks the
+/// rules of `equal` finds the wrong entry, and nothing worse.
+///
 /// # Safety
 ///
 /// `map` must point to a live map, and `key` must fit its keys.
 unsafe fn find(map: *mut Map, hash: u64, key: i64) -> Option<usize> {
     // SAFETY: the caller guarantees this, and a table index is below `used`.
     unsafe {
-        let (table, entries) = (table(map), entries(map));
+        check_live(map.cast());
+        let (table, first) = (table_start(map), map.add(1).cast::<Entry>());
         let counted = key_counted(map);
-        let mask = table.len() - 1;
+        let mask = 2 * (*map).cap - 1;
         let mut at = hash as usize & mask;
         loop {
-            match table[at] {
+            match *table.add(at) {
                 TABLE_EMPTY => return None,
                 TABLE_REMOVED => {}
                 index => {
-                    let entry = &entries[index - 1];
-                    if entry.hash == hash && same_key(counted, entry.key, key) {
+                    let entry = *first.add(index - 1);
+                    let same = entry.hash == hash
+                        && match (*map).keys {
+                            Some(tasks) => (tasks.equal)(entry.key, key) != 0,
+                            None => same_key(counted, entry.key, key),
+                        };
+                    if same {
                         return Some(at);
                     }
                 }
@@ -899,7 +958,7 @@ unsafe fn unique_map(map: *mut Map) -> *mut Map {
             (*map).cap
         };
         let (keys, values) = (key_counted(map), value_counted(map));
-        let copy = map_alloc(cap, keys, values);
+        let copy = map_alloc(cap, keys, values, (*map).keys);
         for entry in entries(map).iter().filter(|entry| entry.hash != REMOVED) {
             append(copy, *entry);
             if shared && keys {
@@ -918,11 +977,17 @@ unsafe fn unique_map(map: *mut Map) -> *mut Map {
     }
 }
 
-/// An empty map, or set. The flags say which slots hold counted values, and
-/// slots of a counted key hold text.
+/// An empty map, or set. The flags say which slots hold counted values. A
+/// compound key needs both tasks. Any other counted key is a text.
 #[unsafe(no_mangle)]
-pub extern "C" fn lucid_map_new(key_counted: bool, value_counted: bool) -> *mut Map {
-    map_alloc(SMALLEST_MAP, key_counted, value_counted)
+pub extern "C" fn lucid_map_new(
+    key_counted: bool,
+    value_counted: bool,
+    hash: Option<HashTask>,
+    equal: Option<EqualTask>,
+) -> *mut Map {
+    let keys = hash.zip(equal).map(|(hash, equal)| KeyTasks { hash, equal });
+    map_alloc(SMALLEST_MAP, key_counted, value_counted, keys)
 }
 
 /// Sets a key's value, and returns the map that replaces `map`. A key that is
@@ -942,7 +1007,7 @@ pub unsafe extern "C" fn lucid_map_set(map: *mut Map, key: i64, value: i64) -> *
             retain_slot(value);
         }
         let map = unique_map(map);
-        let hash = hash_key(keys, key);
+        let hash = hash_key(map, key);
         match find(map, hash, key) {
             Some(at) => {
                 let entry = &mut entries(map)[table(map)[at] - 1];
@@ -974,7 +1039,7 @@ pub unsafe extern "C" fn lucid_map_remove(map: *mut Map, key: i64) -> *mut Map {
     // the position is found again after it.
     unsafe {
         let (keys, values) = (key_counted(map), value_counted(map));
-        let hash = hash_key(keys, key);
+        let hash = hash_key(map, key);
         if find(map, hash, key).is_none() {
             return map;
         }
@@ -1006,7 +1071,7 @@ pub unsafe extern "C" fn lucid_map_remove(map: *mut Map, key: i64) -> *mut Map {
 pub unsafe extern "C" fn lucid_map_find(map: *mut Map, key: i64) -> *const i64 {
     // SAFETY: the caller guarantees this. The address lasts as long as the map.
     unsafe {
-        let hash = hash_key(key_counted(map), key);
+        let hash = hash_key(map, key);
         match find(map, hash, key) {
             Some(at) => &entries(map)[table(map)[at] - 1].value,
             None => std::ptr::null(),
@@ -1042,12 +1107,17 @@ pub unsafe extern "C" fn lucid_map_key(map: *mut Map, position: i64) -> i64 {
 ///
 /// # Safety
 ///
-/// `list` must point to a live list, of values that can be keys.
+/// `list` must point to a live list, of values that can be keys. See
+/// `lucid_map_new` for the tasks.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn lucid_set_from(list: *mut List) -> *mut Map {
+pub unsafe extern "C" fn lucid_set_from(
+    list: *mut List,
+    hash: Option<HashTask>,
+    equal: Option<EqualTask>,
+) -> *mut Map {
     // SAFETY: the caller guarantees a live list, and the new map has one owner.
     unsafe {
-        let mut map = lucid_map_new(is_counted(list), false);
+        let mut map = lucid_map_new(is_counted(list), false, hash, equal);
         for &slot in slots(list).iter() {
             map = lucid_map_set(map, slot, 0);
         }
@@ -1248,7 +1318,7 @@ mod tests {
         let _serial = serial();
         // SAFETY: each pointer is live for as long as this test holds a count.
         unsafe {
-            let mut map = lucid_map_new(false, false);
+            let mut map = lucid_map_new(false, false, None, None);
             for key in 0..1000 {
                 map = lucid_map_set(map, key, key * 2);
             }
@@ -1280,7 +1350,7 @@ mod tests {
         // SAFETY: each pointer is live for as long as this test holds a count.
         unsafe {
             let (a, b) = (text_from(b"key"), text_from(b"key"));
-            let map = lucid_map_set(lucid_map_new(true, false), a as i64, 1);
+            let map = lucid_map_set(lucid_map_new(true, false, None, None), a as i64, 1);
             let map = lucid_map_set(map, b as i64, 2);
             assert_eq!((*map).len, 1);
             assert_eq!(*lucid_map_find(map, b as i64), 2);

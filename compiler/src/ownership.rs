@@ -36,8 +36,8 @@ impl Visit for Owners<'_> {
                 | ExprKind::TextCharAt(..)
                 | ExprKind::TextBytes(_)
                 | ExprKind::ListOf(_)
-                | ExprKind::MapOf(_)
-                | ExprKind::SetOf(_)
+                | ExprKind::MapOf(..)
+                | ExprKind::SetOf(..)
                 | ExprKind::New { .. }
         );
         if new && value.ty.is_counted() {

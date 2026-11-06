@@ -1,0 +1,50 @@
+# What has no `Hash`.
+let a: set[list[float]] = set([])
+let b: map[float?, int] = {}
+
+type Reading
+    value: float
+
+let c: set[Reading] = set([])
+
+type Money
+    cents: int
+
+task equal(self: Money, other: Money) -> bool
+    return self.cents == other.cents
+
+let d: set[Money] = set([])
+let e: set[list[Money]] = set([])
+
+type Late
+    keys: set[Reading]
+
+type Wrong
+    a: int
+
+task hash(self: Wrong) -> float
+    return 1.0
+
+let f: set[Wrong] = set([])
+
+type Odd
+    a: int
+
+task hash(self: Odd)
+    return
+
+task hash(self: int) -> int
+    return self
+
+type Two
+    a: int
+
+task hash(self: Two, other: Two) -> int
+    return 1
+
+task needs[T: Hash](a: T)
+    return
+
+needs(Reading(value: 1.0))
+print [1.0] in {[1]: 2}
+let g: set[none] = set([])

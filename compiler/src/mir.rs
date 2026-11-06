@@ -145,8 +145,8 @@ impl Ty {
         }
     }
 
-    /// True for a value made of other values, whose comparing and showing are
-    /// derived tasks. Hashing one waits for the derived `Hash`.
+    /// True for a value made of other values, whose comparing, showing, and
+    /// hashing are derived tasks.
     pub fn is_compound(self) -> bool {
         self.is_collection() || matches!(self, Ty::Data(..) | Ty::Union(_))
     }
@@ -409,6 +409,19 @@ pub enum Update {
     ListPop,
 }
 
+/// The tasks that hash a compound key and compare two, which a map keeps and
+/// the runtime calls. `mono.rs` fills this in. Any other key needs none.
+pub type KeyTasks = Option<(usize, usize)>;
+
+#[derive(Clone, Copy)]
+pub enum HashOp {
+    /// An `int`-sized value of any type.
+    Int,
+    Text,
+    /// Another hash, in a way that does not depend on order.
+    Sum,
+}
+
 #[derive(Clone)]
 pub struct Expr {
     pub kind: ExprKind,
@@ -463,9 +476,9 @@ pub enum ExprKind {
     /// unless `0 <= start <= end <= len`.
     ListSlice(Box<Expr>, Box<Expr>, Box<Expr>),
     /// A new map. A later repeat of a key wins.
-    MapOf(Vec<(Expr, Expr)>),
+    MapOf(Vec<(Expr, Expr)>, KeyTasks),
     /// A new set from a list.
-    SetOf(Box<Expr>),
+    SetOf(Box<Expr>, KeyTasks),
     /// The length of a list, map, or set.
     Len(Box<Expr>),
     /// Traps if the index is out of bounds.
@@ -513,6 +526,8 @@ pub enum ExprKind {
     /// A task from a trait bound. `mono.rs` makes this a `Call` to the task
     /// with this name for the type of the first argument.
     Method(&'static str, Vec<Expr>),
+    /// Adds the second value to the `int` hash state in the first.
+    Hash(HashOp, Box<Expr>, Box<Expr>),
     /// Runs these statements, which only `Set` hidden locals, then gives a value.
     Seq(Vec<Stmt>, Box<Expr>),
     /// Evaluates a new value, and stores its count in this local, whose old
@@ -574,7 +589,7 @@ pub trait Visit {
             ExprKind::New { fields, .. } => {
                 fields.iter_mut().for_each(|(_, value)| self.expr(value));
             }
-            ExprKind::MapOf(entries) => {
+            ExprKind::MapOf(entries, _) => {
                 for (key, value) in entries {
                     self.expr(key);
                     self.expr(value);
@@ -590,7 +605,7 @@ pub trait Visit {
             | ExprKind::TextIsEmpty(inner)
             | ExprKind::TextByteLen(inner)
             | ExprKind::TextBytes(inner)
-            | ExprKind::SetOf(inner)
+            | ExprKind::SetOf(inner, _)
             | ExprKind::Field(inner, _)
             | ExprKind::Tag(inner)
             | ExprKind::TagIn(inner, _)
@@ -601,6 +616,7 @@ pub trait Visit {
             | ExprKind::Temp(_, inner)
             | ExprKind::Len(inner) => self.expr(inner),
             ExprKind::Binary(_, left, right)
+            | ExprKind::Hash(_, left, right)
             | ExprKind::TextCharAt(left, right)
             | ExprKind::ListGet(left, right)
             | ExprKind::ListHas(left, right)
