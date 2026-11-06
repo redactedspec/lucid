@@ -92,8 +92,8 @@ struct KeyTasks {
 pub struct Record {
     head: Head,
     tag: usize,
-    len: usize,
-    counted: usize,
+    len: u32,
+    counted: u32,
 }
 
 #[repr(C)]
@@ -327,25 +327,20 @@ pub unsafe extern "C" fn lucid_text_join(parts: *const *const Text, count: usize
     joined
 }
 
-/// Adds texts to the end of `parts[0]`, whose count the caller gives. A text
-/// that only this caller holds grows in place, and doubles when it runs out
-/// of room, so a loop of appends is linear.
+/// Adds bytes to the end of `first`, whose count the caller gives. A text that
+/// only this caller holds grows in place, and doubles when it runs out of
+/// room, so a loop of appends is linear.
 ///
 /// # Safety
 ///
-/// `parts` must point to `count` pointers to live texts, with at least one.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn lucid_text_append(parts: *const *mut Text, count: usize) -> *mut Text {
-    // SAFETY: the caller guarantees the range, and live texts.
+/// `first` must point to a live text. `part` must not overlap a text that this
+/// caller alone holds, which `first` then is.
+unsafe fn add_bytes(first: *mut Text, part: &[u8]) -> *mut Text {
+    // SAFETY: the caller guarantees a live text, and each copy fits the room.
     unsafe {
-        let parts = std::slice::from_raw_parts(parts, count);
-        let first = parts[0];
         let start = (*first).len;
-        let rest = parts[1..].iter().map(|&text| bytes(text));
-        let len = rest.clone().fold(start, |len, part| len.saturating_add(part.len()));
-        let unique = (*first).head.count == 1;
-        let text = if unique && len <= (*first).cap {
-            (*first).head.kind = Kind::Text { ascii: Ascii::Unknown };
+        let len = start.saturating_add(part.len());
+        let text = if (*first).head.count == 1 && len <= (*first).cap {
             first
         } else {
             let grown = text_with_room(len, len.saturating_mul(2));
@@ -354,14 +349,47 @@ pub unsafe extern "C" fn lucid_text_append(parts: *const *mut Text, count: usize
             lucid_release(first.cast());
             grown
         };
-        let mut next = text.add(1).cast::<u8>().add(start);
-        for part in rest {
-            std::ptr::copy_nonoverlapping(part.as_ptr(), next, part.len());
-            next = next.add(part.len());
-        }
+        let end = text.add(1).cast::<u8>().add(start);
+        std::ptr::copy_nonoverlapping(part.as_ptr(), end, part.len());
         (*text).len = len;
+        (*text).head.kind = Kind::Text { ascii: Ascii::Unknown };
         text
     }
+}
+
+/// Adds a text to the end of `first`, whose count the caller gives. The two
+/// may be one value, since it then has two counts, which forces a copy.
+///
+/// # Safety
+///
+/// `first` and `part` must point to live texts.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_append(first: *mut Text, part: *const Text) -> *mut Text {
+    // SAFETY: the caller guarantees live texts.
+    unsafe { add_bytes(first, bytes(part)) }
+}
+
+/// Adds an `int` in decimal to the end of `first`, whose count the caller gives.
+///
+/// # Safety
+///
+/// `first` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_append_int(first: *mut Text, value: i64) -> *mut Text {
+    let mut digits = [0; 20];
+    let mut at = digits.len();
+    let mut rest = value.unsigned_abs();
+    while rest > 0 || at == digits.len() {
+        at -= 1;
+        digits[at] = b'0' + (rest % 10) as u8;
+        rest /= 10;
+    }
+    if value < 0 {
+        at -= 1;
+        digits[at] = b'-';
+    }
+    // SAFETY: the caller guarantees a live text, and `digits` is not in one.
+    unsafe { add_bytes(first, &digits[at..]) }
 }
 
 /// # Safety
@@ -421,10 +449,10 @@ pub unsafe extern "C" fn lucid_release(value: *mut Head) {
                 }
                 Kind::Record => {
                     let record = value.cast::<Record>();
-                    for &slot in &record_slots(record)[..(*record).counted] {
+                    for &slot in &record_slots(record)[..(*record).counted as usize] {
                         drop_count(slot as *mut Head, &mut pending);
                     }
-                    free(value, record_size((*record).len));
+                    free(value, record_size((*record).len as usize));
                 }
             }
         }
@@ -880,9 +908,9 @@ pub unsafe extern "C" fn lucid_list_slice(list: *mut List, start: i64, end: i64)
 /// A record with a count of one. Compiled code fills all `len` slots at once,
 /// and retains those below `counted`, before anything can read them.
 #[unsafe(no_mangle)]
-pub extern "C" fn lucid_record_new(tag: usize, len: usize, counted: usize) -> *mut Record {
+pub extern "C" fn lucid_record_new(tag: usize, len: u32, counted: u32) -> *mut Record {
     let head = Head { count: 1, kind: Kind::Record };
-    object(record_size(len), Record { head, tag, len, counted })
+    object(record_size(len as usize), Record { head, tag, len, counted })
 }
 
 /// # Safety
@@ -893,7 +921,7 @@ unsafe fn record_slots<'a>(record: *mut Record) -> &'a mut [i64] {
     // SAFETY: the caller guarantees a live record, whose slots follow the header.
     unsafe {
         check_live(record.cast());
-        std::slice::from_raw_parts_mut(record.add(1).cast(), (*record).len)
+        std::slice::from_raw_parts_mut(record.add(1).cast(), (*record).len as usize)
     }
 }
 
@@ -916,7 +944,7 @@ pub unsafe extern "C" fn lucid_record_set(
     unsafe {
         let record = lucid_record_unique(record);
         let old = std::mem::replace(&mut record_slots(record)[slot], value);
-        if slot < (*record).counted {
+        if slot < (*record).counted as usize {
             release_slot(old);
         }
         record
@@ -938,8 +966,8 @@ pub unsafe extern "C" fn lucid_record_unique(record: *mut Record) -> *mut Record
         let (tag, len, counted) = ((*record).tag, (*record).len, (*record).counted);
         let copy = lucid_record_new(tag, len, counted);
         let old = record_slots(record);
-        std::ptr::copy_nonoverlapping(old.as_ptr(), copy.add(1).cast(), len);
-        old[..counted].iter().for_each(|&held| retain_slot(held));
+        std::ptr::copy_nonoverlapping(old.as_ptr(), copy.add(1).cast(), len as usize);
+        old[..counted as usize].iter().for_each(|&held| retain_slot(held));
         (*record).head.count -= 1;
         copy
     }

@@ -78,3 +78,13 @@ var one = lights[0]
 one = Green(seconds: 3)
 print one
 print lights
+
+# Numbers added in place, at the edges of their range.
+var numbers = "n"
+for value in [0, 7, -7, 10, 9223372036854775807, -9223372036854775808]
+    numbers = "{numbers} {value}"
+print numbers
+var mixed = "é"
+mixed = "{mixed}{1}{"é"}{2.5}{true}{mixed}"
+print mixed
+print mixed.len()

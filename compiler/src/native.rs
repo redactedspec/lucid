@@ -93,6 +93,7 @@ struct Runtime {
     text_new: FuncId,
     text_join: FuncId,
     text_append: FuncId,
+    text_append_int: FuncId,
     text_print: FuncId,
     text_compare: FuncId,
     text_len: FuncId,
@@ -170,6 +171,7 @@ fn compile(
     builder.symbol("lucid_text_new", lucid_rt::lucid_text_new as *const u8);
     builder.symbol("lucid_text_join", lucid_rt::lucid_text_join as *const u8);
     builder.symbol("lucid_text_append", lucid_rt::lucid_text_append as *const u8);
+    builder.symbol("lucid_text_append_int", lucid_rt::lucid_text_append_int as *const u8);
     builder.symbol("lucid_text_print", lucid_rt::lucid_text_print as *const u8);
     builder.symbol("lucid_text_compare", lucid_rt::lucid_text_compare as *const u8);
     builder.symbol("lucid_text_len", lucid_rt::lucid_text_len as *const u8);
@@ -220,6 +222,7 @@ fn compile(
     let (int, float) = ([AbiParam::new(types::I64)], [AbiParam::new(types::F64)]);
     let (byte, value) = ([AbiParam::new(types::I8).uext()], [AbiParam::new(pointer)]);
     let small_float = [AbiParam::new(types::F32)];
+    let small = [AbiParam::new(types::I32)];
     let two = [value[0], value[0]];
     let with_two = [value[0], int[0], int[0]];
     let runtime = Runtime {
@@ -234,7 +237,8 @@ fn compile(
         release: import("lucid_release", &value, &[]),
         text_new: import("lucid_text_new", &text, &value),
         text_join: import("lucid_text_join", &text, &value),
-        text_append: import("lucid_text_append", &text, &value),
+        text_append: import("lucid_text_append", &two, &value),
+        text_append_int: import("lucid_text_append_int", &[value[0], int[0]], &value),
         text_print: import("lucid_text_print", &value, &[]),
         text_compare: import("lucid_text_compare", &two, &int),
         text_len: import("lucid_text_len", &value, &int),
@@ -265,7 +269,7 @@ fn compile(
         hash_int: import("lucid_hash_int", &[int[0], int[0]], &int),
         hash_text: import("lucid_hash_text", &[int[0], value[0]], &int),
         hash_sum: import("lucid_hash_sum", &[int[0], int[0]], &int),
-        record_new: import("lucid_record_new", &[int[0], int[0], int[0]], &value),
+        record_new: import("lucid_record_new", &[int[0], small[0], small[0]], &value),
         record_set: import("lucid_record_set", &with_two, &value),
         int_text: import("lucid_int_text", &int, &value),
         uint_text: import("lucid_uint_text", &int, &value),
@@ -883,7 +887,7 @@ impl Lower<'_, '_> {
         let mut test = self.is_unique(record);
         if emptied {
             let flags = MemFlagsData::trusted();
-            let held = self.body.ins().load(types::I64, flags, record, lucid_rt::COUNTED_OFFSET);
+            let held = self.body.ins().uload32(flags, record, lucid_rt::COUNTED_OFFSET);
             let holds = self.body.ins().icmp_imm_s(IntCC::SignedGreaterThan, held, slot);
             test = self.body.ins().band(test, holds);
         }
@@ -993,8 +997,8 @@ impl Lower<'_, '_> {
     fn new_record(&mut self, tag: Value, counted: usize, fields: &[(usize, Expr)]) -> Value {
         let values: Vec<(usize, Value)> =
             fields.iter().map(|(slot, value)| (*slot, self.slot(value))).collect();
-        let len = self.body.ins().iconst(types::I64, fields.len() as i64);
-        let held = self.body.ins().iconst(types::I64, counted as i64);
+        let len = self.body.ins().iconst(types::I32, fields.len() as i64);
+        let held = self.body.ins().iconst(types::I32, counted as i64);
         let record = self.call(self.runtime.record_new, &[tag, len, held]);
         let record = record.expect("it returns a record");
         for (slot, value) in values {
@@ -1336,8 +1340,37 @@ impl Lower<'_, '_> {
         text.expect("it returns a text")
     }
 
+    /// Adds to a text that this statement moved, one part at a time, so an
+    /// `int` needs no text of its own.
+    fn append(&mut self, parts: &[Expr]) -> Value {
+        let mut text = self.expr(&parts[0]);
+        for part in &parts[1..] {
+            let added = match &part.kind {
+                ExprKind::Temp(_, inner) => match &inner.kind {
+                    ExprKind::ToText(number) if number.ty == Ty::Int => {
+                        let number = self.expr(number);
+                        self.call(self.runtime.text_append_int, &[text, number])
+                    }
+                    _ => {
+                        let part = self.expr(part);
+                        self.call(self.runtime.text_append, &[text, part])
+                    }
+                },
+                _ => {
+                    let part = self.expr(part);
+                    self.call(self.runtime.text_append, &[text, part])
+                }
+            };
+            text = added.expect("it returns a text");
+        }
+        text
+    }
+
     /// The parts go in a stack slot, which E0902 counts as part of the frame.
     fn join(&mut self, parts: &[Expr]) -> Value {
+        if matches!(parts[0].kind, ExprKind::Move(_)) {
+            return self.append(parts);
+        }
         let size = u32::try_from(parts.len() * 8).expect("the source fits in memory");
         let slot = StackSlotData::new(StackSlotKind::ExplicitSlot, size, 3);
         let slot = self.body.create_sized_stack_slot(slot);
@@ -1347,11 +1380,7 @@ impl Lower<'_, '_> {
         }
         let address = self.body.ins().stack_addr(self.pointer, slot, 0);
         let count = self.body.ins().iconst(types::I64, parts.len() as i64);
-        let task = match parts[0].kind {
-            ExprKind::Move(_) => self.runtime.text_append,
-            _ => self.runtime.text_join,
-        };
-        self.call(task, &[address, count]).expect("it returns a text")
+        self.call(self.runtime.text_join, &[address, count]).expect("it returns a text")
     }
 
     fn if_value(&mut self, condition: &Expr, then: &Expr, otherwise: &Expr, ty: Type) -> Value {
