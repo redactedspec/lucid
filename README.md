@@ -12,7 +12,7 @@ for person in people
     print greet(person)
 ```
 
-**Status:** early. The lexer and parser cover the full grammar. `lucid run` runs numbers of every size, booleans, text, lists, maps, sets, `type`, `choice`, `match`, unions with narrowing, generics, traits, `any` values, lambdas, nested tasks, task values, `change` and `take` parameters, control flow, and recursive tasks, with type checking, overflow traps, and reference counting. M2 is done, and M3 is in progress. Progress is in [docs/roadmap.md](docs/roadmap.md).
+**Status:** early. The lexer and parser cover the full grammar. `lucid run` runs numbers of every size, booleans, text, lists, maps, sets, `type`, `choice`, `match`, unions with narrowing, generics, traits, `any` values, lambdas, nested tasks, task values, `change` and `take` parameters, control flow, and recursive tasks, with type checking, overflow traps, and reference counting. M3 is done, and M4 is next. Progress is in [docs/roadmap.md](docs/roadmap.md).
 
 ## Docs
 
@@ -26,6 +26,7 @@ Read in this order:
 | [memory-model.md](docs/memory-model.md) | Inferred ownership: the core technical bet |
 | [security.md](docs/security.md) | Safety guarantees and package permissions |
 | [agents.md](docs/agents.md) | What makes Lucid agent-friendly, as checkable rules |
+| [agent-guide.md](docs/agent-guide.md) | Everything that runs today, in one file for agents |
 | [stdlib-and-web.md](docs/stdlib-and-web.md) | Standard library, servers, and browser output |
 | [compiler.md](docs/compiler.md) | Compiler architecture and toolchain |
 | [roadmap.md](docs/roadmap.md) | Milestones with exit criteria |

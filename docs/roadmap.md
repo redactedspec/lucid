@@ -33,7 +33,7 @@ Build a thin end-to-end path first. Depth comes later.
 
 **Result:** both programs run. `fib(40)` measured 2.02x to 2.09x, and the owner accepted this exit in decision 29.
 
-## M3: Data
+## M3: Data (done)
 
 - [x] `text` values, interpolation, comparison, `.len()`, `.is_empty()`
 - [x] `text` slicing, iteration
@@ -49,9 +49,11 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] Nested tasks, lambdas, task values
 - [x] Parameter modes, exclusivity checks, `for change` over lists
 - [x] Naive reference counting, leak-checking debug runtime
-- [ ] Draft `docs/agent-guide.md`, and run a 10-task agent trial
+- [x] Draft `docs/agent-guide.md`, and run a 10-task agent trial
 
 **Exit:** `examples/hello.lcd` runs. Golden tests cover every feature above, with no leaks under the debug runtime. Trial failures are recorded in `docs/research.md`.
+
+**Result:** `examples/hello.lcd` runs, and the golden tests pass with no leaks. The trial passed 10 of 10 tasks on the first attempt, so it had no failures to record. Its limits are in `docs/research.md`.
 
 ## M4: Ownership performance
 

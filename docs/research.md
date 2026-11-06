@@ -13,25 +13,25 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | Decision | Verdict | Level | Action |
 | --- | --- | --- | --- |
 | Reference counting with reuse | Supported, but in functional languages only | Read | Benchmark at M4 |
-| Mutable value semantics | Supported as research, little production proof | Snippet | Prototype at M3 |
+| Mutable value semantics | Supported as research, little production proof. Lucid's form runs through M3 | Read in part | Measure at M4 |
 | Exclusivity checks | Supported, static checks alone are not enough | Snippet | Rule added: no top-level `var` in tasks |
 | Cranelift for speed | Partly supported. 2x target is at risk | Read | Keep LLVM option open |
 | Overflow traps in release | Measured: 1.17x to 1.78x in Lucid, 1.56x to 1.92x in Rust | Read | Keep. Revisit with M4 benchmarks |
 | Permissions | Supported, but first design had holes | Snippet | `security.md` fixed |
-| Agent-friendliness | Weak. Biggest gap | Snippet | Test with agents from M3 |
+| Agent-friendliness | Weak. A small M3 trial passed 10 of 10, with limits stated below | Snippet, trial | Agent benchmark at M5 |
 | Indentation syntax helps agents | No evidence | None | Owner preference. Measure |
 | No `async`, lightweight tasks in browser | Now feasible through JSPI | Snippet | Decide at M7 |
 | ASCII names, text escapes | Judgment call from existing practice | None | Revisit before 1.0 |
-| Division, argument order | Judgment call from existing practice | None | Agent trial at M3 |
-| Type arguments in brackets, read in one pass | Follows Go. Form also proposed for Python | Read, parser Snippet | Agent trial at M3 |
-| Generic body checked once, then substituted in MIR | Follows Rust and Go, not C++ templates | Snippet | Agent trial at M3 |
-| Dot calls by receiver type, bounds required for every use | Judgment call from Rust and Python practice | None | Agent trial at M3 |
-| Union narrowing by control flow | Follows TypeScript and Kotlin, tightened for memory safety | Read | Agent trial at M3 |
-| Text slices, no character type | Judgment call from existing practice | None | Agent trial at M3 |
+| Division, argument order | Judgment call from existing practice | None | Trial met no failure, and repair is untested. Agent benchmark at M5 |
+| Type arguments in brackets, read in one pass | Follows Go. Form also proposed for Python | Read, parser Snippet | Trial met no failure, and repair is untested. Agent benchmark at M5 |
+| Generic body checked once, then substituted in MIR | Follows Rust and Go, not C++ templates | Snippet | Trial met no failure, and repair is untested. Agent benchmark at M5 |
+| Dot calls by receiver type, bounds required for every use | Judgment call from Rust and Python practice | None | Trial met no failure, and repair is untested. Agent benchmark at M5 |
+| Union narrowing by control flow | Follows TypeScript and Kotlin, tightened for memory safety | Read | Trial met no failure, and repair is untested. Agent benchmark at M5 |
+| Text slices, no character type | Judgment call from existing practice | None | Trial met no failure, and repair is untested. Agent benchmark at M5 |
 | Compact ordered map, SipHash with random keys | Supported by Python and Rust practice | Snippet | Benchmark at M4 |
 | A written `equal` removes derived `Hash` | Python and Clippy both guard this rule | Snippet | None |
 | `any` by tag tests over the whole program, not a vtable | Differs from Rust and Swift, and no benchmark yet | Snippet | Measure at M4 |
-| `change` as copy-in copy-out, with static exclusivity | Follows Swift `inout`, and stricter than Rust or Swift inside a statement | Read | Agent trial at M3 |
+| `change` as copy-in copy-out, with static exclusivity | Follows Swift `inout`, and stricter than Rust or Swift inside a statement | Read | Trial met no failure, and repair is untested. Agent benchmark at M5 |
 
 ## Memory
 
@@ -70,7 +70,15 @@ This paper describes implementation strategies for mutable value semantics, with
 
 **For Lucid:** no production language has shipped this exact model, so Lucid carries real research risk.
 
-Sources: [Google Research listing](https://research.google/pubs/mutable-value-semantics/), [preprint](https://daveabrahams.com/wp-content/uploads/2022/02/implementation_strategies_for_mutable_value_semantics-preprint.pdf), [Hylo docs](https://docs.hylo-lang.org).
+Read on 2026-11-06, in part: the paper's text, by extraction, for sections 2, 6, and 7, and Hylo tour chapters on bindings, functions, and subscripts.
+
+- **Measured.** Racordon et al. compare Swift, their Swiftlet, C++, and Scala Native on random programs and micro-benchmarks. They report Swift "slower than C++ only for programs with extremely large number of mutating operations (>90%)". This is one machine and mostly generated programs.
+- **The cost is uniqueness checks.** Copy-on-write comes "at the cost of runtime checks preceding every mutation". In Swiftlet, "unnecessary reference counter checks account for most of the performance loss". This points M4 at "Borrow elision of count operations".
+- **Nested `inout` copies.** With a pointer to the inside of a shared buffer, "the caller is compelled to copy non-unique storage defensively". A Lucid path takes its value out of its slot, so a shared outer list copies for the same reason, once.
+- **What is lost.** "Traversing an arbitrary graph requires access to the whole graph at each step". `shared` is Lucid's answer, which the paper's strict form does not have.
+- **Hylo.** `let`, `inout`, and `sink` match Lucid's default, `change`, and `take`. Hylo also has `set`, which fills a variable that has no value yet, and subscripts that `yield` a projection. Lucid has neither, and no trial task needed them, so this calls for no change now.
+
+Sources: [Paper in JOT](https://www.jot.fm/issues/issue_2022_02/article2.pdf), [Hylo tour](https://docs.hylo-lang.org/language-tour), [Google Research listing](https://research.google/pubs/mutable-value-semantics/), [preprint](https://daveabrahams.com/wp-content/uploads/2022/02/implementation_strategies_for_mutable_value_semantics-preprint.pdf), [Hylo docs](https://docs.hylo-lang.org).
 
 ### Exclusivity and reference count cost (Swift)
 
@@ -177,6 +185,33 @@ This is the weakest area, and it is a stated core goal.
 - **Explicit types may help learning.** One scaling-law study found Rust's annotations and rigid syntax make it more learnable with fewer parameters. Level: **Snippet**.
 - **Grammar helps generation.** Grammar Prompting improved DSL generation with few examples. Level: **Snippet**.
 - **Syntax is token-relevant, but not proven for layout.** Studies compare languages, and none isolates indentation from braces.
+
+### M3 agent trial
+
+Run on 2026-11-06. Tasks, reference answers, and the runner are in `benchmarks/agent-trial/`.
+
+**Method.** Two new Claude Code subagents on Opus 5.5 got `docs/agent-guide.md` (about 4,400 tokens), `tasks.md`, and the debug compiler, in a directory outside the repository. Each did 5 of the 10 tasks, and was told to read no other Lucid source. `try.sh` kept every attempt and compared its output with answers from a Python reference. The debug runtime also fails a run on a leak.
+
+| Measure | Result |
+| --- | --- |
+| Compiled on the first attempt | 10 of 10 |
+| Passed on the first attempt | 10 of 10 |
+| Repair turns | 0 |
+| Traps, leaks | 0 |
+| Failures to record | None. Every attempt was rerun afterwards, and all passed |
+| Lines of Lucid written | 544 |
+
+The tasks covered text, maps, unions, `choice`, `change`, `for change`, recursive `Node?` trees, generics, closures, traits, `any`, and sized numbers.
+
+**What it does not show.**
+
+- It does not show that the syntax matches what models expect. The guide warns of each known trap, such as `+` on text, `x[0]`, and capturing a `var`, so no decision that names this trial was tested against unaided habit. None of those errors fired.
+- It does not test diagnostics, since no attempt failed.
+- It is not a comparison. There is no Python or TypeScript arm, and 10 tasks is a small sample.
+- It is not independent. One author wrote the language, guide, and tasks, the subjects are the same model family as that author, and they saw the project's `AGENTS.md`, which has no syntax. An agent on 5 tasks could also learn from its own earlier ones, though no attempt failed.
+- The credit cannot be split between the guide and the language, which is why decision 90 adds an arm to the M5 benchmark.
+
+**Guide gaps.** The subjects listed what they had to guess. Each guess worked, and these went into the guide after the trial: `%` sign, unary `-`, trailing commas, expressions in slices, `.get` with a negative index, `is empty` on text, and `_` for every field of a variant. They called task 03 and task 10 hardest, for `.pop` with narrowing, and for hex with no bit operations. The second supports the open question on bit operations.
 
 ### The biggest risk
 
@@ -301,8 +336,6 @@ Sources: [Swift reference, In-Out Parameters](https://github.com/swiftlang/swift
 
 | Topic | Needed by |
 | --- | --- |
-| Read Racordon et al. and the Hylo language tour in full | M3 |
-| Agent trial with a new language and only a guide | M3 |
 | Reference counting cost in imperative code | M4 |
 | Foreign calls with lightweight tasks | M7 |
 | Status of WebAssembly stack switching | M7 |

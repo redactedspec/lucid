@@ -117,12 +117,12 @@ The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and 
 
 ## Agent onboarding
 
-The repository ships `docs/agent-guide.md`, drafted at M3. It is one compact file with the full language, for pasting into any agent context. CI checks that it stays under the token budget and that all its code compiles.
+The repository ships [agent-guide.md](agent-guide.md). It is one compact file with everything that runs today, for pasting into any agent context. It lists only what works, so features move into it as they are built. A golden test checks that it stays under the token budget and that all its code runs.
 
 Models have no Lucid training data, so this guide and the diagnostics carry the whole load. Evidence is in [research.md](research.md).
 
 ## Agent benchmark
 
-A 10-task trial runs at M3, so that a syntax problem surfaces before the language freezes. The full benchmark arrives at M5. It is a fixed set of 50 programming tasks, each with tests. Agents get only `agent-guide.md`. The benchmark tracks first-attempt compile rate, first-attempt test pass rate, and repair turns. Compare against the same tasks in Python and TypeScript. Treat a repeated failure as a language or diagnostics defect.
+A 10-task trial ran at M3, so that a syntax problem would surface before the language freezes. It passed 10 of 10 on the first attempt, with limits stated in [research.md](research.md). Its tasks are in `benchmarks/agent-trial/`. The full benchmark arrives at M5. It is a fixed set of 50 programming tasks, each with tests. Agents get only `agent-guide.md`. The benchmark tracks first-attempt compile rate, first-attempt test pass rate, and repair turns. Compare against the same tasks in Python and TypeScript. A second arm uses a guide with its warnings removed, to show which rules go against what models expect, and to test the diagnostics. Treat a repeated failure as a language or diagnostics defect.
 
-Both run as normal Claude Code sessions, with no API key, and are split over several sessions to fit plan limits. See `docs/claude-code.md`.
+Both run as normal Claude Code sessions or subagents, with no API key, and are split over several sessions to fit plan limits. See `docs/claude-code.md`.
