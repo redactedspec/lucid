@@ -53,7 +53,7 @@ benchmarks/        Lucid and Rust versions of each program
 
 `lucid_rt` is small and has a C ABI. Showing, comparing, and hashing a compound value use no runtime type information: each is a derived task. Today it provides printing, trap reporting, allocation, reference counting, and text, list, map, and record primitives. Task scheduling is planned.
 
-A task with counted locals has one exit block, which releases them, so code size does not grow with returns times locals. Every other task returns directly.
+A task with counted locals has one exit block, which releases them, so code size does not grow with returns times locals. Every other task returns directly. Compiled code changes a count inline, and calls `lucid_release` only for the last one. A debug build calls the runtime for every count, so that its checks run, which means that `cargo test --release` is what tests the inline form.
 
 Every heap value starts with a count and a kind, so one `lucid_retain` and `lucid_release` serve all of them, and the kind tells `lucid_release` what to release inside. A text is one allocation: this header, a byte length, then its UTF-8 bytes. Every text literal allocates when it runs, except directly under `print`. A text slice, a list slice, or a loop character is a new value with its contents copied. `check.rs` lowers a `for` over text or a collection to a `while` over a hidden position.
 
@@ -61,7 +61,7 @@ Every integer lives in a 64-bit register, sign- or zero-extended from its own wi
 
 A list is one allocation: the header, a length, a capacity, then 8-byte slots. Every element type uses one slot size, so `list[byte]` costs 8 bytes per byte for now. A map is one allocation too, with the layout of a compact dict: entries in insertion order, then a table of `2 * cap` indexes into them. A removed entry stays as a gap until the next rebuild. A set is a map with unused values. Hashes come from `RandomState`, keyed once per process. A map with a compound key also holds the addresses of two compiled tasks, which the runtime calls to hash a key and to compare two. An entry keeps its hash, so a rebuild calls neither. A derived hash starts from a state, and adds each length, tag, and part through `lucid_hash_int` and `lucid_hash_text`, each one a SipHash step. Entries of a map or set start alone, and `lucid_hash_sum` adds them, so order has no effect. `find` keeps no reference into the map during a task, since a key may hold that same map. A derived task reads a value by its position, not by its key, so it runs no key task for it: that keeps a key that is not equal to itself from trapping, and keeps nested maps from taking exponential time.
 
-Compiled code reads a list's length and elements inline. Every change goes through a runtime task that takes the local's count and returns the value to store. That task is where copy-on-write happens: it writes in place if the count is one, and otherwise copies. So MIR changes a collection only through `Stmt::Update`, never in an expression. That is why `.pop` lowers to statements, like `match`, and can only be the whole value of one. `.get` changes nothing, so it stays an expression: `ExprKind::Seq` runs any setup, then an `If` tests and reads. A write through a path such as `x[i].push(1)` first reads every index and value, then takes `x[i]` out of its slot, which holds null until the write puts it back. So the element has one count, and needs no copy.
+Compiled code reads a list's length and elements inline. A list set, a list push with room, and a field set are inline too, when the value has one count. Any other change goes through a runtime task that takes the local's count and returns the value to store. That task is where copy-on-write happens: it writes in place if the count is one, and otherwise copies. So MIR changes a collection only through `Stmt::Update`, never in an expression. That is why `.pop` lowers to statements, like `match`, and can only be the whole value of one. `.get` changes nothing, so it stays an expression: `ExprKind::Seq` runs any setup, then an `If` tests and reads. A write through a path such as `x[i].push(1)` first reads every index and value, then takes `x[i]` out of its slot, which holds null until the write puts it back. So the element has one count, and needs no copy.
 
 ### Parameters
 
@@ -112,6 +112,7 @@ Run from the repository root:
 ```sh
 cargo run -p lucid -- run examples/file.lcd   # the compiler
 cargo test                                    # unit and golden tests
+cargo test --release                          # the same, with inline counts
 cargo clippy --all-targets                    # lints
 cargo fmt                                     # formatting
 sh benchmarks/run.sh                          # build, then 15 paired rounds, needs python

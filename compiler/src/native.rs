@@ -26,6 +26,10 @@ const STACK_MARGIN: usize = 1024 * 1024;
 /// Half the margin stays spare, for runtime calls.
 const MAX_FRAME: usize = STACK_MARGIN / 2;
 
+/// Compiled code changes counts itself, except in a debug build of `lucid_rt`,
+/// where its calls find a use after free.
+const INLINE_COUNTS: bool = !cfg!(debug_assertions);
+
 /// Marks the end of paths that cannot continue, such as after `lucid_trap`.
 const UNREACHABLE: TrapCode = TrapCode::unwrap_user(1);
 
@@ -289,6 +293,7 @@ fn compile(
             runtime,
             ids,
             vars,
+            types: &task.locals,
             owned,
             changed,
             exit,
@@ -326,6 +331,8 @@ struct Lower<'a, 'b> {
     runtime: &'a Runtime,
     ids: &'a [FuncId],
     vars: Vec<Variable>,
+    /// The type of each local.
+    types: &'a [Ty],
     /// Counted locals that are not parameters, released on return.
     owned: Vec<Variable>,
     /// Each `change` parameter, with the address of the caller's stack slot.
@@ -391,7 +398,7 @@ impl Lower<'_, '_> {
             self.body.switch_to_block(exit);
             for local in 0..self.owned.len() {
                 let held = self.body.use_var(self.owned[local]);
-                self.call(self.runtime.release, &[held]);
+                self.release(held);
             }
             for index in 0..self.changed.len() {
                 let (var, address) = self.changed[index];
@@ -426,8 +433,51 @@ impl Lower<'_, '_> {
     /// Replaces the value of a counted local with `value`, which it owns.
     fn store(&mut self, local: Local, value: Value) {
         let old = self.body.use_var(self.vars[local]);
-        self.call(self.runtime.release, &[old]);
+        self.release(old);
         self.body.def_var(self.vars[local], value);
+    }
+
+    fn retain(&mut self, value: Value) {
+        if !INLINE_COUNTS {
+            self.call(self.runtime.retain, &[value]);
+            return;
+        }
+        let flags = MemFlagsData::trusted();
+        let count = self.body.ins().load(types::I64, flags, value, lucid_rt::COUNT_OFFSET);
+        let count = self.body.ins().iadd_imm_s(count, 1);
+        self.body.ins().store(flags, count, value, lucid_rt::COUNT_OFFSET);
+    }
+
+    /// Gives up a count of `value`, which may be null. Only the last count
+    /// calls the runtime.
+    fn release(&mut self, value: Value) {
+        if !INLINE_COUNTS {
+            self.call(self.runtime.release, &[value]);
+            return;
+        }
+        let held = self.body.create_block();
+        let shared = self.body.create_block();
+        let last = self.body.create_block();
+        let done = self.body.create_block();
+        self.body.set_cold_block(last);
+        self.body.ins().brif(value, held, &[], done, &[]);
+        self.body.seal_block(held);
+        self.body.switch_to_block(held);
+        let flags = MemFlagsData::trusted();
+        let count = self.body.ins().load(types::I64, flags, value, lucid_rt::COUNT_OFFSET);
+        let more = self.body.ins().icmp_imm_s(IntCC::NotEqual, count, 1);
+        self.body.ins().brif(more, shared, &[], last, &[]);
+        self.body.seal_block(shared);
+        self.body.seal_block(last);
+        self.body.switch_to_block(shared);
+        let count = self.body.ins().iadd_imm_s(count, -1);
+        self.body.ins().store(flags, count, value, lucid_rt::COUNT_OFFSET);
+        self.body.ins().jump(done, &[]);
+        self.body.switch_to_block(last);
+        self.call(self.runtime.release, &[value]);
+        self.body.ins().jump(done, &[]);
+        self.body.seal_block(done);
+        self.body.switch_to_block(done);
     }
 
     fn none(&mut self) -> Value {
@@ -683,7 +733,134 @@ impl Lower<'_, '_> {
         }
     }
 
+    /// True if `value` has one count. A debug runtime's dead value has another,
+    /// so it reaches the runtime's own check.
+    fn is_unique(&mut self, value: Value) -> Value {
+        let flags = MemFlagsData::trusted();
+        let count = self.body.ins().load(types::I64, flags, value, lucid_rt::COUNT_OFFSET);
+        self.body.ins().icmp_imm_s(IntCC::Equal, count, 1)
+    }
+
+    /// Runs `fast` if `test` holds, and otherwise the runtime `task`, which
+    /// copies. Each gives the value that replaces `local`.
+    fn update_paths(
+        &mut self,
+        local: Local,
+        test: Value,
+        fast: impl FnOnce(&mut Self) -> Value,
+        task: FuncId,
+        args: &[Value],
+        span: Option<Span>,
+    ) {
+        let fast_block = self.body.create_block();
+        let slow = self.body.create_block();
+        let done = self.body.create_block();
+        let result = self.body.append_block_param(done, types::I64);
+        self.body.set_cold_block(slow);
+        self.body.ins().brif(test, fast_block, &[], slow, &[]);
+        self.body.seal_block(fast_block);
+        self.body.seal_block(slow);
+        self.body.switch_to_block(fast_block);
+        let kept = fast(self);
+        self.body.ins().jump(done, &[kept.into()]);
+        self.body.switch_to_block(slow);
+        let copy = self.call(task, args).expect("it returns the new value");
+        if let Some(span) = span {
+            let outside = self.body.ins().icmp_imm_s(IntCC::Equal, copy, 0);
+            self.trap_if(outside, OUT_OF_BOUNDS, span);
+        }
+        self.body.ins().jump(done, &[copy.into()]);
+        self.body.seal_block(done);
+        self.body.switch_to_block(done);
+        self.body.def_var(self.vars[local], result);
+    }
+
+    /// Stores `value` in a slot of a value that this code alone holds, and
+    /// gives up what the slot held, if it holds a count. The slot of a write
+    /// through a path holds null then, which is safe.
+    fn replace(&mut self, value: Value, address: Value, offset: i32, counted: bool) {
+        let flags = MemFlagsData::trusted();
+        if counted {
+            let old = self.body.ins().load(types::I64, flags, address, offset);
+            self.body.ins().store(flags, value, address, offset);
+            self.release(old);
+        } else {
+            self.body.ins().store(flags, value, address, offset);
+        }
+    }
+
+    fn list_set(&mut self, local: Local, args: &[Expr], span: Span) {
+        let list = self.body.use_var(self.vars[local]);
+        let index = self.slot(&args[0]);
+        let value = self.slot(&args[1]);
+        let flags = MemFlagsData::trusted();
+        let len = self.body.ins().load(types::I64, flags, list, lucid_rt::LEN_OFFSET);
+        let inside = self.body.ins().icmp(IntCC::UnsignedLessThan, index, len);
+        let unique = self.is_unique(list);
+        let test = self.body.ins().band(inside, unique);
+        let counted = matches!(self.types[local], Ty::List(item) if item.is_counted());
+        let fast = |lower: &mut Self| {
+            let offset = lower.body.ins().ishl_imm_s(index, 3);
+            let address = lower.body.ins().iadd(list, offset);
+            lower.replace(value, address, lucid_rt::SLOTS_OFFSET, counted);
+            list
+        };
+        let task = self.runtime.list_set;
+        self.update_paths(local, test, fast, task, &[list, index, value], Some(span));
+    }
+
+    fn list_push(&mut self, local: Local, args: &[Expr]) {
+        let list = self.body.use_var(self.vars[local]);
+        let value = self.slot(&args[0]);
+        let flags = MemFlagsData::trusted();
+        let len = self.body.ins().load(types::I64, flags, list, lucid_rt::LEN_OFFSET);
+        let cap = self.body.ins().load(types::I64, flags, list, lucid_rt::CAP_OFFSET);
+        let room = self.body.ins().icmp(IntCC::UnsignedLessThan, len, cap);
+        let unique = self.is_unique(list);
+        let test = self.body.ins().band(room, unique);
+        let fast = |lower: &mut Self| {
+            let offset = lower.body.ins().ishl_imm_s(len, 3);
+            let address = lower.body.ins().iadd(list, offset);
+            lower.body.ins().store(flags, value, address, lucid_rt::SLOTS_OFFSET);
+            let longer = lower.body.ins().iadd_imm_s(len, 1);
+            lower.body.ins().store(flags, longer, list, lucid_rt::LEN_OFFSET);
+            list
+        };
+        self.update_paths(local, test, fast, self.runtime.list_push, &[list, value], None);
+    }
+
+    /// `args[1]` is a plain `none` when a write through a path empties a slot,
+    /// or writes to a `none` field. The type does not show if that slot holds
+    /// a count, so only a slot that does takes the fast path.
+    fn field_set(&mut self, local: Local, args: &[Expr]) {
+        let ExprKind::Int(slot) = args[0].kind else { unreachable!("`mono.rs` gives a slot") };
+        let emptied = matches!(args[1].kind, ExprKind::None);
+        let counted = args[1].ty.is_counted() || emptied;
+        let record = self.body.use_var(self.vars[local]);
+        let index = self.body.ins().iconst(types::I64, slot);
+        let value = self.slot(&args[1]);
+        let mut test = self.is_unique(record);
+        if emptied {
+            let flags = MemFlagsData::trusted();
+            let held = self.body.ins().load(types::I64, flags, record, lucid_rt::COUNTED_OFFSET);
+            let holds = self.body.ins().icmp_imm_s(IntCC::SignedGreaterThan, held, slot);
+            test = self.body.ins().band(test, holds);
+        }
+        let fast = |lower: &mut Self| {
+            lower.replace(value, record, slot_offset(slot as usize), counted);
+            record
+        };
+        let args = [record, index, value];
+        self.update_paths(local, test, fast, self.runtime.record_set, &args, None);
+    }
+
     fn update(&mut self, local: Local, op: Update, args: &[Expr], span: Span) {
+        match op {
+            Update::ListSet => return self.list_set(local, args, span),
+            Update::ListPush => return self.list_push(local, args),
+            Update::FieldSet => return self.field_set(local, args),
+            _ => {}
+        }
         let mut values = vec![self.body.use_var(self.vars[local])];
         for arg in args {
             let value = self.slot(arg);
@@ -691,17 +868,17 @@ impl Lower<'_, '_> {
         }
         let runtime = self.runtime;
         let task = match op {
-            Update::ListPush => runtime.list_push,
-            Update::ListSet => runtime.list_set,
             Update::ListSwap => runtime.list_swap,
             Update::MapSet => runtime.map_set,
             Update::MapRemove => runtime.map_remove,
-            Update::FieldSet => runtime.record_set,
             Update::UnionSet => unreachable!("`mono.rs` replaces these"),
             Update::ListPop => runtime.list_pop,
+            Update::ListSet | Update::ListPush | Update::FieldSet => {
+                unreachable!("handled above")
+            }
         };
         let result = self.call(task, &values).expect("it returns the new value");
-        if matches!(op, Update::ListSet | Update::ListSwap) {
+        if op == Update::ListSwap {
             let outside = self.body.ins().icmp_imm_s(IntCC::Equal, result, 0);
             self.trap_if(outside, OUT_OF_BOUNDS, span);
         }
@@ -968,7 +1145,7 @@ impl Lower<'_, '_> {
             }
             ExprKind::Retain(value) => {
                 let value = self.expr(value);
-                self.call(self.runtime.retain, &[value]);
+                self.retain(value);
                 value
             }
             ExprKind::Change(_) => unreachable!("only `call_task` reads these"),

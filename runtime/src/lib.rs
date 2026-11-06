@@ -105,15 +105,20 @@ const SMALLEST_MAP: usize = 8;
 
 const HEADER: usize = size_of::<Text>();
 
+/// Compiled code changes a count here.
+pub const COUNT_OFFSET: i32 = offset_of!(Head, count) as i32;
+
 /// Compiled code reads a list's or a map's length here, and a list's slots
 /// from `SLOTS_OFFSET`, so that a read needs no call.
 pub const LEN_OFFSET: i32 = offset_of!(List, len) as i32;
 pub const SLOTS_OFFSET: i32 = size_of::<List>() as i32;
+pub const CAP_OFFSET: i32 = offset_of!(List, cap) as i32;
 const _: () = assert!(offset_of!(Map, len) == offset_of!(List, len));
 
 /// Compiled code reads a record's variant and slots here.
 pub const TAG_OFFSET: i32 = offset_of!(Record, tag) as i32;
 pub const RECORD_SLOTS_OFFSET: i32 = size_of::<Record>() as i32;
+pub const COUNTED_OFFSET: i32 = offset_of!(Record, counted) as i32;
 
 /// Debug builds only: the count of a released value.
 const DEAD: usize = usize::MAX;
