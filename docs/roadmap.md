@@ -61,7 +61,7 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] Static text literals, with no allocation
 - [ ] Borrow elision of count operations
 - [ ] Reuse analysis, if measurements justify it
-- [ ] Shifts for division and remainder by a constant power of two
+- [x] Shifts for division and remainder by a constant power of two
 - [ ] `lucid check --costs`
 - [ ] Benchmark suite: n-body, binary trees, JSON parse, hash map, string building
 

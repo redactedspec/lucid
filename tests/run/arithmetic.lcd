@@ -61,3 +61,16 @@ print 9.0.sqrt()
 let four: f32 = 4.0
 print four.sqrt()
 print (-1.0).sqrt()
+var minus = -7
+print minus // 2
+print minus % 2
+print minus // 8
+print minus % 8
+print minus % 1
+print minus // 1
+let small: i8 = -128
+print small // 64
+print small % 64
+let huge: u64 = 18446744073709551615
+print huge // 2
+print huge % 1024

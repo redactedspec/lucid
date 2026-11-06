@@ -1296,6 +1296,20 @@ impl Lower<'_, '_> {
     fn binary(&mut self, op: BinaryOp, left: &Expr, right: &Expr, span: Span) -> Value {
         let (ty, float) = (left.ty, left.ty.is_float());
         let a = self.expr(left);
+        if let ExprKind::Int(divisor) = right.kind
+            && divisor > 0
+            && divisor.count_ones() == 1
+            && matches!(op, BinaryOp::FloorDiv | BinaryOp::Rem)
+        {
+            // Both round down, so this holds below zero too. A divisor like
+            // this cannot trap, and the result is in range.
+            let shift = i64::from(divisor.trailing_zeros());
+            return match (op, ty) {
+                (BinaryOp::Rem, _) => self.body.ins().band_imm_s(a, divisor - 1),
+                (_, Ty::U64) => self.body.ins().ushr_imm_s(a, shift),
+                _ => self.body.ins().sshr_imm_s(a, shift),
+            };
+        }
         let b = self.expr(right);
         if ty == Ty::Text {
             let cc = int_cc(op).expect("the checker allows only comparisons on text");
