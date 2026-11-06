@@ -1,0 +1,2 @@
+use ./modules_lib.colors.Thing as int
+use ./modules_lib.colors.Thing as Error

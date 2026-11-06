@@ -1,0 +1,2 @@
+module_built_in.lcd:1:1: error E0304: `int` is already defined
+module_built_in.lcd:2:1: error E0304: `Error` is already defined

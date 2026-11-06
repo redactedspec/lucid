@@ -1,4 +1,2 @@
 unsupported.lcd:17:12: error E0901: a task reading a non-literal top-level `let` parses, but cannot run yet
   note: see docs/roadmap.md for the milestone that adds it
-unsupported.lcd:19:1: error E0901: `public` parses, but cannot run yet
-  note: see docs/roadmap.md for the milestone that adds it

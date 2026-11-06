@@ -1,0 +1,6 @@
+module_private.lcd:2:26: error E0333: `hidden` is private to its module
+  note: mark it `public` in `modules_lib.secret.hidden` to use it here
+module_private.lcd:4:7: error E0333: `hidden` is private to its module
+  note: mark it `public` in `modules_lib.secret.hidden` to use it here
+module_private.lcd:5:8: error E0333: `Closed` is private to its module
+  note: mark it `public` in `modules_lib.secret.Closed` to use it here

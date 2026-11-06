@@ -4,7 +4,7 @@ The compiler is written in Rust until M9, when its front end moves to Lucid (dec
 
 ## Status
 
-M4 is done, and M5 is in progress. `lucid run` compiles `int`, `float`, the sized numbers and wrapping math, `bool`, `none`, `text`, `list`, `map`, `set`, `type`, `choice`, `match`, unions, `is` with narrowing, interpolation, text slices, `let`, `var`, `if`, `while`, `for` over ranges, text, and collections, tasks with recursion and defaults, `change` and `take` parameters, `for change` over lists, lambdas, nested tasks, and task values, generic tasks, types, and aliases, traits with bounds, `any` values, `self` with dot calls, `try` and `else`, and `expect`, `test`, `unsafe`, and `print`. It reports E0901 for anything else. `check.rs` binds names, checks types, and lowers to MIR in one pass, because with no modules those stages have nothing to do alone. It splits when they arrive. A generic body is checked once, with each parameter as an opaque `Ty::Param`. Flattening means that only the real type arguments show what is a union and what is counted, so `check.rs` records intent as `Wrap`, `View`, `Member`, and `Holds`, and `mono.rs` picks the code for each, starting from every task with no type parameters. `Ty` keeps compound types behind leaked references, so it stays `Copy`. `Ty::Data` holds a name, an index into the checker's table, and type arguments, so a recursive type needs no cycle in `Ty`. A `match` lowers to an `if` chain on a hidden local, and the last arm has no test, since the exhaustiveness check proves what remains. `Ty::Union` holds flat members in a fixed order, so two spellings are equal. Narrowing is a stack of facts in the checker, cut back at the end of each block. An assignment resets entries in place, and a loop first resets each name its body assigns. List, map, and set tasks stay built into `check.rs`. They can move to Lucid now that `change` parameters exist. `mono.rs` also replaces `==`, `<`, showing, and `in` on a compound value with a call: to a hand-written task if the type has one, or else to a task from `derive.rs`. It also gives each new map or set with a compound key its hash and equal tasks. `mono.rs` lists the types that reach each `any`. A task on an `any` tests its tag against that list, so `run` builds these tasks last, and again if building them boxed a new type. A task of a trait has a signature in `check.rs` and no body, and a call to one is `ExprKind::Method` until `mono.rs` knows the receiver. Trait checks are structural, so `Checker::satisfied` runs at each use, and walks a type's fields for a derived trait. `ownership.rs` gives each new heap value an owner, makes every count explicit with `Move` and `Retain`, and finds moves with a backward walk of what is live. First it turns each local that can only hold a path into a read parameter into `Stmt::Bind`, which holds no count, so `Task::borrowed` lists what no exit releases. The walk repeats until each loop head settles, which takes a pass per level of nesting. "Counting" in `mir.rs` states the rules that a backend follows. `check.rs` lets go of the names in a block with `Stmt::Clear`, and `ownership.rs` does the same for temporaries after their statement.
+M4 is done, and M5 is in progress. `lucid run` compiles `int`, `float`, the sized numbers and wrapping math, `bool`, `none`, `text`, `list`, `map`, `set`, `type`, `choice`, `match`, unions, `is` with narrowing, interpolation, text slices, `let`, `var`, `if`, `while`, `for` over ranges, text, and collections, tasks with recursion and defaults, `change` and `take` parameters, `for change` over lists, lambdas, nested tasks, and task values, generic tasks, types, and aliases, traits with bounds, `any` values, `self` with dot calls, `try` and `else`, and `expect`, `test`, `unsafe`, `print`, and modules with `use ./` and `public`. It reports E0901 for anything else. `check.rs` binds names, checks types, and lowers to MIR in one pass, since `resolve.rs` leaves it one tree. A generic body is checked once, with each parameter as an opaque `Ty::Param`. Flattening means that only the real type arguments show what is a union and what is counted, so `check.rs` records intent as `Wrap`, `View`, `Member`, and `Holds`, and `mono.rs` picks the code for each, starting from every task with no type parameters. `Ty` keeps compound types behind leaked references, so it stays `Copy`. `Ty::Data` holds a name, an index into the checker's table, and type arguments, so a recursive type needs no cycle in `Ty`. A `match` lowers to an `if` chain on a hidden local, and the last arm has no test, since the exhaustiveness check proves what remains. `Ty::Union` holds flat members in a fixed order, so two spellings are equal. Narrowing is a stack of facts in the checker, cut back at the end of each block. An assignment resets entries in place, and a loop first resets each name its body assigns. List, map, and set tasks stay built into `check.rs`. They can move to Lucid now that `change` parameters exist. `mono.rs` also replaces `==`, `<`, showing, and `in` on a compound value with a call: to a hand-written task if the type has one, or else to a task from `derive.rs`. It also gives each new map or set with a compound key its hash and equal tasks. `mono.rs` lists the types that reach each `any`. A task on an `any` tests its tag against that list, so `run` builds these tasks last, and again if building them boxed a new type. A task of a trait has a signature in `check.rs` and no body, and a call to one is `ExprKind::Method` until `mono.rs` knows the receiver. Trait checks are structural, so `Checker::satisfied` runs at each use, and walks a type's fields for a derived trait. `ownership.rs` gives each new heap value an owner, makes every count explicit with `Move` and `Retain`, and finds moves with a backward walk of what is live. First it turns each local that can only hold a path into a read parameter into `Stmt::Bind`, which holds no count, so `Task::borrowed` lists what no exit releases. The walk repeats until each loop head settles, which takes a pass per level of nesting. "Counting" in `mir.rs` states the rules that a backend follows. `check.rs` lets go of the names in a block with `Stmt::Clear`, and `ownership.rs` does the same for temporaries after their statement.
 
 ## `unsafe`
 
@@ -38,7 +38,7 @@ A trap ends the process, and Cranelift frames have no unwind tables. So `lucid t
 source text
   -> lexer          tokens with NEWLINE, INDENT, DEDENT
   -> parser         AST, with error recovery
-  -> resolver       names bound across modules (in check.rs for now)
+  -> resolver       modules joined into one tree, with unique names (resolve.rs)
   -> type checker   inference, narrowing, exhaustiveness, exclusivity, MIR (check.rs)
   -> monomorphizer  concrete tasks and types only (mono.rs)
   -> ownership      owners of new values, last-use moves, borrow elision
@@ -46,6 +46,12 @@ source text
 ```
 
 **Key decision:** MIR stays structured (blocks, ifs, loops) and is not a free control-flow graph. Lucid has no `goto`, so nothing is lost. WebAssembly needs structured control flow, so its backend stays small, and Cranelift can build its own graph from the same input. Both backends share one MIR.
+
+## Modules
+
+`resolve.rs` loads the entry file and each `use ./` in turn, then rewrites each module so that the later stages see one file. `module.name` is the new name of each top-level name, and no written name has a dot, so nothing clashes. The module's name is its path from the entry file. In a program with imports the entry file gets a prefix too, its file stem, so a module cannot see its names, and messages show that form: `main.User`. A file alone keeps its names. `alias.name` becomes one name. A task with `self` keeps its name, and `check.rs` tests its visibility, since only a call's type finds it. `ast::short_name` gives the written name back where one is shown at run time or passed to C.
+
+`Source` holds all the files end to end, entry file first, so a span alone gives its file. `Lines::place` turns an offset into a file, line, and column.
 
 ## Repository layout
 
@@ -59,7 +65,7 @@ compiler/          Rust crate `lucid`: the CLI and compiler
         lexer.rs
         ast.rs
         parser.rs
-        resolve.rs     planned
+        resolve.rs joins modules into one tree
         check.rs   names, types, lowering to MIR
         mono.rs    one concrete task per use of a generic
         derive.rs  derived tasks, as MIR for one concrete type
@@ -149,8 +155,8 @@ ROUNDS=3 sh benchmarks/run.sh                 # fewer rounds
 | Command | Behavior | State |
 | --- | --- | --- |
 | `lucid run file.lcd` | Compile with JIT and run | Works for the features under "Status" |
-| `lucid check [--json] file.lcd` | Report diagnostics only | Syntax, name, and type errors, see `agents.md`. Takes a file until packages exist at M5 |
-| `lucid check [--json] --unsafe file.lcd` | List `unsafe` blocks and `extern` tasks | Works, in one file until packages exist |
+| `lucid check [--json] file.lcd` | Report diagnostics only | Syntax, name, and type errors, in the file and what it imports, see `agents.md`. Takes a file until packages exist at M5 |
+| `lucid check [--json] --unsafe file.lcd` | List `unsafe` blocks and `extern` tasks | Works, for a file and what it imports |
 | `lucid check [--json] --costs file.lcd` | List copy and count sites | Works, from the MIR after `ownership.rs`. A task that `derive.rs` wrote stays out |
 | `lucid build` | Produce a native executable | Planned |
 | `lucid build --target web` | Produce WebAssembly and a loader | Planned |
@@ -173,6 +179,7 @@ Exit codes: 0 for success, 1 for compile errors or a failed test, 2 for bad usag
 - **Golden error tests:** `tests/fail/name.lcd` with `name.err` for expected diagnostics, under `lucid run`.
 - **Golden cost tests:** `tests/costs/name.lcd` with `name.out` for what `lucid check --costs` reports.
 - **Golden trap tests:** `tests/trap/name.lcd` with `name.err` for the trap message, and exit code 101.
+- **Modules:** a file that a golden test imports sits in `modules_lib/` under the test directory, which the runner does not list.
 - **Golden `lucid test` tests:** `tests/test/name.lcd` with `name.out` for the report. Exit code 1 if it holds a failure.
 - **Error code check:** `compiler/tests/golden.rs` fails if a code in the source has no golden test or is missing from `docs/agents.md`.
 - **Examples:** everything in `examples/` must parse. Later milestones raise this to compile.

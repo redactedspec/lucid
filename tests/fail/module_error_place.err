@@ -1,0 +1,2 @@
+module_error_place.lcd:3:7: error E0301: name `missing` is not defined
+modules_lib/bad_type.lcd:2:12: error E0303: this `return` needs `int`, found `text`

@@ -1,2 +1,0 @@
-data_later.lcd:1:1: error E0901: `public` parses, but cannot run yet
-  note: see docs/roadmap.md for the milestone that adds it

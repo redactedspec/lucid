@@ -10,7 +10,7 @@
 //! value goes to a `Temp`, and everything that keeps a value retains it. Tests
 //! run both ways, since a program must not depend on an optimization.
 
-use crate::diag::{Lines, Span, json_string};
+use crate::diag::{Lines, Source, Span, json_string};
 use crate::mir::{Expr, ExprKind, Local, Program, Stmt, Task, Ty, Update, Visit};
 use std::collections::{BTreeSet, HashMap};
 
@@ -103,10 +103,10 @@ pub fn costs(program: &mut Program) -> BTreeSet<Cost> {
 }
 
 /// Renders `costs` the way `lucid check` renders errors.
-pub fn render_costs(file: &str, src: &str, costs: &BTreeSet<Cost>, json: bool) -> String {
-    let lines = Lines::new(src);
+pub fn render_costs(source: &Source, costs: &BTreeSet<Cost>, json: bool) -> String {
+    let lines = Lines::new(source);
     let items = costs.iter().map(|cost| {
-        let (line, column) = lines.position(cost.start);
+        let (file, line, column) = lines.place(cost.start);
         let meaning = match cost.kind {
             "copy" => "is held twice, so the next write copies it",
             _ => "gets one more count here",

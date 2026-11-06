@@ -1,0 +1,13 @@
+# Imported from two places, so it must load once.
+use ./metric
+
+public type Size
+    value: int
+
+public task name() -> text
+    return metric.word()
+
+let COUNT = 3
+
+public task make() -> Size
+    return Size(value: COUNT)

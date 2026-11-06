@@ -11,8 +11,10 @@ mod mono;
 mod native;
 mod ownership;
 mod parser;
+mod resolve;
 
-use diag::{Diagnostic, Span};
+use diag::{Diagnostic, Source};
+use resolve::load;
 use std::io::Write;
 use std::process::ExitCode;
 
@@ -20,11 +22,6 @@ const USAGE: &str = "usage: lucid run FILE\n       lucid check [--json] [--costs
 
 /// Set for the child process of `lucid test`, to the place of its first test.
 const TEST_FROM: &str = "LUCID_TEST_FROM";
-
-/// What every file sees. The checker treats these like the file's own.
-const PRELUDE: &str = "trait Error
-    task error_message(self) -> text
-";
 
 /// Debug builds use large stack frames, and `MAX_DEPTH` levels of nesting must fit.
 const STACK_BYTES: usize = 256 * 1024 * 1024;
@@ -60,11 +57,11 @@ fn cli(args: &[String]) -> ExitCode {
     if path.starts_with('-') {
         return usage();
     }
-    let (src, file, mut diags) = load(path);
+    let (source, file, mut diags) = load(path);
     if diags.is_empty()
         && let Some(file) = &file
     {
-        let (mut program, errors) = check::check(file, &src, !run);
+        let (mut program, errors) = check::check(file, &source, !run);
         diags = errors;
         if diags.is_empty() {
             diags = mono::run(&mut program);
@@ -74,60 +71,56 @@ fn cli(args: &[String]) -> ExitCode {
         }
         if costs && diags.is_empty() {
             let found = ownership::costs(&mut program);
-            emit(std::io::stdout(), &ownership::render_costs(path, &src, &found, json));
+            emit(std::io::stdout(), &ownership::render_costs(&source, &found, json));
             return ExitCode::SUCCESS;
         }
         if run && diags.is_empty() {
-            diags = native::run(&program, path, &src, STACK_BYTES).err().unwrap_or_default();
+            diags = native::run(&program, &source, STACK_BYTES).err().unwrap_or_default();
         } else if !run && !costs {
             // `check` reports errors in the program. An unbuilt feature is not one.
             // `--costs` needs compiled code, so there it stays an error.
             diags.retain(|d| d.code != "E0901");
         }
     }
-    if json {
-        emit(std::io::stdout(), &diag::render_json(path, &src, &diags));
-    } else {
-        emit(std::io::stderr(), &diag::render_text(path, &src, &diags));
-    }
+    report_errors(&source, &diags, json);
     if diags.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
 
 /// Reports compile errors, as data on stdout with `json`.
-fn report_errors(path: &str, src: &str, diags: &[Diagnostic], json: bool) {
+fn report_errors(source: &Source, diags: &[Diagnostic], json: bool) {
     if json {
-        emit(std::io::stdout(), &diag::render_json(path, src, diags));
+        emit(std::io::stdout(), &diag::render_json(source, diags));
     } else {
-        emit(std::io::stderr(), &diag::render_text(path, src, diags));
+        emit(std::io::stderr(), &diag::render_text(source, diags));
     }
 }
 
 /// `lucid check --unsafe`: each `unsafe` block and `extern` task, in file order.
 fn unsafe_sites(path: &str, json: bool) -> ExitCode {
-    let (src, file, mut diags) = load(path);
+    let (source, file, mut diags) = load(path);
     let mut sites = Vec::new();
     if diags.is_empty()
         && let Some(file) = &file
     {
-        let (program, errors) = check::check(file, &src, true);
+        let (program, errors) = check::check(file, &source, true);
         diags = errors;
         // As in `check`: an unbuilt feature is not an error in the program.
         diags.retain(|d| d.code != "E0901");
         sites = program.unsafe_sites;
     }
     if !diags.is_empty() {
-        report_errors(path, &src, &diags, json);
+        report_errors(&source, &diags, json);
         return ExitCode::FAILURE;
     }
     sites.sort_by_key(|(_, span)| span.start);
-    let lines = diag::Lines::new(&src);
-    let file = diag::json_string(path);
+    let lines = diag::Lines::new(&source);
     let items = sites.iter().map(|(kind, span)| {
-        let (line, column) = lines.position(span.start);
+        let (file, line, column) = lines.place(span.start);
         if json {
+            let file = diag::json_string(file);
             format!("{{\"kind\":\"{kind}\",\"file\":{file},\"line\":{line},\"column\":{column}}}")
         } else {
-            format!("{path}:{line}:{column}: unsafe: {kind}\n")
+            format!("{file}:{line}:{column}: unsafe: {kind}\n")
         }
     });
     let report: String =
@@ -146,12 +139,12 @@ struct Outcome {
 /// `lucid test`. A trap ends a process, so tests run in a child, which goes on
 /// after a failure in a new child. That compiles once more per failure.
 fn test(path: &str, json: bool) -> ExitCode {
-    let (src, file, mut diags) = load(path);
+    let (source, file, mut diags) = load(path);
     let mut tests = Vec::new();
     if diags.is_empty()
         && let Some(file) = &file
     {
-        let (mut program, errors) = check::check(file, &src, true);
+        let (mut program, errors) = check::check(file, &source, true);
         diags = errors;
         if diags.is_empty() {
             diags = mono::run(&mut program);
@@ -160,11 +153,11 @@ fn test(path: &str, json: bool) -> ExitCode {
             if let Ok(from) = std::env::var(TEST_FROM) {
                 ownership::run(&mut program, std::env::var_os("LUCID_NAIVE").is_none());
                 let from = from.parse().unwrap_or(usize::MAX);
-                diags = native::run_tests(&program, path, &src, STACK_BYTES, from)
+                diags = native::run_tests(&program, &source, STACK_BYTES, from)
                     .err()
                     .unwrap_or_default();
                 if !diags.is_empty() {
-                    report_errors(path, &src, &diags, json);
+                    report_errors(&source, &diags, json);
                     return ExitCode::FAILURE;
                 }
                 return ExitCode::SUCCESS;
@@ -173,7 +166,7 @@ fn test(path: &str, json: bool) -> ExitCode {
         }
     }
     if !diags.is_empty() {
-        report_errors(path, &src, &diags, json);
+        report_errors(&source, &diags, json);
         return ExitCode::FAILURE;
     }
     let outcomes = match run_tests(path, tests.len(), json) {
@@ -188,7 +181,7 @@ fn test(path: &str, json: bool) -> ExitCode {
         }
     };
     let report = if json {
-        render_tests_json(path, &src, &tests, &outcomes)
+        render_tests_json(&source, &tests, &outcomes)
     } else {
         render_tests(&tests, &outcomes)
     };
@@ -251,20 +244,15 @@ fn render_tests(tests: &[mir::TestCase], outcomes: &[Outcome]) -> String {
     report + &format!("{} tests, {failed} failed\n", tests.len())
 }
 
-fn render_tests_json(
-    path: &str,
-    src: &str,
-    tests: &[mir::TestCase],
-    outcomes: &[Outcome],
-) -> String {
-    let lines = diag::Lines::new(src);
-    let file = diag::json_string(path);
+fn render_tests_json(source: &Source, tests: &[mir::TestCase], outcomes: &[Outcome]) -> String {
+    let lines = diag::Lines::new(source);
     let items: Vec<String> = tests
         .iter()
         .zip(outcomes)
         .map(|(test, outcome)| {
             let name = diag::json_string(&test.name);
-            let (line, column) = lines.position(test.span.start);
+            let (file, line, column) = lines.place(test.span.start);
+            let file = diag::json_string(file);
             let (passed, output) = (!outcome.failed, diag::json_string(&outcome.output));
             format!(
                 "{{\"name\":{name},\"passed\":{passed},\"file\":{file},\"line\":{line},\"column\":{column},\"output\":{output}}}"
@@ -283,32 +271,4 @@ fn usage() -> ExitCode {
 /// code still reports the result, so a failure here is ignored.
 fn emit(mut out: impl Write, text: &str) {
     let _ = out.write_all(text.as_bytes());
-}
-
-/// Reads and parses a file. Returns the text that spans refer to.
-fn load(path: &str) -> (String, Option<ast::File>, Vec<Diagnostic>) {
-    let start = Span { start: 0, end: 0 };
-    let bytes = match std::fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            let diag = Diagnostic::new("E0001", format!("cannot read `{path}`: {e}"), start);
-            return (String::new(), None, vec![diag]);
-        }
-    };
-    let src = match String::from_utf8(bytes) {
-        Ok(src) => src,
-        Err(e) => {
-            let valid = e.utf8_error().valid_up_to();
-            let span = Span { start: valid, end: valid };
-            let diag = Diagnostic::new("E0002", "file is not valid UTF-8", span);
-            let prefix = String::from_utf8_lossy(&e.as_bytes()[..valid]).into_owned();
-            return (prefix, None, vec![diag]);
-        }
-    };
-    let (tokens, mut diags) = lexer::lex(&src);
-    let (mut file, parse_diags) = parser::parse(tokens);
-    diag::add_unless_same_line(&src, &mut diags, parse_diags);
-    let (prelude, _) = parser::parse(lexer::lex(PRELUDE).0);
-    file.stmts.splice(0..0, prelude.stmts);
-    (src, Some(file), diags)
 }

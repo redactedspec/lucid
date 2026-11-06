@@ -1,0 +1,2 @@
+public task f(x: Local) -> int
+    return entry_task() + ENTRY_VALUE

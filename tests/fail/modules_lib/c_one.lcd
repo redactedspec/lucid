@@ -1,0 +1,1 @@
+public unsafe extern task strlen(s: pointer[byte]) -> int

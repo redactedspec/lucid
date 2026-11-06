@@ -1,0 +1,4 @@
+use ./modules_lib.bad_type
+
+print missing
+print bad_type.f()

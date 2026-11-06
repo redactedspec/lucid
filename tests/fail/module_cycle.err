@@ -1,0 +1,2 @@
+modules_lib/loop_b.lcd:1:1: error E0335: `modules_lib/loop_a.lcd` imports itself, through this `use`
+  note: move what both files need into a third module

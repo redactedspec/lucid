@@ -12,6 +12,11 @@ pub struct Name {
     pub span: Span,
 }
 
+/// A declared name without its module, as `resolve.rs` adds it.
+pub fn short_name(name: &str) -> &str {
+    name.rsplit('.').next().unwrap_or(name)
+}
+
 pub struct Stmt {
     pub kind: StmtKind,
     pub span: Span,
@@ -81,6 +86,13 @@ pub struct TaskSig {
     pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub returns: Option<Type>,
+}
+
+impl TaskSig {
+    /// True for a task called with a dot, which has `self` first.
+    pub fn is_method(&self) -> bool {
+        self.params.first().is_some_and(|param| param.name.text == "self")
+    }
 }
 
 pub struct TaskDef {

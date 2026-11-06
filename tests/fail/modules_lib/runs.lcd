@@ -1,0 +1,4 @@
+print "side effect"
+var count = 0
+let total = 1 + 1
+let fine = 1

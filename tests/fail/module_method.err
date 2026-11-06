@@ -1,0 +1,5 @@
+module_method.lcd:3:7: error E0333: `size` is private to its module
+  note: mark it `public` in its module to use it here
+module_method.lcd:4:7: error E0301: name `modules_lib.secret.absent` is not defined
+module_method.lcd:5:8: error E0302: type `modules_lib.secret.Absent` is not defined
+module_method.lcd:6:7: error E0301: name `nowhere` is not defined

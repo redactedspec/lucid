@@ -1,0 +1,6 @@
+use ./modules_lib.colors
+
+task f(c: colors.Color or none) -> int
+    match c
+        none -> return 0
+        Red -> return 1

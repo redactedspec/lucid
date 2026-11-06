@@ -1,0 +1,2 @@
+module_binding.lcd:6:9: error E0318: `Red` cannot be bound here
+  note: it names a type or variant, and patterns do not nest, so use another name

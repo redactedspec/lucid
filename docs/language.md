@@ -568,9 +568,18 @@ use std.http
 use std.json as js
 use ./models
 use ./models.User
+use ./models.load as read_models
 ```
 
-Names are private to their module unless marked `public`. Import cycles are an error.
+`use ./a.b` is relative to the file that holds it, and reads `a/b.lcd`. If that file does not exist, it takes the name `b` from `a.lcd`. A `./` path cannot go up a directory. A file that cannot be found is error E0334, and the spelling must match the file's name exactly, on every system. Packages and `std` have no `./`, and report E0901 until they exist.
+
+A whole module goes by its last name, or by the name after `as`, and its names need that prefix: `models.load()`, `x: models.User`. A taken name has no prefix. The name a `use` takes must be new in the file, and not a built-in type or trait, or else error E0304. A local in a block may hide it, as with any top-level name. A `use` works in its own file only, and a module passes nothing on from its imports.
+
+Names are private to their module unless marked `public`, on a task, `type`, `choice`, or `trait`. Using a private name from another module is error E0333. A public `type` shows all its fields, and a public `choice` shows all its variants. A variant is a name of its module, so build one with `models.Red`. A pattern needs no prefix or import, since the type of the subject finds the variant: `Red -> ...`. So no binding in a pattern can reuse the name of a type or variant of any module, or else error E0318.
+
+A task with `self` also needs `public` before another module can call it, or else E0333. A private one still counts when a type must have a trait, and when it replaces a derived task, so a type means one thing in the whole program. A receiver type has one task of each name in the whole program.
+
+Only the entry file runs code. An imported module holds declarations and `let` with a literal value, or else error E0336. So importing a module never has an effect, and order of imports does not matter. Its `test` blocks are dropped: run `lucid test` on that file. Import cycles are error E0335.
 
 ## Concurrency
 
@@ -633,7 +642,7 @@ Only an `unsafe` block can call an `extern` task or `.pointer()`, or else error 
 
 `pointer[byte]` is a raw address. It has no traits, so it does not print or compare, and it holds no count. `items.pointer()` gives the address of the first element of a `list[byte]` held in a name. The address is valid while that name is in scope and until the list changes or moves. C code that writes through it changes every holder of the list. Text has no pointer: use `.bytes()`, and push a zero byte for a C string.
 
-`unsafe` blocks and `extern` declarations will need the `unsafe` package permission, once packages exist. See [security.md](security.md).
+`unsafe` blocks and `extern` declarations in any module will need the `unsafe` package permission, once packages exist. See [security.md](security.md).
 
 ## Keywords
 

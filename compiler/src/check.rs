@@ -1,18 +1,21 @@
 //! Binds names, checks types, and lowers the syntax tree to MIR in one pass.
 //! A generic body is checked once, with its parameters as opaque types, and
-//! `mono.rs` makes the concrete tasks. There are no modules yet, so nothing
-//! else needs a separate stage. List, map, and set tasks are built in.
+//! `mono.rs` makes the concrete tasks. `resolve.rs` has already joined the
+//! modules into one tree. List, map, and set tasks are built in.
 
 use crate::ast::{
     self, BinaryOp, ExprKind as Ast, StmtKind, TextPart, TypeBody, TypeKind, UnaryOp,
 };
-use crate::diag::{Diagnostic, Span};
+use crate::diag::{Diagnostic, Source, SourceFile, Span, file_index};
 use crate::mir::{
     Expr, ExprKind, Local, Program, Shape, ShapeVariant, Stmt, Task, TestCase, Ty, Types, Update,
     Visit, inner,
 };
 use crate::native::find_symbol;
 use std::collections::{HashMap, HashSet};
+
+/// The traits that `resolve::PRELUDE` declares, which no module can redefine.
+pub const PRELUDE_TRAITS: [&str; 1] = ["Error"];
 
 /// Built-in type names with one form of their own, which `named` checks.
 const LATER_TYPES: [&str; 1] = ["pointer"];
@@ -44,8 +47,8 @@ const TEST_UNION: &str = "test it first, as in `if x is not none`. Only a name n
 /// Checks a file. A program using an unbuilt feature gets only E0901, because
 /// names and types that feature would supply make any other error unreliable.
 /// With `keep_tests` false, `test` blocks are dropped unread.
-pub fn check(file: &ast::File, src: &str, keep_tests: bool) -> (Program, Vec<Diagnostic>) {
-    let mut checker = Checker { src, ..Checker::default() };
+pub fn check(file: &ast::File, source: &Source, keep_tests: bool) -> (Program, Vec<Diagnostic>) {
+    let mut checker = Checker { src: &source.text, files: &source.files, ..Checker::default() };
     checker.declare_types(file);
     checker.declare(file);
     let written: Vec<_> = file
@@ -167,6 +170,7 @@ type Bounds<'a> = Vec<Vec<&'a str>>;
 
 struct Signature<'a> {
     name: &'a ast::Name,
+    public: bool,
     type_params: TypeEnv<'a>,
     bounds: Bounds<'a>,
     /// A task of a trait: it has no body, and `self` has no type here.
@@ -261,8 +265,9 @@ enum Top<'a> {
 
 #[derive(Default)]
 struct Checker<'a> {
-    /// The text of the file, where an `unsafe` block needs a comment.
+    /// The text of the files, where an `unsafe` block needs a comment.
     src: &'a str,
+    files: &'a [SourceFile],
     diags: Vec<Diagnostic>,
     /// The ids of `extern` tasks.
     foreign: HashSet<usize>,
@@ -285,6 +290,10 @@ struct Checker<'a> {
     datas: Vec<Data<'a>>,
     /// A type or variant name, with its data and variant index.
     constructors: HashMap<&'a str, (usize, usize)>,
+    /// The same names as written, without their modules.
+    constructor_names: HashSet<&'a str>,
+    /// The form of each foreign symbol, which all of its declarations share.
+    symbols: HashMap<&'a str, (Vec<Ty>, Ty)>,
     /// The types whose written `hash` a trait check is inside.
     written_hashes: Vec<Ty>,
     /// The aliases being resolved, innermost last.
@@ -362,7 +371,16 @@ fn poisoned(span: Span) -> Expr {
     Expr { kind: ExprKind::None, ty: Ty::Error, span }
 }
 
-fn is_literal(expr: &ast::Expr) -> bool {
+/// True for a name that means a built-in type or trait everywhere.
+pub fn is_built_in(name: &str) -> bool {
+    BUILT_IN_TYPES.contains(&name)
+        || number_type(name).is_some()
+        || LATER_TYPES.contains(&name)
+        || BUILT_IN_TRAITS.contains(&name)
+        || LATER_TRAITS.contains(&name)
+}
+
+pub fn is_literal(expr: &ast::Expr) -> bool {
     match &expr.kind {
         Ast::Int(_) | Ast::Float(_) | Ast::Bool(_) | Ast::None => true,
         Ast::Text(parts) => parts.iter().all(|part| matches!(part, TextPart::Literal(_))),
@@ -796,7 +814,11 @@ impl<'a> Checker<'a> {
                     let args: Vec<Ty> = args.iter().map(|arg| self.ty(arg)).collect();
                     self.named(&name.text, args, ty.span)
                 }
-                _ => self.unsupported("this type", ty.span).ty,
+                _ => {
+                    let names: Vec<&str> = path.iter().map(|n| n.text.as_str()).collect();
+                    let message = format!("type `{}` is not defined", names.join("."));
+                    self.fail("E0302", message, ty.span).ty
+                }
             },
             TypeKind::Any(held) => self.any_type(held, ty.span),
             TypeKind::Task { params, returns } => {
@@ -1003,23 +1025,15 @@ impl<'a> Checker<'a> {
     /// Like `define`, for a name that a type or `set(...)` already means.
     fn define_data(&mut self, name: &'a ast::Name) -> bool {
         let text = name.text.as_str();
-        let reserved = BUILT_IN_TYPES.contains(&text)
-            || number_type(text).is_some()
-            || LATER_TYPES.contains(&text)
-            || BUILT_IN_TRAITS.contains(&text)
-            || LATER_TRAITS.contains(&text)
-            || self.traits.contains_key(text);
+        let short = ast::short_name(text);
+        let reserved = is_built_in(short)
+            || self.traits.contains_key(text)
+            || (text != short && PRELUDE_TRAITS.contains(&short));
         if reserved {
             self.fail("E0304", format!("`{text}` is already defined"), name.span);
             return false;
         }
         self.define(name)
-    }
-
-    fn data_header(&mut self, public: bool, span: Span) {
-        if public {
-            self.unsupported("`public`", span);
-        }
     }
 
     fn is_trait(&self, name: &str) -> bool {
@@ -1300,13 +1314,12 @@ impl<'a> Checker<'a> {
         let mut written: Vec<(usize, usize, Vec<WrittenField<'a>>)> = Vec::new();
         for stmt in &file.stmts {
             if let StmtKind::Trait(def) = &stmt.kind {
-                self.declare_trait(def, stmt.span);
+                self.declare_trait(def);
             }
         }
         for stmt in &file.stmts {
             match &stmt.kind {
                 StmtKind::Type(def) => {
-                    self.data_header(def.public, stmt.span);
                     if !self.define_data(&def.name) {
                         continue;
                     }
@@ -1324,7 +1337,11 @@ impl<'a> Checker<'a> {
                         TypeBody::Fields(fields) => {
                             let id = self.new_data(&def.name, &def.type_params, false);
                             let name = def.name.text.as_str();
-                            self.datas[id].variants.push(Variant { name, fields: Vec::new() });
+                            let short = ast::short_name(name);
+                            self.constructor_names.insert(short);
+                            self.datas[id]
+                                .variants
+                                .push(Variant { name: short, fields: Vec::new() });
                             self.constructors.insert(name, (id, 0));
                             let fields = fields
                                 .iter()
@@ -1335,7 +1352,6 @@ impl<'a> Checker<'a> {
                     }
                 }
                 StmtKind::Choice(def) => {
-                    self.data_header(def.public, stmt.span);
                     if !self.define_data(&def.name) {
                         continue;
                     }
@@ -1346,8 +1362,10 @@ impl<'a> Checker<'a> {
                         let index = self.datas[id].variants.len();
                         if self.define_data(&variant.name) {
                             self.constructors.insert(name, (id, index));
+                            self.constructor_names.insert(ast::short_name(name));
                         }
-                        self.datas[id].variants.push(Variant { name, fields: Vec::new() });
+                        let short = ast::short_name(name);
+                        self.datas[id].variants.push(Variant { name: short, fields: Vec::new() });
                         let fields = variant
                             .params
                             .iter()
@@ -1465,10 +1483,7 @@ impl<'a> Checker<'a> {
 
     /// A trait name goes in before anything that may name it. Its tasks wait
     /// for `declare`, since their types may be any type.
-    fn declare_trait(&mut self, def: &'a ast::TraitDef, span: Span) {
-        if def.public {
-            self.unsupported("`public`", span);
-        }
+    fn declare_trait(&mut self, def: &'a ast::TraitDef) {
         if let Some(first) = def.type_params.first() {
             self.unsupported("a generic trait", first.name.span);
         }
@@ -1558,17 +1573,15 @@ impl<'a> Checker<'a> {
     fn declare(&mut self, file: &'a ast::File) {
         for stmt in &file.stmts {
             let StmtKind::Task(def) = &stmt.kind else { continue };
-            if def.public {
-                self.unsupported("`public`", stmt.span);
-            }
             let name = def.sig.name.text.as_str();
             let id = self.signatures.len();
-            if def.sig.params.first().is_some_and(|param| param.name.text == "self") {
+            if def.sig.is_method() {
                 self.methods.entry(name).or_default().push(id);
             } else if self.define(&def.sig.name) {
                 self.task_ids.insert(name, id);
             }
-            let signature = self.signature(&def.sig, false);
+            let mut signature = self.signature(&def.sig, false);
+            signature.public = def.public;
             if def.body.is_none() {
                 self.check_foreign(def, &signature);
                 self.foreign.insert(id);
@@ -1650,7 +1663,8 @@ impl<'a> Checker<'a> {
         let returns = sig.returns.as_ref().map_or(Ty::None, |ty| self.ty(ty));
         self.type_params.clear();
         self.bounds.clear();
-        Signature { name: &sig.name, type_params, bounds, in_trait, params, returns }
+        let (name, public) = (&sig.name, false);
+        Signature { name, public, type_params, bounds, in_trait, params, returns }
     }
 
     fn default_value(&mut self, value: &'a ast::Expr, ty: Ty) -> Expr {
@@ -1751,9 +1765,9 @@ impl<'a> Checker<'a> {
     }
 
     /// An `extern` task crosses to C, where only plain values make sense.
-    fn check_foreign(&mut self, def: &ast::TaskDef, signature: &Signature) {
+    fn check_foreign(&mut self, def: &'a ast::TaskDef, signature: &Signature) {
         let span = def.sig.name.span;
-        let name = &def.sig.name.text;
+        let name = ast::short_name(&def.sig.name.text);
         let plain = |ty: Ty| ty.is_number() || matches!(ty, Ty::Bool | Ty::Pointer);
         let problem = if name.starts_with("lucid_") {
             Some("the runtime keeps names that start with `lucid_`")
@@ -1769,7 +1783,14 @@ impl<'a> Checker<'a> {
             Some("a parameter must be a number, `bool`, or `pointer[byte]`")
         } else if !plain(signature.returns) && !matches!(signature.returns, Ty::None | Ty::Error) {
             Some("the result must be a number, `bool`, `pointer[byte]`, or nothing")
+        } else if self.symbols.get(name).is_some_and(|(params, returns)| {
+            *returns != signature.returns
+                || !params.iter().copied().eq(signature.params.iter().map(|p| p.ty))
+        }) {
+            Some("another module declares this symbol with a different form")
         } else {
+            let params = signature.params.iter().map(|p| p.ty).collect();
+            self.symbols.insert(name, (params, signature.returns));
             if find_symbol(name).is_none() {
                 let message = format!("cannot find the foreign task `{name}`");
                 let note = "it must be in the C runtime or `kernel32`";
@@ -1791,7 +1812,8 @@ impl<'a> Checker<'a> {
         let read = |(local, &ty)| Expr { kind: ExprKind::Local(local), ty, span };
         let args = locals.iter().enumerate().map(read).collect();
         let name: &'static str = def.sig.name.text.clone().leak();
-        let call = Expr { kind: ExprKind::Foreign(name, args), ty: returns, span };
+        let symbol = ast::short_name(name);
+        let call = Expr { kind: ExprKind::Foreign(symbol, args), ty: returns, span };
         let (captures, change, take, borrowed) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         Task {
             name,
@@ -2232,9 +2254,6 @@ impl<'a> Checker<'a> {
             return None;
         };
         let sig = &def.sig;
-        if def.public {
-            self.unsupported("`public`", span);
-        }
         let wrong = "a nested task takes no type parameters, `self`, defaults, or `change`";
         let plain = |p: &ast::Param| {
             p.name.text != "self" && p.default.is_none() && p.mode != ast::ParamMode::Change
@@ -2934,7 +2953,7 @@ impl<'a> Checker<'a> {
     /// A variant or type name in a binding would read as a test, and catch
     /// everything. See decision 52.
     fn check_binding(&mut self, name: &ast::Name) {
-        if self.constructors.contains_key(name.text.as_str()) {
+        if self.constructor_names.contains(name.text.as_str()) {
             let message = format!("`{}` cannot be bound here", name.text);
             let note = "it names a type or variant, and patterns do not nest, so use another name";
             self.report(Diagnostic::new("E0318", message, name.span).note(note));
@@ -4968,6 +4987,7 @@ impl<'a> Checker<'a> {
         let ty = value.ty;
         let found = self.trait_task(ty, name).map(|id| (id, Vec::new()));
         if let Some((id, known)) = found.or_else(|| self.find_method(name, ty)) {
+            self.check_method_visible(id, span);
             if matches!(ty, Ty::Any(_)) && self.signatures[id].in_trait && self.changes(id) {
                 self.poison_args(args, span);
                 let message =
@@ -5014,6 +5034,18 @@ impl<'a> Checker<'a> {
             diag
         });
         poison
+    }
+
+    /// A private task with `self` can only be called in its own module. It
+    /// still counts for traits, so a type means one thing everywhere.
+    fn check_method_visible(&mut self, id: usize, span: Span) {
+        let signature = &self.signatures[id];
+        let home = file_index(self.files, signature.name.span.start);
+        if !signature.in_trait && !signature.public && home != file_index(self.files, span.start) {
+            let message = format!("`{}` is private to its module", signature.name.text);
+            let note = "mark it `public` in its module to use it here";
+            self.report(Diagnostic::new("E0333", message, span).note(note));
+        }
     }
 
     /// A dot call: a built-in task on a built-in type, or else a method.

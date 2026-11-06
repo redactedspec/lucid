@@ -420,6 +420,17 @@ Read for decisions 111 and 112.
 
 Sources: [Clippy lint source](https://rust.googlesource.com/rust-clippy/+/refs/heads/beta/clippy_lints/src/undocumented_unsafe_blocks.rs).
 
+## Modules
+
+Decisions 116 to 120.
+
+- **Go.** A name in another package needs a qualified form and must be exported. An import's name is scoped to the file that holds it. A blank import exists for initialization side effects, which Lucid avoids by having no module code run.
+- **Rust.** The orphan rule limits who may implement a trait, as the Reference states. Lucid has no such limit today: any module may add a task to any type, and a clash is E0304. Packages at M5 may need a rule here.
+- **Swift.** Evolution discussion describes inferring a case from the switched type, with a trap: `.none` on an optional means `Optional.none`. Lucid avoids that trap since `none` is a keyword, so no variant has that name.
+- **Weak ground.** Decision 118 is a judgment call, with no study behind it. These were search summaries of the pages, not full reads, and the Swift source is a mailing list and forums, not the language reference.
+
+Sources: [Go spec](https://go.dev/ref/spec), [Rust Reference, implementations](https://doc.rust-lang.org/reference/items/implementations.html), [Swift Evolution thread](https://lists.swift.org/pipermail/swift-evolution/Week-of-Mon-20160208/009940.html), [Swift Forums on `.none`](https://forums.swift.org/t/should-you-ever-have-a-none-case-in-an-enum/58760).
+
 ## Open research
 
 | Topic | Needed by |

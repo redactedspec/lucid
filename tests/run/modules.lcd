@@ -1,0 +1,56 @@
+use ./modules_lib.shapes
+use ./modules_lib.text
+use ./modules_lib.shapes.Square
+use ./modules_lib.shapes.sides as count
+use ./modules_lib.deep.units as units
+
+# These names are private in `shapes`, and mean something else here.
+task helper() -> int
+    return 100
+
+task scale(x: int) -> int
+    return x + 1
+
+let square = Square(side: 3)
+print square
+print square.area()
+print shapes.Square().area()
+print count()
+print helper()
+print scale(1)
+print units.name()
+print units.make()
+
+let pair = shapes.Pair[int](left: 1, right: 2)
+print pair
+print shapes.first(pair)
+
+let id: shapes.Id = 7
+print id
+print shapes.apply(x => x * 2)
+print shapes.apply(scale, x: 1)
+
+let dark = shapes.darken(shapes.Light)
+print dark
+print shapes.darken(dark)
+match dark
+    Light -> print "light"
+    Dark(amount) -> print "dark {amount}"
+
+task shade_name(shade: shapes.Shade or none) -> text
+    match shade
+        none -> return "none"
+        s: shapes.Shade -> return "{s}"
+
+print shade_name(none)
+print shade_name(shapes.Light)
+print shapes.describe(square)
+
+let named: list[any shapes.Named] = [square]
+print named[0].label()
+
+if true
+    # A local may hide a module inside a block.
+    let shapes = "hidden"
+    print shapes.len()
+print text.shout()

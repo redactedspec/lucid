@@ -1,0 +1,6 @@
+use ./modules_lib.bad
+
+task go() -> int
+    return bad.boom([1])
+
+print go()

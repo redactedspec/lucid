@@ -1,0 +1,4 @@
+module_clash.lcd:1:1: error E0304: `secret` is already defined
+module_clash.lcd:2:1: error E0304: `secret` is already defined
+module_clash.lcd:4:1: error E0304: `Open` is already defined
+module_clash.lcd:5:26: error E0301: the module has no name `nothing`

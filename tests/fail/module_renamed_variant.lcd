@@ -1,0 +1,12 @@
+use ./modules_lib.colors
+use ./modules_lib.colors.Red as Crimson
+
+task f(c: colors.Color or none) -> text
+    match c
+        none -> return "none"
+        Crimson -> return "crimson"
+
+task g(c: colors.Color) -> text
+    match c
+        Crimson -> return "crimson"
+        Blue -> return "blue"

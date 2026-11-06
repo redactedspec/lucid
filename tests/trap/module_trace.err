@@ -1,0 +1,3 @@
+modules_lib/bad.lcd:2:12: trap: list index out of bounds
+    at module_trace.lcd:4:12 in module_trace.go
+    at module_trace.lcd:6:7 in top level

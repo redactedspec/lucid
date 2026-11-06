@@ -1,0 +1,5 @@
+use ./modules_lib.secret
+use ./modules_lib.secret.hidden
+
+print secret.hidden()
+let c: secret.Closed = secret.make()

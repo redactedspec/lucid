@@ -1,0 +1,9 @@
+use ./modules_lib.nosy
+
+type Local
+    a: int
+
+let ENTRY_VALUE = 1
+
+task entry_task() -> int
+    return 1

@@ -1,0 +1,6 @@
+use ./modules_lib.secret
+
+print secret.make().size()
+print secret.absent()
+let x: secret.Absent = 1
+print nowhere.thing

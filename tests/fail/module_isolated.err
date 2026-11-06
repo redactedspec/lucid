@@ -1,0 +1,3 @@
+modules_lib/nosy.lcd:1:18: error E0302: type `Local` is not defined
+modules_lib/nosy.lcd:2:12: error E0301: name `entry_task` is not defined
+modules_lib/nosy.lcd:2:27: error E0301: name `ENTRY_VALUE` is not defined

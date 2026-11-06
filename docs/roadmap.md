@@ -73,7 +73,8 @@ Build a thin end-to-end path first. Depth comes later.
 
 - [x] `try`, `else`, the `Error` trait, unused-error check
 - [x] `test`, `expect`, `unsafe`, and stack traces on a trap
-- [ ] Modules, `use`, `public`, packages, `lucid.toml`
+- [x] Modules, `use`, `public`
+- [ ] Packages, `lucid.toml`
 - [ ] `std.fs`, `std.json`, `std.env`, `std.args`, `std.time`
 - [ ] `lucid build`, `test`, `fix`, `explain`, `context`
 - [ ] `lucid fmt`, written in Lucid as first dogfooding test

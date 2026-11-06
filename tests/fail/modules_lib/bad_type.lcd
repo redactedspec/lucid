@@ -1,0 +1,2 @@
+public task f() -> int
+    return "text"

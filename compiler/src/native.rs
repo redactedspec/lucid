@@ -1,7 +1,7 @@
 //! Cranelift backend. Lowers MIR to machine code, and runs it in this process.
 
 use crate::ast::BinaryOp;
-use crate::diag::{Diagnostic, Lines, Span};
+use crate::diag::{Diagnostic, Lines, Source, Span};
 use crate::mir::{Expr, ExprKind, HashOp, KeyTasks, Local, Program, Stmt, Task, Ty, Update};
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
@@ -35,18 +35,13 @@ const INLINE_COUNTS: bool = !cfg!(debug_assertions);
 const UNREACHABLE: TrapCode = TrapCode::unwrap_user(1);
 
 /// Compiles the program and runs it on this thread, whose stack is
-/// `stack_bytes` long. `path` and `src` place trap messages.
-pub fn run(
-    program: &Program,
-    path: &str,
-    src: &str,
-    stack_bytes: usize,
-) -> Result<(), Vec<Diagnostic>> {
+/// `stack_bytes` long. `source` places trap messages.
+pub fn run(program: &Program, source: &Source, stack_bytes: usize) -> Result<(), Vec<Diagnostic>> {
     let here = 0u8;
     // ponytail: a limit in the code fits one JIT thread. `lucid build` and
     // `spawn` need a per-thread limit that the runtime sets up.
     let stack_limit = (&raw const here) as usize - (stack_bytes - STACK_MARGIN);
-    let (entry, _) = compile(program, path, src, stack_limit, stack_bytes / 2)?;
+    let (entry, _) = compile(program, source, stack_limit, stack_bytes / 2)?;
     run_entry(entry);
     Ok(())
 }
@@ -56,14 +51,13 @@ pub fn run(
 /// in `main.rs`.
 pub fn run_tests(
     program: &Program,
-    path: &str,
-    src: &str,
+    source: &Source,
     stack_bytes: usize,
     from: usize,
 ) -> Result<(), Vec<Diagnostic>> {
     let here = 0u8;
     let stack_limit = (&raw const here) as usize - (stack_bytes - STACK_MARGIN);
-    let (_, tests) = compile(program, path, src, stack_limit, stack_bytes / 2)?;
+    let (_, tests) = compile(program, source, stack_limit, stack_bytes / 2)?;
     let mark = || {
         let mark = b"\0";
         // SAFETY: the range is `mark`.
@@ -181,8 +175,7 @@ fn signature_of(module: &JITModule, task: &Task) -> Signature {
 /// Panics on a failure: valid input reaching here makes that a compiler bug.
 fn compile(
     program: &Program,
-    path: &str,
-    src: &str,
+    source: &Source,
     stack_limit: usize,
     max_main_frame: usize,
 ) -> Result<(*const u8, Vec<*const u8>), Vec<Diagnostic>> {
@@ -327,7 +320,7 @@ fn compile(
     let signature = signature_of(&module, &program.main);
     let main = module.declare_anonymous_function(&signature).expect(CODEGEN);
 
-    let lines = Lines::new(src);
+    let lines = Lines::new(source);
     let mut diags = Vec::new();
     let mut context = module.make_context();
     let mut builder_context = FunctionBuilderContext::new();
@@ -359,7 +352,6 @@ fn compile(
             data,
             text,
             statics,
-            path,
             lines,
         }
         .task(task, data_id, stack_limit);
@@ -373,8 +365,8 @@ fn compile(
             let held = held.filter(|_| !task.name.is_empty());
             let site =
                 held.map(|loc| loc.loc.as_abs()).filter(|loc| !loc.is_default()).map(|loc| {
-                    let (line, column) = lines.position(loc.bits() as usize);
-                    CallSite { task: task.name, line, column }
+                    let (file, line, column) = lines.place(loc.bits() as usize);
+                    CallSite { file, task: task.name, line, column }
                 });
             sites.push((id, call.ret_addr, site));
         }
@@ -394,7 +386,7 @@ fn compile(
     let tests = tests.map(|test| module.get_finalized_function(ids[test.task])).collect();
     let address =
         |(id, offset, line)| (module.get_finalized_function(id) as usize + offset as usize, line);
-    lucid_rt::set_call_sites(path, sites.into_iter().map(address).collect());
+    lucid_rt::set_call_sites(sites.into_iter().map(address).collect());
     // Leaked on purpose: `entry` points into memory that the module owns.
     std::mem::forget(module);
     Ok((entry, tests))
@@ -453,7 +445,6 @@ struct Lower<'a, 'b> {
     text: Vec<u8>,
     /// Values in static data, each once in the program.
     statics: &'a mut HashMap<Vec<u8>, DataId>,
-    path: &'a str,
     lines: &'a Lines<'a>,
 }
 
@@ -651,8 +642,8 @@ impl Lower<'_, '_> {
 
     /// Ends the current block with a trap at `span`.
     fn trap(&mut self, message: &str, span: Span) {
-        let (line, column) = self.lines.position(span.start);
-        let [text, len] = self.text(&format!("{}:{line}:{column}: trap: {message}", self.path));
+        let (file, line, column) = self.lines.place(span.start);
+        let [text, len] = self.text(&format!("{file}:{line}:{column}: trap: {message}"));
         let frame = self.body.ins().get_frame_pointer(self.pointer);
         self.call(self.runtime.trap, &[text, len, frame]);
         self.body.ins().trap(UNREACHABLE);
@@ -778,8 +769,8 @@ impl Lower<'_, '_> {
             }
             Stmt::Fail(value, span) => {
                 let value = self.expr(value);
-                let (line, column) = self.lines.position(span.start);
-                let [text, len] = self.text(&format!("{}:{line}:{column}: trap: ", self.path));
+                let (file, line, column) = self.lines.place(span.start);
+                let [text, len] = self.text(&format!("{file}:{line}:{column}: trap: "));
                 let frame = self.body.ins().get_frame_pointer(self.pointer);
                 self.call(self.runtime.trap_text, &[text, len, value, frame]);
                 self.body.ins().trap(UNREACHABLE);

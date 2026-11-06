@@ -1,0 +1,54 @@
+# Holds names that the entry file also uses, which must not clash.
+use ./deep.units
+
+let SIDES = 4
+
+public trait Named
+    task label(self) -> text
+
+public type Square
+    side: int = 2
+
+public type Pair[T]
+    left: T
+    right: T
+
+public type Id = int
+
+public choice Shade
+    Light
+    Dark(amount: int)
+
+public task area(self: Square) -> int
+    return scale(self.side * self.side)
+
+public task label(self: Square) -> text
+    return "square of {units.name()}"
+
+task scale(x: int) -> int
+    return x * 2
+
+task helper() -> int
+    return SIDES
+
+public task sides() -> int
+    return helper()
+
+public task first[T](pair: Pair[T]) -> T
+    return pair.left
+
+public task apply(f: task(int) -> int, x: int = 5) -> int
+    return f(x)
+
+public task darken(shade: Shade) -> Shade
+    # A local hides the task of the same name.
+    let scale = 1
+    match shade
+        Light -> return Dark(amount: scale)
+        Dark(amount) -> return Dark(amount: amount + scale)
+
+public task describe[T: Named](item: T) -> text
+    return item.label()
+
+test "never runs from another module"
+    expect false

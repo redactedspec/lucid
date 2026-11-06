@@ -4,7 +4,7 @@ trait Pair[T]
 trait Generic
     task make[T](self, value: T) -> T
 
-public trait Open
+trait Open
     task open(self)
 
 type Table[V: Hash] = map[text, V]

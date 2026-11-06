@@ -1,0 +1,9 @@
+public choice Color
+    Red
+    Blue
+
+public task pick() -> Color
+    return Blue
+
+public type Thing
+    a: int

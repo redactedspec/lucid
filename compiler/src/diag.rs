@@ -26,32 +26,69 @@ impl Diagnostic {
     }
 }
 
-/// Maps byte offsets to 1-based lines and columns. Columns count characters.
+/// One file in a `Source`.
+pub struct SourceFile {
+    pub path: &'static str,
+    pub start: usize,
+}
+
+/// Every file of a program, end to end, so that a span alone gives its file.
+/// The entry file comes first.
+#[derive(Default)]
+pub struct Source {
+    pub text: String,
+    pub files: Vec<SourceFile>,
+}
+
+impl Source {
+    /// Adds a file, and returns where it starts. A line break follows it, so
+    /// the next file starts on a line of its own, and the offset of this file's
+    /// end still falls in this file.
+    pub fn add(&mut self, path: &'static str, text: &str) -> usize {
+        let start = self.text.len();
+        self.files.push(SourceFile { path, start });
+        self.text += text;
+        self.text.push('\n');
+        start
+    }
+}
+
+/// The position in `files` of the file that holds a byte offset.
+pub fn file_index(files: &[SourceFile], offset: usize) -> usize {
+    files.partition_point(|file| file.start <= offset).saturating_sub(1)
+}
+
+/// Maps byte offsets to files and 1-based lines and columns. Columns count
+/// characters.
 pub struct Lines<'a> {
-    src: &'a str,
+    source: &'a Source,
     starts: Vec<usize>,
 }
 
 impl<'a> Lines<'a> {
-    pub fn new(src: &'a str) -> Self {
-        let newlines = src.match_indices('\n').map(|(i, _)| i + 1);
-        Self { src, starts: std::iter::once(0).chain(newlines).collect() }
+    pub fn new(source: &'a Source) -> Self {
+        let newlines = source.text.match_indices('\n').map(|(i, _)| i + 1);
+        Self { source, starts: std::iter::once(0).chain(newlines).collect() }
     }
 
-    pub fn position(&self, offset: usize) -> (usize, usize) {
+    /// The file, line, and column of a byte offset.
+    pub fn place(&self, offset: usize) -> (&'static str, usize, usize) {
+        let SourceFile { path, start: file } =
+            self.source.files[file_index(&self.source.files, offset)];
         let line = self.starts.partition_point(|&start| start <= offset);
         let start = self.starts[line - 1];
-        let prefix = &self.src[start..offset];
+        let line = line - self.starts.partition_point(|&start| start < file);
+        let prefix = &self.source.text[start..offset];
         let bom = usize::from(line == 1 && prefix.starts_with('\u{feff}'));
-        (line, prefix.chars().count() + 1 - bom)
+        (path, line, prefix.chars().count() + 1 - bom)
     }
 }
 
 /// Merges parser diagnostics into `diags`, except on lines that already have
 /// one. The lexer's recovery often causes a second, misleading parse error.
-pub fn add_unless_same_line(src: &str, diags: &mut Vec<Diagnostic>, more: Vec<Diagnostic>) {
-    let lines = Lines::new(src);
-    let line = |d: &Diagnostic| lines.position(d.span.start).0;
+pub fn add_unless_same_line(source: &Source, diags: &mut Vec<Diagnostic>, more: Vec<Diagnostic>) {
+    let lines = Lines::new(source);
+    let line = |d: &Diagnostic| lines.place(d.span.start).1;
     let taken: std::collections::HashSet<usize> = diags.iter().map(line).collect();
     diags.extend(more.into_iter().filter(|d| !taken.contains(&line(d))));
 }
@@ -63,11 +100,11 @@ fn sorted(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
     sorted
 }
 
-pub fn render_text(file: &str, src: &str, diags: &[Diagnostic]) -> String {
-    let lines = Lines::new(src);
+pub fn render_text(source: &Source, diags: &[Diagnostic]) -> String {
+    let lines = Lines::new(source);
     let mut out = String::new();
     for d in sorted(diags) {
-        let (line, column) = lines.position(d.span.start);
+        let (file, line, column) = lines.place(d.span.start);
         out += &format!("{file}:{line}:{column}: error {}: {}\n", d.code, d.message);
         for note in &d.notes {
             out += &format!("  note: {note}\n");
@@ -76,13 +113,13 @@ pub fn render_text(file: &str, src: &str, diags: &[Diagnostic]) -> String {
     out
 }
 
-pub fn render_json(file: &str, src: &str, diags: &[Diagnostic]) -> String {
-    let lines = Lines::new(src);
+pub fn render_json(source: &Source, diags: &[Diagnostic]) -> String {
+    let lines = Lines::new(source);
     let items: Vec<String> = sorted(diags)
         .iter()
         .map(|d| {
-            let (line, column) = lines.position(d.span.start);
-            let (end_line, end_column) = lines.position(d.span.end);
+            let (file, line, column) = lines.place(d.span.start);
+            let (_, end_line, end_column) = lines.place(d.span.end);
             let notes: Vec<String> = d.notes.iter().map(|n| json_string(n)).collect();
             format!(
                 "{{\"code\":{},\"severity\":\"error\",\"message\":{},\"file\":{},\"line\":{line},\
@@ -119,22 +156,31 @@ pub fn json_string(s: &str) -> String {
 mod tests {
     use super::*;
 
+    fn one(text: &str) -> Source {
+        let mut source = Source::default();
+        source.add("f", text);
+        source
+    }
+
     #[test]
     fn positions_count_characters_and_lines() {
-        let lines = Lines::new("ab\né x\n");
-        assert_eq!(lines.position(0), (1, 1));
-        assert_eq!(lines.position(3), (2, 1));
-        assert_eq!(lines.position(6), (2, 3));
-        assert_eq!(lines.position(8), (3, 1));
-        assert_eq!(Lines::new("\u{feff}ab").position(4), (1, 2));
+        let source = one("ab\né x\n");
+        let lines = Lines::new(&source);
+        assert_eq!(lines.place(0), ("f", 1, 1));
+        assert_eq!(lines.place(3), ("f", 2, 1));
+        assert_eq!(lines.place(6), ("f", 2, 3));
+        assert_eq!(lines.place(8), ("f", 3, 1));
+        assert_eq!(Lines::new(&one("\u{feff}ab")).place(4), ("f", 1, 2));
     }
 
     #[test]
     fn json_has_the_documented_shape_and_escapes_text() {
         let span = Span { start: 0, end: 2 };
         let diags = [Diagnostic::new("T0", "bad \"x\"", span).note("a\nb")];
+        let mut source = Source::default();
+        source.add("a\\b.lcd", "ab");
         assert_eq!(
-            render_json("a\\b.lcd", "ab", &diags),
+            render_json(&source, &diags),
             "[{\"code\":\"T0\",\"severity\":\"error\",\"message\":\"bad \\\"x\\\"\",\
              \"file\":\"a\\\\b.lcd\",\"line\":1,\"column\":1,\"end_line\":1,\"end_column\":3,\
              \"notes\":[\"a\\nb\"],\"fixes\":[]}]\n"
@@ -145,6 +191,6 @@ mod tests {
     fn output_is_sorted_by_position() {
         let at = |start| Span { start, end: start };
         let diags = [Diagnostic::new("E2", "b", at(1)), Diagnostic::new("E1", "a", at(0))];
-        assert_eq!(render_text("f", "ab", &diags), "f:1:1: error E1: a\nf:1:2: error E2: b\n");
+        assert_eq!(render_text(&one("ab"), &diags), "f:1:1: error E1: a\nf:1:2: error E2: b\n");
     }
 }

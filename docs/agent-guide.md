@@ -563,11 +563,36 @@ unsafe
 - `.pointer()` works on a `list[byte]` in a name, and is valid until the list changes. A C string is `.bytes()` with a zero byte pushed.
 - `lucid check --unsafe file.lcd` lists every site.
 
+## Modules
+
+```text
+# models.lcd
+public type User
+    name: text
+
+public task greet(user: User) -> text
+    return "Hi {user.name}"
+```
+
+```text
+# main.lcd
+use ./models
+use ./models.User
+
+print models.greet(User(name: "Ada"))
+```
+
+- `use ./a.b` reads `a/b.lcd` next to this file, or else takes the name `b` from `a.lcd`. `as` renames.
+- A name is private unless marked `public`, and so is a task with `self`. A public `type` shows its fields, and a public `choice` its variants.
+- Build a variant with `models.Red`. A pattern is just `Red`, with no prefix.
+- Only the entry file runs code. An imported module holds declarations and `let` with a literal value.
+- `use std.x` reports E0901: there is no standard library yet.
+
 ## What is not available
 
-Some keywords parse but do not run yet, and report E0901: `spawn`, `shared`, `weak`, `use`, `public`.
+Some keywords parse but do not run yet, and report E0901: `spawn`, `shared`, `weak`.
 
-There are no modules, file or console input, or standard library. These do not exist, so write your own: `sort`, `split`, `join`, `trim`, `contains`, `replace`, `abs`, `min`, `max`, `sum`, `range`, `enumerate`, `zip`, `.map`, `.filter`, `.keys`, `.values`, `.insert`, `.clear`, text to number, and number to text other than interpolation. There is no way to turn a number into a character. To map characters to numbers, search a text such as `"abcdefghijklmnopqrstuvwxyz"`.
+There is no file or console input, and no standard library. These do not exist, so write your own: `sort`, `split`, `join`, `trim`, `contains`, `replace`, `abs`, `min`, `max`, `sum`, `range`, `enumerate`, `zip`, `.map`, `.filter`, `.keys`, `.values`, `.insert`, `.clear`, text to number, and number to text other than interpolation. There is no way to turn a number into a character. To map characters to numbers, search a text such as `"abcdefghijklmnopqrstuvwxyz"`.
 
 `print` is the only output, and it ends each value with a line break.
 

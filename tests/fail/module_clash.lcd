@@ -1,0 +1,8 @@
+use ./modules_lib.secret
+use ./modules_lib.secret
+use ./modules_lib.secret.Open
+use ./modules_lib.secret.make as Open
+use ./modules_lib.secret.nothing
+
+task secret() -> int
+    return 1

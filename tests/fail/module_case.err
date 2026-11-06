@@ -1,0 +1,4 @@
+module_case.lcd:1:1: error E0334: cannot find module `./modules_lib.Colors`
+  note: looked for `modules_lib/Colors.lcd`
+module_case.lcd:2:1: error E0334: cannot find module `./Modules_lib.colors`
+  note: looked for `Modules_lib/colors.lcd`

@@ -16,7 +16,7 @@ let d = 1 + 1
 task g() -> int
     return d
 
-public task h()
+task h()
     return
 
 missing("x")

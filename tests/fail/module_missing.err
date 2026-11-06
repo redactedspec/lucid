@@ -1,0 +1,4 @@
+module_missing.lcd:1:1: error E0334: cannot find module `./modules_lib.nothing`
+  note: looked for `modules_lib/nothing.lcd`
+module_missing.lcd:2:1: error E0334: cannot find module `./no_such_dir.thing`
+  note: looked for `no_such_dir/thing.lcd`

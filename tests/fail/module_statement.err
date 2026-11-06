@@ -1,0 +1,6 @@
+modules_lib/runs.lcd:1:1: error E0336: an imported module cannot run code
+  note: it holds declarations and `let` with a literal value
+modules_lib/runs.lcd:2:1: error E0336: an imported module cannot run code
+  note: it holds declarations and `let` with a literal value
+modules_lib/runs.lcd:3:1: error E0336: an imported module cannot run code
+  note: it holds declarations and `let` with a literal value
