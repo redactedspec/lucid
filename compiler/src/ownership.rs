@@ -111,9 +111,9 @@ pub fn render_costs(source: &Source, costs: &BTreeSet<Cost>, json: bool) -> Stri
             "copy" => "is held twice, so the next write copies it",
             _ => "gets one more count here",
         };
-        let (kind, ty) = (cost.kind, &cost.ty);
+        let (kind, ty) = (cost.kind, crate::diag::plain(&cost.ty));
         if json {
-            let (file, ty) = (json_string(file), json_string(ty));
+            let (file, ty) = (json_string(file), json_string(&ty));
             format!(
                 "{{\"kind\":\"{kind}\",\"type\":{ty},\"file\":{file},\"line\":{line},\"column\":{column}}}"
             )

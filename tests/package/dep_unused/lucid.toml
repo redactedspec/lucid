@@ -1,0 +1,6 @@
+[package]
+name = "dep_unused"
+version = "1.0.0"
+
+[dependencies]
+nope = { path = "../nope" }

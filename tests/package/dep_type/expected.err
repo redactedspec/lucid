@@ -1,0 +1,1 @@
+dep_type/src/main.lcd:2:14: error E0303: this annotation needs `int`, found `greet.Name`

@@ -156,11 +156,25 @@ fn test(path: &str, json: bool) -> ExitCode {
         }
         files = package_files(path);
     }
+    // All files compile first, so an error in one wastes no test run.
     let mut results = Vec::new();
     for file in &files {
-        match test_file(file, json) {
+        match compile_tests(file, json) {
             Ok(result) => results.push(result),
             Err(code) => return code,
+        }
+    }
+    for (file, result) in files.iter().zip(&mut results) {
+        match run_tests(file, result.tests.len(), json) {
+            Ok(outcomes) => result.outcomes = outcomes,
+            Err(problem) => {
+                if json {
+                    emit(std::io::stdout(), &problem);
+                } else {
+                    emit(std::io::stderr(), &problem);
+                }
+                return ExitCode::FAILURE;
+            }
         }
     }
     let outcomes = || results.iter().flat_map(|result| &result.outcomes);
@@ -182,10 +196,11 @@ fn test(path: &str, json: bool) -> ExitCode {
     if outcomes().any(|outcome| outcome.failed) { ExitCode::FAILURE } else { ExitCode::SUCCESS }
 }
 
-/// Runs one file's tests. A trap ends a process, so tests run in a child, which
-/// goes on after a failure in a new child. That compiles once more per failure.
-/// `Err` holds the exit code, after a report of why. A child ends here too.
-fn test_file(path: &str, json: bool) -> Result<FileTests, ExitCode> {
+/// Checks one file and lists its tests, for `run_tests`. A trap ends a process,
+/// so tests run in a child, which goes on after a failure in a new child. That
+/// compiles once more per failure. A child runs its tests here, and ends with
+/// `Err`, which holds the exit code, as it does after a report of a compile error.
+fn compile_tests(path: &str, json: bool) -> Result<FileTests, ExitCode> {
     let (source, file, mut diags) = load(path, false);
     let mut tests = Vec::new();
     if diags.is_empty()
@@ -216,17 +231,7 @@ fn test_file(path: &str, json: bool) -> Result<FileTests, ExitCode> {
         report_errors(&source, &diags, json);
         return Err(ExitCode::FAILURE);
     }
-    match run_tests(path, tests.len(), json) {
-        Ok(outcomes) => Ok(FileTests { source, tests, outcomes }),
-        Err(problem) => {
-            if json {
-                emit(std::io::stdout(), &problem);
-            } else {
-                emit(std::io::stderr(), &problem);
-            }
-            Err(ExitCode::FAILURE)
-        }
-    }
+    Ok(FileTests { source, tests, outcomes: Vec::new() })
 }
 
 /// Runs `count` tests in child processes. Each child gives a NUL before each

@@ -1,2 +1,2 @@
 dep_private/src/main.lcd:2:7: error E0333: `hidden` is private to its module
-  note: mark it `public` in `@private_lib.lib.hidden` to use it here
+  note: mark it `public` in `private_lib.hidden` to use it here

@@ -1,0 +1,2 @@
+use greet
+let n: int = greet.Name(text: "a")

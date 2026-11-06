@@ -1,0 +1,6 @@
+[package]
+name = "dep_deep"
+version = "1.0.0"
+
+[dependencies]
+deep_lib = { path = "../deep_lib" }

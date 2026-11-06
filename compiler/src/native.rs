@@ -366,7 +366,7 @@ fn compile(
             let site =
                 held.map(|loc| loc.loc.as_abs()).filter(|loc| !loc.is_default()).map(|loc| {
                     let (file, line, column) = lines.place(loc.bits() as usize);
-                    CallSite { file, task: task.name, line, column }
+                    CallSite { file, task: crate::diag::plain(task.name).leak(), line, column }
                 });
             sites.push((id, call.ret_addr, site));
         }

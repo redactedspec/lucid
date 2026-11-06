@@ -1,0 +1,2 @@
+test "good"
+    expect 1 == 1

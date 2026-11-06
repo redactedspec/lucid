@@ -14,6 +14,13 @@ pub struct Diagnostic {
     pub notes: Vec<String>,
 }
 
+impl Span {
+    /// The same span, in a file that starts at `base`.
+    pub fn shifted(self, base: usize) -> Self {
+        Self { start: self.start + base, end: self.end + base }
+    }
+}
+
 impl Diagnostic {
     pub fn new(code: &'static str, message: impl Into<String>, span: Span) -> Self {
         let (message, notes) = (message.into(), Vec::new());
@@ -33,7 +40,7 @@ pub struct SourceFile {
 }
 
 /// Every file of a program, end to end, so that a span alone gives its file.
-/// The entry file comes first.
+/// The entry file comes first, after the manifest of a package.
 #[derive(Default)]
 pub struct Source {
     pub text: String,
@@ -84,6 +91,29 @@ impl<'a> Lines<'a> {
     }
 }
 
+/// Text with each module name of a package as its user writes it: `@a.lib.b` is
+/// `a.b`, and `@a.c.b` is `a.c.b`. `resolve.rs` adds the `@`, and no written name
+/// has one.
+pub fn plain(text: &str) -> String {
+    let mut parts = text.split('@');
+    let mut out = parts.next().unwrap_or("").to_string();
+    for part in parts {
+        let length = part.find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(part.len());
+        let (package, rest) = part.split_at(length);
+        if package.is_empty() || !rest.starts_with('.') {
+            out.push('@');
+            out += part;
+            continue;
+        }
+        out += package;
+        out += match rest.strip_prefix(".lib") {
+            Some(tail) if tail.starts_with('.') => tail,
+            _ => rest,
+        };
+    }
+    out
+}
+
 /// Merges parser diagnostics into `diags`, except on lines that already have
 /// one. The lexer's recovery often causes a second, misleading parse error.
 pub fn add_unless_same_line(source: &Source, diags: &mut Vec<Diagnostic>, more: Vec<Diagnostic>) {
@@ -105,9 +135,9 @@ pub fn render_text(source: &Source, diags: &[Diagnostic]) -> String {
     let mut out = String::new();
     for d in sorted(diags) {
         let (file, line, column) = lines.place(d.span.start);
-        out += &format!("{file}:{line}:{column}: error {}: {}\n", d.code, d.message);
+        out += &format!("{file}:{line}:{column}: error {}: {}\n", d.code, plain(&d.message));
         for note in &d.notes {
-            out += &format!("  note: {note}\n");
+            out += &format!("  note: {}\n", plain(note));
         }
     }
     out
@@ -120,13 +150,13 @@ pub fn render_json(source: &Source, diags: &[Diagnostic]) -> String {
         .map(|d| {
             let (file, line, column) = lines.place(d.span.start);
             let (_, end_line, end_column) = lines.place(d.span.end);
-            let notes: Vec<String> = d.notes.iter().map(|n| json_string(n)).collect();
+            let notes: Vec<String> = d.notes.iter().map(|n| json_string(&plain(n))).collect();
             format!(
                 "{{\"code\":{},\"severity\":\"error\",\"message\":{},\"file\":{},\"line\":{line},\
                  \"column\":{column},\"end_line\":{end_line},\"end_column\":{end_column},\
                  \"notes\":[{}],\"fixes\":[]}}",
                 json_string(d.code),
-                json_string(&d.message),
+                json_string(&plain(&d.message)),
                 json_string(file),
                 notes.join(","),
             )
@@ -155,6 +185,12 @@ pub fn json_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn package_names_read_as_written() {
+        assert_eq!(plain("found `@q.lib.User`, not `@q.a.b.T`"), "found `q.User`, not `q.a.b.T`");
+        assert_eq!(plain("mail a@ or @ or @x, @.y"), "mail a@ or @ or @x, @.y");
+    }
 
     fn one(text: &str) -> Source {
         let mut source = Source::default();

@@ -199,7 +199,12 @@ fn packages_work_from_inside() {
     let package = dir.join("..");
     let library = lucid(&package, &["run", "greet"]);
     assert_eq!(library.status.code(), Some(1));
-    assert!(text(&library.stderr).contains("error E0339: `greet` is a library"));
+    assert!(text(&library.stderr).contains("error E0339: `greet/src/lib.lcd` is a library"));
+    let library = lucid(&package, &["run", "greet/src/lib.lcd"]);
+    assert_eq!(library.status.code(), Some(1));
+    let statement = lucid(&package, &["check", "lib_statement/src/lib.lcd"]);
+    assert_eq!(statement.status.code(), Some(1));
+    assert!(text(&statement.stderr).contains("E0336"), "{}", text(&statement.stderr));
     let statement = lucid(&package, &["check", "lib_statement"]);
     assert_eq!(statement.status.code(), Some(1));
     assert!(text(&statement.stderr).contains("E0336"), "{}", text(&statement.stderr));
@@ -225,6 +230,11 @@ ok twice
     let output = lucid(&dir, &["test", "--json", "greet"]);
     assert!(text(&output.stdout).contains("\"file\":\"greet/src/lib.lcd\""));
     assert!(text(&output.stdout).starts_with('['), "{}", text(&output.stdout));
+    // `bad_later` has a good test first and a type error after it.
+    let output = lucid(&dir, &["test", "bad_later"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(text(&output.stdout), "", "a test ran before all files compiled");
+    assert!(text(&output.stderr).contains("zz.lcd:1:"), "{}", text(&output.stderr));
     let output = lucid(&dir, &["test", "both_entries"]);
     assert_eq!(output.status.code(), Some(1));
     assert!(text(&output.stderr).contains("E0339"));

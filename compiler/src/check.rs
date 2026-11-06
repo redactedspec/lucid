@@ -1842,7 +1842,9 @@ impl<'a> Checker<'a> {
     /// end of the line.
     fn unsafe_block(&mut self, body: &'a [ast::Stmt], span: Span) -> Stmt {
         self.unsafe_sites.push(("block", span));
-        if !has_comment(self.src, span.start) {
+        // Only this file: a package's manifest sits just before its entry file.
+        let file = self.files[file_index(self.files, span.start)].start;
+        if !has_comment(&self.src[file..], span.start - file) {
             let diag = Diagnostic::new("E0332", "this `unsafe` block has no comment", span);
             self.report(diag.note("say why it is sound, in a `#` line above it"));
         }

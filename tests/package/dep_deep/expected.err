@@ -1,0 +1,1 @@
+dep_deep/../deep_lib/lucid.toml:6:1: error E0339: no `lucid.toml` in `dep_deep/../deep_lib/../nope/`, with this spelling

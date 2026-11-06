@@ -15,7 +15,7 @@ use crate::lexer::{self, TextPart as RawPart, Token, TokenKind};
 use crate::manifest::{self, Dependency};
 use crate::parser;
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// What every file sees. The checker treats these like the file's own.
 const PRELUDE: &str = "trait Error
@@ -91,14 +91,25 @@ fn dir_prefix(path: &str) -> String {
     }
 }
 
+/// The part of a file's path up to its name.
+fn dir_of(file: &str) -> &str {
+    &file[..file.rfind(['/', '\\']).map_or(0, |slash| slash + 1)]
+}
+
+/// A directory in the form of `dir_of`, as a path that the system can open.
+fn openable(dir: &str) -> &str {
+    if dir.is_empty() { "." } else { dir }
+}
+
 /// The directory of the nearest `lucid.toml` at or above a file, reached with
 /// `..` so that its path stays short in messages.
 fn package_above(file: &str) -> Option<String> {
-    let dir = &file[..file.rfind(['/', '\\']).map_or(0, |slash| slash + 1)];
-    let real = std::fs::canonicalize(if dir.is_empty() { "." } else { dir }).ok()?;
+    let dir = dir_of(file);
+    let real = std::fs::canonicalize(openable(dir)).ok()?;
     let mut up = dir.to_string();
     for at in real.ancestors() {
-        if at.join("lucid.toml").is_file() {
+        let manifest = at.join("lucid.toml");
+        if manifest.is_file() && exact_path(&manifest) {
             return Some(up);
         }
         up += "../";
@@ -141,20 +152,18 @@ pub fn load(path: &str, run: bool) -> (Source, Option<ast::File>, Vec<Diagnostic
     let mut loader = Loader::default();
     let start = Span { start: 0, end: 0 };
     let mut entry = path.to_string();
-    let mut library = false;
     if Path::new(path).is_dir() {
         let package = loader.package(&package_root(path), start);
         let Some(package) = package else { return (loader.source, None, loader.diags) };
-        let package = &loader.packages[package];
-        entry.clone_from(&package.entry);
-        library = package.library;
-        if run && library {
-            let message = format!("`{}` is a library, so it cannot run", package.name);
-            loader.diags.push(Diagnostic::new("E0339", message, start));
-            return (loader.source, None, loader.diags);
-        }
+        entry.clone_from(&loader.packages[package].entry);
     }
     let found = loader.module(&entry, Vec::new(), start);
+    loader.check_dependencies();
+    let library = is_library(&entry);
+    if run && library {
+        let message = format!("`{entry}` is a library, so it cannot run");
+        loader.diags.push(Diagnostic::new("E0339", message, start));
+    }
     let Loader { source, mut diags, mut modules, .. } = loader;
     if found.is_none() || !diags.is_empty() {
         return (source, None, diags);
@@ -171,10 +180,18 @@ pub fn load(path: &str, run: bool) -> (Source, Option<ast::File>, Vec<Diagnostic
     (source, Some(file), diags)
 }
 
+/// True if a file is the `src/lib.lcd` of its package, by any spelling.
+fn is_library(file: &str) -> bool {
+    let real = |path: &str| std::fs::canonicalize(path).ok();
+    package_above(file).is_some_and(|dir| {
+        let lib = real(&format!("{dir}src/lib.lcd"));
+        lib.is_some() && lib == real(file)
+    })
+}
+
 fn shift(tokens: &mut [Token], base: usize) {
     for token in tokens {
-        token.span.start += base;
-        token.span.end += base;
+        token.span = token.span.shifted(base);
         if let TokenKind::Text(parts) = &mut token.kind {
             for part in parts {
                 if let RawPart::Expr(inner) = part {
@@ -215,7 +232,7 @@ impl Loader {
 
     /// Reads the package in `dir`, once. `None` means that it is reported.
     fn package(&mut self, dir: &str, used_at: Span) -> Option<usize> {
-        let real = std::fs::canonicalize(if dir.is_empty() { "." } else { dir }).ok();
+        let real = std::fs::canonicalize(openable(dir)).ok();
         if let Some(known) = real.as_ref().and_then(|real| self.package_ids.get(real)) {
             return *known;
         }
@@ -230,13 +247,13 @@ impl Loader {
         let (base, text) = self.read(&format!("{dir}lucid.toml"), used_at)?;
         let (found, diags) = manifest::parse(&text);
         self.diags.extend(diags.into_iter().map(|mut d| {
-            d.span = Span { start: d.span.start + base, end: d.span.end + base };
+            d.span = d.span.shifted(base);
             d
         }));
         let found = found?;
         let at = Span { start: base, end: base };
         let src = format!("{dir}src/");
-        let (main, lib) = (exact_file(&src, &["main"]), exact_file(&src, &["lib"]));
+        let (main, lib) = (exact_file(dir, &["src", "main"]), exact_file(dir, &["src", "lib"]));
         if main == lib {
             let message = if main {
                 "a package has `src/main.lcd` or `src/lib.lcd`, not both"
@@ -257,6 +274,7 @@ impl Loader {
                 dependency.path = format!("{dir}{}", dependency.path);
             }
             dependency.path = dir_prefix(&dependency.path);
+            dependency.span = dependency.span.shifted(base);
             dependency
         });
         self.packages.push(Package {
@@ -280,8 +298,10 @@ impl Loader {
     /// The library that a manifest entry names.
     fn dependency(&mut self, dependency: &Dependency) -> Option<usize> {
         let name = &dependency.name;
-        if !Path::new(&format!("{}lucid.toml", dependency.path)).is_file() {
-            self.fault(dependency, format!("no `lucid.toml` in `{}`", dependency.path));
+        let manifest = format!("{}lucid.toml", dependency.path);
+        if !Path::new(&manifest).is_file() || !exact_path(Path::new(&manifest)) {
+            let message = format!("no `lucid.toml` in `{}`, with this spelling", dependency.path);
+            self.fault(dependency, message);
             return None;
         }
         let id = self.package(&dependency.path, dependency.span)?;
@@ -298,6 +318,18 @@ impl Loader {
         Some(id)
     }
 
+    /// Checks every entry of every manifest read, used or not, so a bad entry
+    /// shows before its first `use`. `packages` grows during the walk.
+    fn check_dependencies(&mut self) {
+        let mut at = 0;
+        while at < self.packages.len() {
+            for dependency in self.packages[at].dependencies.clone() {
+                self.dependency(&dependency);
+            }
+            at += 1;
+        }
+    }
+
     /// Loads a file and all it imports. `None` if it cannot be read as text.
     fn module(&mut self, path: &str, key: Vec<String>, used_at: Span) -> Option<usize> {
         if let Some(&id) = self.loaded.get(path) {
@@ -307,7 +339,7 @@ impl Loader {
         let (mut tokens, mut diags) = lexer::lex(&text);
         shift(&mut tokens, base);
         for d in &mut diags {
-            d.span = Span { start: d.span.start + base, end: d.span.end + base };
+            d.span = d.span.shifted(base);
         }
         let (file, parse_diags) = parser::parse(tokens);
         diag::add_unless_same_line(&self.source, &mut diags, parse_diags);
@@ -342,7 +374,7 @@ impl Loader {
         alias: Option<&Name>,
         span: Span,
     ) -> Option<Import> {
-        let dir = &from[..from.rfind(['/', '\\']).map_or(0, |slash| slash + 1)];
+        let dir = dir_of(from);
         let parts: Vec<&str> = written.iter().map(|name| name.text.as_str()).collect();
         let last = written.last().expect("a path has a name");
         let Some((found, item)) = locate(dir, &parts, last) else {
@@ -459,7 +491,7 @@ fn locate(dir: &str, parts: &[&str], last: &Name) -> Option<(String, Option<Name
 /// A file system that ignores case must not make one file two modules, or let
 /// a program work only on Windows.
 fn exact_file(dir: &str, parts: &[&str]) -> bool {
-    let mut at = std::path::PathBuf::from(if dir.is_empty() { "." } else { dir });
+    let mut at = PathBuf::from(openable(dir));
     for (place, part) in parts.iter().enumerate() {
         let last = place + 1 == parts.len();
         let name = if last { format!("{part}.lcd") } else { (*part).to_string() };
@@ -470,6 +502,25 @@ fn exact_file(dir: &str, parts: &[&str]) -> bool {
         at.push(name);
     }
     at.is_file()
+}
+
+/// True if each named step of a path has exactly this spelling, for the reason
+/// in `exact_file`. A directory that cannot be listed gets the benefit of doubt.
+fn exact_path(path: &Path) -> bool {
+    let mut at = PathBuf::new();
+    for part in path.components() {
+        if let Component::Normal(name) = part {
+            let parent = if at.as_os_str().is_empty() { Path::new(".") } else { at.as_path() };
+            let listed = std::fs::read_dir(parent).map(|mut entries| {
+                entries.any(|entry| entry.is_ok_and(|entry| entry.file_name() == name))
+            });
+            if !listed.unwrap_or(true) {
+                return false;
+            }
+        }
+        at.push(part);
+    }
+    true
 }
 
 /// Every top-level name of a module.

@@ -1,0 +1,6 @@
+[package]
+name = "dep_case"
+version = "1.0.0"
+
+[dependencies]
+base = { path = "../Base" }

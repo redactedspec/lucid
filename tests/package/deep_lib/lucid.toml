@@ -1,0 +1,6 @@
+[package]
+name = "deep_lib"
+version = "1.0.0"
+
+[dependencies]
+nope = { path = "../nope" }
