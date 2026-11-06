@@ -378,7 +378,9 @@ impl Lower<'_, '_> {
             if task.locals[local].is_counted() {
                 let empty = self.body.ins().iconst(self.pointer, 0);
                 self.body.def_var(self.vars[local], empty);
-                self.owned.push(self.vars[local]);
+                if task.borrowed.binary_search(&local).is_err() {
+                    self.owned.push(self.vars[local]);
+                }
             }
         }
         if !self.owned.is_empty() || !self.changed.is_empty() {
@@ -585,6 +587,10 @@ impl Lower<'_, '_> {
                 } else {
                     self.body.def_var(self.vars[*local], value);
                 }
+            }
+            Stmt::Bind(local, value) => {
+                let value = self.expr(value);
+                self.body.def_var(self.vars[*local], value);
             }
             Stmt::Update { local, op, args, span } => self.update(*local, *op, args, *span),
             Stmt::Clear(local) => {

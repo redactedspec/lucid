@@ -463,11 +463,17 @@ pub struct Task {
     /// through a task value or the runtime has a borrowed one instead, and a
     /// first statement that retains it, since those callers pass no count.
     pub take: Vec<Local>,
+    /// Counted locals that hold no count, in order. Only `Stmt::Bind` sets one.
+    /// Added by `ownership.rs`.
+    pub borrowed: Vec<Local>,
 }
 
 #[derive(Clone)]
 pub enum Stmt {
     Set(Local, Expr),
+    /// Holds a borrow of a value that stays valid for the whole task, with no
+    /// count. Added by `ownership.rs`.
+    Bind(Local, Expr),
     /// Changes the list, map, set, or record in this local, which may then move.
     /// Traps at `span` if a list index is out of bounds.
     Update {
@@ -700,9 +706,11 @@ pub trait Visit {
 
     fn stmt_parts(&mut self, stmt: &mut Stmt) {
         match stmt {
-            Stmt::Set(_, value) | Stmt::Return(value) | Stmt::Print(value) | Stmt::Expr(value) => {
-                self.expr(value);
-            }
+            Stmt::Set(_, value)
+            | Stmt::Bind(_, value)
+            | Stmt::Return(value)
+            | Stmt::Print(value)
+            | Stmt::Expr(value) => self.expr(value),
             Stmt::Update { args, .. } => args.iter_mut().for_each(|arg| self.expr(arg)),
             Stmt::Block(body) => self.stmts(body),
             Stmt::If { branches, otherwise } => {

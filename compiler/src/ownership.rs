@@ -23,11 +23,15 @@ pub fn run(program: &mut Program, moves: bool) {
         })
         .collect();
     for task in program.tasks.iter_mut().chain([&mut program.main]) {
+        if moves {
+            task.borrowed = borrow_locals(task);
+        }
         let live = Bits::new(task.locals.len());
-        let Task { params, locals, body, take, .. } = task;
+        let Task { params, locals, body, take, borrowed, .. } = task;
         let mut pass = Owners {
             moves,
             params: *params,
+            borrowed,
             take,
             takes: &takes,
             locals,
@@ -46,6 +50,104 @@ pub fn run(program: &mut Program, moves: bool) {
         }
         pass.rewrite = true;
         pass.walk(body);
+    }
+}
+
+/// Finds locals that need no count, and gives them `Stmt::Bind`. Such a local
+/// only ever holds a path into a read parameter, or into another such local,
+/// and nothing changes it. The caller keeps a read parameter alive and fixed
+/// for the whole call, so what it holds stays valid. Returns them in order.
+fn borrow_locals(task: &mut Task) -> Vec<Local> {
+    let may_borrow = |(local, ty): (usize, &Ty)| local >= task.params && ty.is_counted();
+    let locals = task.locals.iter().enumerate();
+    let mut finder = Borrows {
+        can: locals.map(may_borrow).collect(),
+        params: task.params,
+        fixed: &task.change,
+        owned: &task.take,
+        changed: false,
+    };
+    finder.stmts(&mut task.body);
+    while std::mem::take(&mut finder.changed) {
+        finder.stmts(&mut task.body);
+    }
+    let can = finder.can;
+    Bind { can: &can }.stmts(&mut task.body);
+    (0..can.len()).filter(|&local| can[local]).collect()
+}
+
+/// Strikes out each local that cannot borrow.
+struct Borrows<'a> {
+    can: Vec<bool>,
+    params: usize,
+    fixed: &'a [Local],
+    owned: &'a [Local],
+    changed: bool,
+}
+
+impl Borrows<'_> {
+    fn strike(&mut self, local: Local) {
+        self.changed |= std::mem::replace(&mut self.can[local], false);
+    }
+
+    /// True if `value` is a path into something that stays valid.
+    fn is_path(&self, value: &Expr) -> bool {
+        match &value.kind {
+            ExprKind::Local(local) if *local < self.params => {
+                !self.fixed.contains(local) && !self.owned.contains(local)
+            }
+            ExprKind::Local(local) => self.can[*local],
+            ExprKind::Field(inner, _) | ExprKind::ListGet(inner, _) => self.is_path(inner),
+            _ => false,
+        }
+    }
+}
+
+impl Visit for Borrows<'_> {
+    fn expr(&mut self, value: &mut Expr) {
+        if let ExprKind::Change(local) = value.kind {
+            self.strike(local);
+        }
+        self.expr_parts(value);
+    }
+
+    fn stmts(&mut self, stmts: &mut [Stmt]) {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Set(local, value) if self.can[*local] && !self.is_path(value) => {
+                    self.strike(*local);
+                }
+                Stmt::Update { local, .. } => self.strike(*local),
+                _ => {}
+            }
+            self.stmt_parts(stmt);
+        }
+    }
+}
+
+/// Rewrites what `Borrows` left.
+struct Bind<'a> {
+    can: &'a [bool],
+}
+
+impl Visit for Bind<'_> {
+    fn expr(&mut self, value: &mut Expr) {
+        self.expr_parts(value);
+    }
+
+    fn stmts(&mut self, stmts: &mut [Stmt]) {
+        for stmt in stmts {
+            self.stmt_parts(stmt);
+            match stmt {
+                Stmt::Set(local, value) if self.can[*local] => {
+                    let (local, ty, span) = (*local, value.ty, value.span);
+                    let empty = Expr { kind: ExprKind::None, ty, span };
+                    *stmt = Stmt::Bind(local, std::mem::replace(value, empty));
+                }
+                Stmt::Clear(local) if self.can[*local] => *stmt = Stmt::Block(Vec::new()),
+                _ => {}
+            }
+        }
     }
 }
 
@@ -150,6 +252,8 @@ struct Moving {
 struct Owners<'a> {
     moves: bool,
     params: usize,
+    /// The locals that hold no count, in order.
+    borrowed: &'a [Local],
     /// The `take` parameters of this task, whose count it holds on entry.
     take: &'a [Local],
     takes: &'a [Vec<Local>],
@@ -200,6 +304,10 @@ impl Owners<'_> {
             Stmt::Set(local, value) => {
                 self.live.remove(*local);
                 self.give_one(value);
+            }
+            Stmt::Bind(local, value) => {
+                self.live.remove(*local);
+                self.borrow_one(value);
             }
             Stmt::Return(value) => {
                 self.live.clear();
@@ -323,7 +431,10 @@ impl Owners<'_> {
 
     fn can_move(&self, local: Local) -> bool {
         self.moving.as_ref().is_some_and(|moving| {
-            local >= self.params && moving.reads.get(&local) == Some(&1) && !moving.after.has(local)
+            local >= self.params
+                && moving.reads.get(&local) == Some(&1)
+                && !moving.after.has(local)
+                && self.borrowed.binary_search(&local).is_err()
         })
     }
 

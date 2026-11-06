@@ -1,0 +1,127 @@
+# Locals that may borrow from a read parameter, and ones that must not.
+
+type Pair
+    left: list[int]
+    right: list[int]
+
+choice Chain
+    End
+    Link(value: int, next: Chain)
+
+# A read-only walk.
+task walk(chain: Chain) -> int
+    var total = 0
+    var at = chain
+    var going = true
+    while going
+        match at
+            End ->
+                going = false
+            Link(value, next) ->
+                total += value
+                at = next
+    return total
+
+# Borrowed, then kept: what keeps it needs its own count.
+task keep_left(pair: Pair) -> list[int]
+    let left = pair.left
+    return left
+
+task keep_in_list(pair: Pair) -> list[list[int]]
+    let left = pair.left
+    let right = pair.right
+    return [left, right, left]
+
+task keep_in_record(pair: Pair) -> Pair
+    let left = pair.left
+    return Pair(left: left, right: left)
+
+task capture(pair: Pair) -> task() -> int
+    let left = pair.left
+    return () => left.len()
+
+# Looks like a borrow, then a later write makes it a copy.
+task changed_copy(pair: Pair) -> int
+    var left = pair.left
+    left.push(1)
+    return left.len() + pair.left.len()
+
+task changed_by_call(pair: Pair) -> int
+    var left = pair.left
+    add_one(change left)
+    return left.len() + pair.left.len()
+
+task add_one(change items: list[int])
+    items.push(1)
+
+# Starts as a path, then holds a new value.
+task replaced(pair: Pair) -> list[int]
+    var best = pair.left
+    if best.len() == 0
+        best = [9]
+    return best
+
+task replaced_in_loop(pair: Pair) -> int
+    var best = pair.left
+    for i in 0..3
+        let old = best
+        best = [i]
+        if old.len() > 5
+            return 0
+    return best[0]
+
+# A path into a `change` parameter must keep its count.
+task from_change(change pair: Pair) -> int
+    let left = pair.left
+    pair.left = [7]
+    return left.len() + pair.left.len()
+
+# A path into a `take` parameter.
+task from_take(take pair: Pair) -> int
+    let left = pair.left
+    pair.left.push(1)
+    return left.len() + pair.left.len()
+
+# A loop over a parameter, and over a path into it.
+task sum(pair: Pair) -> int
+    var total = 0
+    for item in pair.left
+        total += item
+    for item in pair.right
+        total += item
+    return total
+
+task names(items: list[text]) -> list[text]
+    var out: list[text] = []
+    for item in items
+        out.push(item)
+    return out
+
+# A parameter that a caller passes from a list it is about to replace.
+task length_then(items: list[int], other: int) -> int
+    let held = items
+    return held.len() + other
+
+let pair = Pair(left: [1, 2], right: [3])
+print walk(Link(value: 1, next: Link(value: 2, next: End)))
+print keep_left(pair)
+print keep_in_list(pair)
+print keep_in_record(pair)
+print capture(pair)()
+print changed_copy(pair)
+print changed_by_call(pair)
+print replaced(pair)
+print replaced(Pair(left: [], right: []))
+print replaced_in_loop(pair)
+var mine = pair
+print from_change(change mine)
+print from_take(pair)
+print sum(pair)
+print names(["a", "b"])
+print pair
+print mine
+
+var grid = [[1], [2]]
+print length_then(grid[0], grid[1].len())
+grid[0] = [5, 6]
+print grid

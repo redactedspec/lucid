@@ -1594,7 +1594,8 @@ impl<'a> Checker<'a> {
         let captures = Vec::new();
         self.frame.params = 0;
         let params = params.len();
-        Task { params, type_params, returns, locals, body, span, captures, change, take }
+        let borrowed = Vec::new();
+        Task { params, type_params, returns, locals, body, span, captures, change, take, borrowed }
     }
 
     /// A local holds a count of a `take` parameter, so the task can change it
@@ -1619,8 +1620,8 @@ impl<'a> Checker<'a> {
         let span = Span { start: 0, end: 0 };
         let locals = std::mem::take(&mut self.frame.locals);
         let (captures, change, take) = (Vec::new(), Vec::new(), Vec::new());
-        let (params, type_params, returns) = (0, 0, Ty::None);
-        Task { params, type_params, returns, locals, body, span, captures, change, take }
+        let (params, type_params, returns, borrowed) = (0, 0, Ty::None, Vec::new());
+        Task { params, type_params, returns, locals, body, span, captures, change, take, borrowed }
     }
 
     fn new_local(&mut self, ty: Ty, mutable: bool) -> Local {
@@ -1874,9 +1875,19 @@ impl<'a> Checker<'a> {
         let captures = values.iter().map(|value| value.ty).collect();
         let (type_params, args) = self.own_type_args();
         let params = params.len() + 1;
-        let (change, take) = (Vec::new(), Vec::new());
-        let task =
-            Task { params, type_params, returns, locals, body, span, captures, change, take };
+        let (change, take, borrowed) = (Vec::new(), Vec::new(), Vec::new());
+        let task = Task {
+            params,
+            type_params,
+            returns,
+            locals,
+            body,
+            span,
+            captures,
+            change,
+            take,
+            borrowed,
+        };
         self.lifted.push(task);
         let task = self.first_lifted + self.lifted.len() - 1;
         let fields = values.into_iter().enumerate().collect();
@@ -2069,9 +2080,21 @@ impl<'a> Checker<'a> {
                 let params = locals.len();
                 let type_params = own.len();
                 let (captures, change, take) = (Vec::new(), Vec::new(), Vec::new());
+                let borrowed = Vec::new();
                 let body = vec![Stmt::Return(call)];
                 let code =
-                    Task { params, type_params, returns, locals, body, span, captures, change, take };
+                    Task {
+                        params,
+                        type_params,
+                        returns,
+                        locals,
+                        body,
+                        span,
+                        captures,
+                        change,
+                        take,
+                        borrowed,
+                    };
                 self.lifted.push(code);
                 let task = self.first_lifted + self.lifted.len() - 1;
                 self.task_values.insert(id, task);
