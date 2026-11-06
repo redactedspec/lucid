@@ -619,11 +619,21 @@ A test sits at top level, and its name is plain text, new in the file, with no `
 ```lucid
 unsafe extern task strlen(s: pointer[byte]) -> u64
 
+var raw = "hello".bytes()
+raw.push(0)
+
+# `raw` ends in a zero byte, and stays unchanged for the call.
 unsafe
-    let n = strlen(raw)
+    print strlen(raw.pointer())
 ```
 
-`unsafe` blocks and `extern` declarations need the `unsafe` package permission. See [security.md](security.md).
+An `extern` task is a C function, found by its name in the C runtime or `kernel32`, or else error E0904. It takes and gives numbers, `bool`, and `pointer[byte]`, and may give nothing. It sits at top level, and it has no `change`, `take`, `self`, defaults, or type parameters. A C type must match the declared width: a C `int` is `i32`. A name that starts with `lucid_` is kept for the runtime.
+
+Only an `unsafe` block can use an `extern` task, as a call or as a value, or call `.pointer()`, or else error E0330. A lambda or nested task inside the block is outside it. The block is a block like the body of an `if`, with its own scope. It needs a `#` comment on the line above, or at the end of its line, or else error E0332, and the comment says why it is sound.
+
+`pointer[byte]` is a raw address. It has no traits, so it does not print or compare, and it holds no count. `items.pointer()` gives the address of the first element of a `list[byte]` held in a name. The address is valid while that name is in scope and until the list changes or moves. C code that writes through it changes every holder of the list. Text has no pointer: use `.bytes()`, and push a zero byte for a C string.
+
+`unsafe` blocks and `extern` declarations will need the `unsafe` package permission, once packages exist. See [security.md](security.md).
 
 ## Keywords
 

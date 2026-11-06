@@ -210,6 +210,21 @@ fn costs_are_reported() {
 }
 
 #[test]
+fn unsafe_sites_are_reported() {
+    let dir = repo().join("tests").join("run");
+    let output = lucid(&dir, &["check", "--unsafe", "unsafe.lcd"]);
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    let report = text(&output.stdout);
+    assert!(report.starts_with("unsafe.lcd:2:1: unsafe: extern\n"), "{report}");
+    assert!(report.contains("unsafe.lcd:15:1: unsafe: block\n"), "{report}");
+    let output = lucid(&dir, &["check", "--json", "--unsafe", "unsafe.lcd"]);
+    let wanted = "[{\"kind\":\"extern\",\"file\":\"unsafe.lcd\",\"line\":2,\"column\":1}";
+    assert!(text(&output.stdout).starts_with(wanted), "{}", text(&output.stdout));
+    let output = lucid(&dir, &["check", "--unsafe", "hello.lcd"]);
+    assert_eq!((output.status.code(), text(&output.stdout).as_str()), (Some(0), ""));
+}
+
+#[test]
 fn missing_file_is_reported() {
     let output = lucid(&repo(), &["run", "no_such_file.lcd"]);
     assert_eq!(output.status.code(), Some(1));

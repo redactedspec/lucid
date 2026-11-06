@@ -1,0 +1,18 @@
+extern_form.lcd:1:20: error E0331: `a` cannot be `extern`
+  note: a parameter must be a number, `bool`, or `pointer[byte]`
+extern_form.lcd:2:20: error E0331: `b` cannot be `extern`
+  note: the result must be a number, `bool`, `pointer[byte]`, or nothing
+extern_form.lcd:3:20: error E0331: `c` cannot be `extern`
+  note: it cannot be generic
+extern_form.lcd:4:20: error E0331: `d` cannot be `extern`
+  note: a parameter cannot be `change` or `take`
+extern_form.lcd:5:20: error E0331: `e` cannot be `extern`
+  note: a parameter cannot have a default
+extern_form.lcd:6:20: error E0331: `f` cannot be `extern`
+  note: it cannot take `self`
+extern_form.lcd:7:20: error E0331: `lucid_print` cannot be `extern`
+  note: the runtime keeps names that start with `lucid_`
+extern_form.lcd:8:8: error E0331: this pointer type does not exist
+  note: the only one is `pointer[byte]`
+extern_form.lcd:15:15: error E0303: `pointer` does not work on `list[int]`
+extern_form.lcd:16:16: error E0331: `.pointer()` needs a name

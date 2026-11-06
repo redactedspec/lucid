@@ -1,0 +1,3 @@
+task f(p: pointer[byte], q: pointer[byte])
+    print p
+    print p == q

@@ -1,0 +1,15 @@
+unsafe extern task strlen(s: pointer[byte]) -> u64
+
+var raw = "a".bytes()
+raw.push(0)
+
+# Each of these is outside an `unsafe` block.
+print strlen(raw.pointer())
+let f = strlen
+
+task g()
+    print strlen(raw_literal())
+
+task raw_literal() -> pointer[byte]
+    var bytes = "x".bytes()
+    return bytes.pointer()

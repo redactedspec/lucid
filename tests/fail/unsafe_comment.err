@@ -1,0 +1,2 @@
+unsafe_comment.lcd:3:1: error E0332: this `unsafe` block has no comment
+  note: say why it is sound, in a `#` line above it

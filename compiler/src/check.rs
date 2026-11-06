@@ -13,7 +13,7 @@ use crate::mir::{
 };
 use std::collections::{HashMap, HashSet};
 
-/// Names of the spec's built-in types that this milestone cannot represent.
+/// Built-in type names with one form of their own, which `named` checks.
 const LATER_TYPES: [&str; 1] = ["pointer"];
 
 /// Type names that a program cannot define for itself, beyond `number_type`.
@@ -43,15 +43,15 @@ const TEST_UNION: &str = "test it first, as in `if x is not none`. Only a name n
 /// Checks a file. A program using an unbuilt feature gets only E0901, because
 /// names and types that feature would supply make any other error unreliable.
 /// With `keep_tests` false, `test` blocks are dropped unread.
-pub fn check(file: &ast::File, keep_tests: bool) -> (Program, Vec<Diagnostic>) {
-    let mut checker = Checker::default();
+pub fn check(file: &ast::File, src: &str, keep_tests: bool) -> (Program, Vec<Diagnostic>) {
+    let mut checker = Checker { src, ..Checker::default() };
     checker.declare_types(file);
     checker.declare(file);
     let written: Vec<_> = file
         .stmts
         .iter()
         .filter_map(|stmt| match &stmt.kind {
-            StmtKind::Task(def) => def.body.as_ref().map(|body| (def, body, stmt.span)),
+            StmtKind::Task(def) => Some((def, def.body.as_ref(), stmt.span)),
             _ => None,
         })
         .collect();
@@ -68,7 +68,10 @@ pub fn check(file: &ast::File, keep_tests: bool) -> (Program, Vec<Diagnostic>) {
     let mut tasks: Vec<Task> = written
         .into_iter()
         .enumerate()
-        .map(|(id, (def, body, span))| checker.task(id, def, body, span))
+        .map(|(id, (def, body, span))| match body {
+            Some(body) => checker.task(id, def, body, span),
+            None => checker.foreign_task(id, def, span),
+        })
         .collect();
     let mut tests = Vec::with_capacity(blocks.len());
     for (name, body, span) in blocks {
@@ -86,7 +89,8 @@ pub fn check(file: &ast::File, keep_tests: bool) -> (Program, Vec<Diagnostic>) {
     if diags.iter().any(|d| d.code == "E0901") {
         diags.retain(|d| d.code == "E0901");
     }
-    (Program { tasks, tests, main, types: checker.table, datas, methods }, diags)
+    let unsafe_sites = checker.unsafe_sites;
+    (Program { tasks, tests, unsafe_sites, main, types: checker.table, datas, methods }, diags)
 }
 
 /// Type parameters in scope, with the type that each one stands for.
@@ -101,6 +105,8 @@ struct Frame<'a> {
     mutable: Vec<bool>,
     /// The return type, or `None` at top level.
     returns: Option<Ty>,
+    /// True in an `unsafe` block.
+    in_unsafe: bool,
     /// True in a `test` block, where a failed `try` ends the program, as it
     /// does at top level.
     in_test: bool,
@@ -254,7 +260,12 @@ enum Top<'a> {
 
 #[derive(Default)]
 struct Checker<'a> {
+    /// The text of the file, where an `unsafe` block needs a comment.
+    src: &'a str,
     diags: Vec<Diagnostic>,
+    /// The ids of `extern` tasks.
+    foreign: HashSet<usize>,
+    unsafe_sites: Vec<(&'static str, Span)>,
     task_ids: HashMap<&'a str, usize>,
     signatures: Vec<Signature<'a>>,
     types: HashMap<&'a str, Named<'a>>,
@@ -338,6 +349,7 @@ fn builtin_method(ty: Ty, name: &str) -> bool {
         ty if ty.is_float() && name == "sqrt" => true,
         ty if ty.is_number() => conversion(ty, name).is_some() || wrapping_op(ty, name).is_some(),
         Ty::Text => matches!(name, "len" | "is_empty" | "bytes"),
+        Ty::List(Ty::Byte) if name == "pointer" => true,
         Ty::List(_) => matches!(name, "len" | "is_empty" | "get" | "push" | "pop" | "swap"),
         Ty::Map(..) => matches!(name, "len" | "is_empty" | "get" | "remove"),
         Ty::Set(_) => matches!(name, "len" | "is_empty" | "add" | "remove"),
@@ -409,6 +421,15 @@ fn ends(stmts: &[Stmt], jumps: bool) -> bool {
         }
         _ => false,
     })
+}
+
+/// True if the line of `start` ends in a comment, or the last line above it
+/// that is not blank is one.
+fn has_comment(src: &str, start: usize) -> bool {
+    let line_start = src[..start].rfind('\n').map_or(0, |at| at + 1);
+    let line_end = src[start..].find('\n').map_or(src.len(), |at| start + at);
+    let above = src[..line_start].lines().rev().find(|line| !line.trim().is_empty());
+    src[start..line_end].contains('#') || above.is_some_and(|l| l.trim_start().starts_with('#'))
 }
 
 /// One side of a failed `expect`. Text has quotes, so that a space shows.
@@ -677,7 +698,9 @@ impl<'a> Checker<'a> {
                     }
                     self.forget_assigned(otherwise.as_deref().unwrap_or_default());
                 }
-                StmtKind::While { body, .. } | StmtKind::For { body, .. } => {
+                StmtKind::While { body, .. }
+                | StmtKind::For { body, .. }
+                | StmtKind::Unsafe(body) => {
                     self.forget_assigned(body);
                 }
                 StmtKind::Expr(value)
@@ -851,7 +874,11 @@ impl<'a> Checker<'a> {
             return if self.arity(name, 0, args.len(), span) { plain } else { Ty::Error };
         }
         if LATER_TYPES.contains(&name) {
-            return self.unsupported(&format!("type `{name}`"), span).ty;
+            if args == [Ty::Byte] {
+                return Ty::Pointer;
+            }
+            let diag = Diagnostic::new("E0331", "this pointer type does not exist", span);
+            return self.report(diag.note("the only one is `pointer[byte]`")).ty;
         }
         if self.is_trait(name) {
             let message = format!("`{name}` is a trait, not a type");
@@ -1084,6 +1111,9 @@ impl<'a> Checker<'a> {
     fn satisfied(&mut self, ty: Ty, name: &str, seen: &mut Vec<(Ty, String)>) -> bool {
         if ty == Ty::Error {
             return true;
+        }
+        if ty == Ty::Pointer {
+            return false;
         }
         if let Ty::Param(_, index) = ty {
             return self.bounds.get(index).is_some_and(|traits| traits.contains(&name));
@@ -1531,10 +1561,6 @@ impl<'a> Checker<'a> {
     fn declare(&mut self, file: &'a ast::File) {
         for stmt in &file.stmts {
             let StmtKind::Task(def) = &stmt.kind else { continue };
-            if def.body.is_none() {
-                self.unsupported("`unsafe extern task`", stmt.span);
-                continue;
-            }
             if def.public {
                 self.unsupported("`public`", stmt.span);
             }
@@ -1546,6 +1572,11 @@ impl<'a> Checker<'a> {
                 self.task_ids.insert(name, id);
             }
             let signature = self.signature(&def.sig, false);
+            if def.body.is_none() {
+                self.check_foreign(def, &signature);
+                self.foreign.insert(id);
+                self.unsafe_sites.push(("extern", stmt.span));
+            }
             self.signatures.push(signature);
         }
         for stmt in &file.stmts {
@@ -1720,6 +1751,81 @@ impl<'a> Checker<'a> {
             let message = format!("`{}` must return `{}` on every path", name.text, returns.name());
             self.fail("E0309", message, name.span);
         }
+    }
+
+    /// An `extern` task crosses to C, where only plain values make sense.
+    fn check_foreign(&mut self, def: &ast::TaskDef, signature: &Signature) {
+        let span = def.sig.name.span;
+        let name = &def.sig.name.text;
+        let plain = |ty: Ty| ty.is_number() || matches!(ty, Ty::Bool | Ty::Pointer);
+        let problem = if name.starts_with("lucid_") {
+            Some("the runtime keeps names that start with `lucid_`")
+        } else if !signature.type_params.is_empty() {
+            Some("it cannot be generic")
+        } else if signature.params.iter().any(|p| p.name == "self") {
+            Some("it cannot take `self`")
+        } else if signature.params.iter().any(|p| p.default.is_some()) {
+            Some("a parameter cannot have a default")
+        } else if signature.params.iter().any(|p| p.mode != ast::ParamMode::Read) {
+            Some("a parameter cannot be `change` or `take`")
+        } else if !signature.params.iter().all(|p| plain(p.ty) || p.ty == Ty::Error) {
+            Some("a parameter must be a number, `bool`, or `pointer[byte]`")
+        } else if !plain(signature.returns) && !matches!(signature.returns, Ty::None | Ty::Error) {
+            Some("the result must be a number, `bool`, `pointer[byte]`, or nothing")
+        } else {
+            None
+        };
+        if let Some(problem) = problem {
+            let diag = Diagnostic::new("E0331", format!("`{name}` cannot be `extern`"), span);
+            self.report(diag.note(problem));
+        }
+    }
+
+    /// The task behind an `extern`. It passes its parameters on, so a call
+    /// goes through the same path as any task.
+    fn foreign_task(&mut self, id: usize, def: &ast::TaskDef, span: Span) -> Task {
+        let locals: Vec<Ty> = self.signatures[id].params.iter().map(|p| p.ty).collect();
+        let returns = self.signatures[id].returns;
+        let read = |(local, &ty)| Expr { kind: ExprKind::Local(local), ty, span };
+        let args = locals.iter().enumerate().map(read).collect();
+        let name: &'static str = def.sig.name.text.clone().leak();
+        let call = Expr { kind: ExprKind::Foreign(name, args), ty: returns, span };
+        let (captures, change, take, borrowed) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        Task {
+            name,
+            params: locals.len(),
+            type_params: 0,
+            returns,
+            locals,
+            body: vec![Stmt::Return(call)],
+            span,
+            captures,
+            change,
+            take,
+            borrowed,
+        }
+    }
+
+    /// Reports `what` outside an `unsafe` block.
+    fn need_unsafe(&mut self, what: &str, span: Span) {
+        if !self.frame.in_unsafe {
+            let diag = Diagnostic::new("E0330", format!("{what} needs an `unsafe` block"), span);
+            self.report(diag);
+        }
+    }
+
+    /// `unsafe`. The comment that security.md asks for comes first, or at the
+    /// end of the line.
+    fn unsafe_block(&mut self, body: &'a [ast::Stmt], span: Span) -> Stmt {
+        self.unsafe_sites.push(("block", span));
+        if !has_comment(self.src, span.start) {
+            let diag = Diagnostic::new("E0332", "this `unsafe` block has no comment", span);
+            self.report(diag.note("say why it is sound, in a `#` line above it"));
+        }
+        let outer = std::mem::replace(&mut self.frame.in_unsafe, true);
+        let body = self.block(body);
+        self.frame.in_unsafe = outer;
+        Stmt::Block(body)
     }
 
     /// The name of a `test`, which must be plain and new.
@@ -2062,7 +2168,7 @@ impl<'a> Checker<'a> {
             | StmtKind::Choice(_)
             | StmtKind::Trait(_) => return None,
             StmtKind::Expect(value) => self.expect_stmt(value, span),
-            StmtKind::Unsafe(_) => return self.later("`unsafe`", span),
+            StmtKind::Unsafe(body) => self.unsafe_block(body, span),
         })
     }
 
@@ -2257,6 +2363,9 @@ impl<'a> Checker<'a> {
     /// A task used as a value. Its code is a small task that takes a record
     /// first, like a lambda, and calls the real one.
     fn task_value(&mut self, id: usize, name: &str, explicit: Option<&[Ty]>, span: Span) -> Expr {
+        if self.foreign.contains(&id) {
+            self.need_unsafe(&format!("`{name}`, an `extern` task,"), span);
+        }
         let params: Vec<&str> =
             self.signatures[id].type_params.iter().map(|&(name, _)| name).collect();
         let known: Vec<Option<Ty>> = match explicit {
@@ -4571,6 +4680,9 @@ impl<'a> Checker<'a> {
         args: &'a [ast::Arg],
         span: Span,
     ) -> Expr {
+        if self.foreign.contains(&id) {
+            self.need_unsafe(&format!("`{name}`, an `extern` task,"), span);
+        }
         let reported = self.diags.len();
         let opened = self.frame.opened.len();
         let (receiver, seeded, written) = match receiver {
@@ -4950,6 +5062,14 @@ impl<'a> Checker<'a> {
                 Expr { kind: ExprKind::TextBytes(boxed), ty: Ty::List(&Ty::Byte), span }
             }
             (_, "len") => int(ExprKind::Len(boxed)),
+            (_, "pointer") => {
+                self.need_unsafe("`.pointer()`", span);
+                if !matches!(value.kind, ExprKind::Local(_)) {
+                    // A temporary would be gone by the time the address is used.
+                    self.fail("E0331", "`.pointer()` needs a name".into(), span);
+                }
+                Expr { kind: ExprKind::ListPointer(boxed), ty: Ty::Pointer, span }
+            }
             _ => self.is_empty(value, span),
         }
     }

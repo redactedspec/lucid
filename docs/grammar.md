@@ -112,7 +112,7 @@ literal     = [ "-" ] ( INT | FLOAT ) | TEXT | "true" | "false" ;
 return_stmt = "return" ( NEWLINE | value ) ;
 print_stmt  = "print" expression NEWLINE ;
 expect_stmt = "expect" expression NEWLINE ;
-unsafe_stmt = "unsafe" NEWLINE block ;
+unsafe_stmt = "unsafe" NEWLINE block ;   (* the type checker requires a comment *)
 
 expr_stmt   = expression [ assign_op expression ] NEWLINE ;
 assign_op   = "=" | "+=" | "-=" | "*=" | "/=" ;

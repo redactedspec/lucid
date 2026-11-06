@@ -1,0 +1,48 @@
+# Foreign calls, with each width of result. All live in the C runtime.
+unsafe extern task strlen(s: pointer[byte]) -> u64
+unsafe extern task abs(n: i32) -> i32
+unsafe extern task labs(n: i32) -> i32
+unsafe extern task toupper(c: i32) -> i32
+unsafe extern task sqrt(x: float) -> float
+unsafe extern task memset(to: pointer[byte], value: i32, count: u64) -> pointer[byte]
+unsafe extern task srand(seed: u32)
+unsafe extern task atoi(s: pointer[byte]) -> i32
+
+var raw = "hello".bytes()
+raw.push(0)
+
+# `raw` ends in a zero byte, and stays in scope and unchanged for the call.
+unsafe
+    print strlen(raw.pointer())
+    let negative: i32 = -7
+    print abs(negative)
+    print labs(-8)
+    print toupper(97)
+    print sqrt(16.0)
+    srand(1)
+
+var number = "-5".bytes()
+number.push(0)
+# `number` ends in a zero byte. A negative `i32` result must stay negative.
+unsafe
+    print atoi(number.pointer()) + 1
+
+var buffer = "aaaa".bytes()
+unsafe    # memset writes inside `buffer`, which nothing else holds.
+    let same = memset(buffer.pointer(), 98, 2)
+print buffer
+
+task length(items: list[byte]) -> u64
+    # The caller's list stays alive for this call, and ends in a zero byte.
+    unsafe
+        return strlen(items.pointer())
+
+print length(raw)
+
+# A name narrowed before an `unsafe` block loses that if the block writes it.
+var value: int? = 1
+if value is int
+    # This block calls nothing foreign, so it is sound.
+    unsafe
+        value = none
+    print value

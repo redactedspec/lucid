@@ -1,0 +1,16 @@
+unsafe extern task a(s: text)
+unsafe extern task b() -> list[int]
+unsafe extern task c[T](x: int)
+unsafe extern task d(change x: int)
+unsafe extern task e(x: int = 1)
+unsafe extern task f(self: int)
+unsafe extern task lucid_print(x: int)
+let p: pointer[int]? = none
+
+task g() -> pointer[byte]
+    var items = [1, 2]
+    var bytes = "x".bytes()
+    # Neither of these has a pointer.
+    unsafe
+        print items.pointer()
+        return "x".bytes().pointer()

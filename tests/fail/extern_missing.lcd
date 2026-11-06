@@ -1,0 +1,5 @@
+unsafe extern task no_such_symbol_anywhere(x: int) -> int
+
+# Nothing runs, since no library has it.
+unsafe
+    print no_such_symbol_anywhere(1)

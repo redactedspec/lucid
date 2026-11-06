@@ -25,6 +25,7 @@ Every tool has a stable `--json` output.
 | `lucid test --json` | Per-test results with values on failure: `name`, `passed`, `file`, `line`, `column`, and `output`, which holds what the test printed and, on failure, the trap message and trace |
 | `lucid context <module>` | Compact public API of a module or package: signatures and doc comments only |
 | `lucid doc --json` | Full docs as data |
+| `lucid check --unsafe` | `unsafe` blocks and `extern` tasks: `file:line:column: unsafe: kind` on stdout, or `kind`, `file`, `line`, and `column` with `--json`. `kind` is `block` or `extern` |
 | `lucid check --costs` | Copy and reference count sites: `file:line:column: kind: message` on stdout, or `kind`, `type`, `file`, `line`, and `column` with `--json`. A `copy` is a value held twice that a later write changes, which costs O(n) if both holders stay. A `count` costs one count operation. Exit code 0. A program with an error or an unbuilt feature reports that instead, with exit code 1 |
 
 ## Diagnostics format
@@ -114,7 +115,11 @@ The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and 
 | E0327 | `try` or `else` on a value with no error type or `none` to act on, or with nothing left after it |
 | E0328 | An error that nothing uses: a statement drops it, or a name holds it and is never read |
 | E0329 | A `test` name holds `{}`, or repeats |
+| E0330 | An `extern` task or `.pointer()` is used outside an `unsafe` block |
+| E0331 | An `extern` task has a form that C cannot take, a pointer type is not `pointer[byte]`, or `.pointer()` is not on a name |
+| E0332 | An `unsafe` block has no comment |
 | E0901 | Parses, but cannot run at this milestone |
+| E0904 | No library has this foreign task |
 | E0902 | Task frame is too large for the stack check: over 512 KiB, or half the stack for top-level code |
 | E0903 | Too many generic instances: over 20,000, or a type argument of over 256 parts |
 

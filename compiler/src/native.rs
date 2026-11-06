@@ -89,6 +89,7 @@ fn clif(ty: Ty) -> Type {
         | Ty::U16
         | Ty::U32
         | Ty::U64
+        | Ty::Pointer
         | Ty::Text
         | Ty::List(_)
         | Ty::Map(..)
@@ -188,6 +189,7 @@ fn compile(
         ("preserve_frame_pointers", "true"),
     ];
     let mut builder = JITBuilder::with_flags(&flags, default_libcall_names()).expect(CODEGEN);
+    builder.symbol_lookup_fn(Box::new(find_symbol));
     builder.symbol("lucid_print", lucid_rt::lucid_print as *const u8);
     builder.symbol("lucid_print_int", lucid_rt::lucid_print_int as *const u8);
     builder.symbol("lucid_print_uint", lucid_rt::lucid_print_uint as *const u8);
@@ -325,12 +327,13 @@ fn compile(
     let mut builder_context = FunctionBuilderContext::new();
     let mut statics = HashMap::new();
     let mut sites = Vec::new();
+    let mut missing = Vec::new();
     let tasks = program.tasks.iter().zip(&ids).map(|(task, id)| (task, *id));
     for (task, id) in tasks.chain([(&program.main, main)]) {
         context.func.signature = signature_of(&module, task);
         let body = FunctionBuilder::new(&mut context.func, &mut builder_context);
         let (module, runtime, ids, lines) = (&mut module, &runtime, &ids, &lines);
-        let statics = &mut statics;
+        let (statics, missing) = (&mut statics, &mut missing);
         let data_id = module.declare_anonymous_data(false, false).expect(CODEGEN);
         let data = module.declare_data_in_func(data_id, body.func);
         let (vars, loops, funcs, text) = (Vec::new(), Vec::new(), HashMap::new(), Vec::new());
@@ -351,6 +354,7 @@ fn compile(
             data,
             text,
             statics,
+            missing,
             path,
             lines,
         }
@@ -376,6 +380,11 @@ fn compile(
         }
         module.clear_context(&mut context);
     }
+    for (name, span) in missing {
+        let message = format!("cannot find the foreign task `{name}`");
+        let note = "it must be in the C runtime or `kernel32`";
+        diags.push(Diagnostic::new("E0904", message, span).note(note));
+    }
     if !diags.is_empty() {
         return Err(diags);
     }
@@ -389,6 +398,35 @@ fn compile(
     // Leaked on purpose: `entry` points into memory that the module owns.
     std::mem::forget(module);
     Ok((entry, tests))
+}
+
+/// Finds a foreign task in the libraries that every Lucid program has loaded.
+/// `lucid build` and other systems need their own answer, at M5 and M8.
+#[cfg(windows)]
+fn find_symbol(name: &str) -> Option<*const u8> {
+    use std::ffi::{CString, c_char, c_void};
+    unsafe extern "system" {
+        fn GetModuleHandleA(name: *const c_char) -> *mut c_void;
+        fn GetProcAddress(module: *mut c_void, name: *const c_char) -> *const u8;
+    }
+    let name = CString::new(name).ok()?;
+    [c"ucrtbase.dll", c"kernel32.dll"].iter().find_map(|library| {
+        // SAFETY: both are NUL-terminated strings, and a null module is checked.
+        unsafe {
+            let module = GetModuleHandleA(library.as_ptr());
+            let found = if module.is_null() {
+                std::ptr::null()
+            } else {
+                GetProcAddress(module, name.as_ptr())
+            };
+            (!found.is_null()).then_some(found)
+        }
+    })
+}
+
+#[cfg(not(windows))]
+fn find_symbol(_name: &str) -> Option<*const u8> {
+    None
 }
 
 struct Lower<'a, 'b> {
@@ -414,6 +452,8 @@ struct Lower<'a, 'b> {
     data: GlobalValue,
     text: Vec<u8>,
     /// Values in static data, each once in the program.
+    /// Foreign tasks that no library has.
+    missing: &'a mut Vec<(String, Span)>,
     statics: &'a mut HashMap<Vec<u8>, DataId>,
     path: &'a str,
     lines: &'a Lines<'a>,
@@ -1274,6 +1314,11 @@ impl Lower<'_, '_> {
                 self.new_record(code, *counted, fields)
             }
             ExprKind::CallValue(callee, args) => self.call_value(callee, args, expr.span),
+            ExprKind::Foreign(name, args) => self.foreign(name, args, expr.ty, expr.span),
+            ExprKind::ListPointer(list) => {
+                let list = self.expr(list);
+                self.body.ins().iadd_imm_s(list, i64::from(lucid_rt::SLOTS_OFFSET))
+            }
             ExprKind::Field(value, slot) => {
                 let value = self.expr(value);
                 self.load_slot(value, slot_offset(*slot), expr.ty)
@@ -1349,6 +1394,38 @@ impl Lower<'_, '_> {
             self.body.def_var(self.vars[local], value);
         }
         result
+    }
+
+    /// Compiled code keeps every integer in 64 bits, which C reads the low part
+    /// of. A C result has only its own width, so it widens here.
+    fn foreign(&mut self, name: &str, args: &[Expr], returns: Ty, span: Span) -> Value {
+        if find_symbol(name).is_none() {
+            self.missing.push((name.to_string(), span));
+        }
+        let values: Vec<Value> = args.iter().map(|arg| self.expr(arg)).collect();
+        let mut signature = self.module.make_signature();
+        for arg in args {
+            let param = AbiParam::new(clif(arg.ty));
+            signature.params.push(if arg.ty == Ty::Bool { param.uext() } else { param });
+        }
+        let width = match returns {
+            Ty::Byte | Ty::I8 => types::I8,
+            Ty::I16 | Ty::U16 => types::I16,
+            Ty::I32 | Ty::U32 => types::I32,
+            ty => clif(ty),
+        };
+        if returns != Ty::None {
+            signature.returns.push(AbiParam::new(width));
+        }
+        let id = self.module.declare_function(name, Linkage::Import, &signature).expect(CODEGEN);
+        let Some(value) = self.call(id, &values) else { return self.none() };
+        match returns {
+            Ty::Byte | Ty::U16 | Ty::U32 => self.body.ins().uextend(types::I64, value),
+            Ty::I8 | Ty::I16 | Ty::I32 => self.body.ins().sextend(types::I64, value),
+            // C may give any byte, and Lucid needs 0 or 1.
+            Ty::Bool => self.body.ins().icmp_imm_s(IntCC::NotEqual, value, 0),
+            _ => value,
+        }
     }
 
     /// The record comes first in the call, so that the code finds its captures.

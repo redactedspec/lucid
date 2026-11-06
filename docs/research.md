@@ -410,6 +410,16 @@ Read for decision 110.
 
 Sources: [nextest, why process per test](https://nexte.st/docs/design/why-process-per-test/), [nextest, how it works](https://nexte.st/book/how-it-works.html).
 
+## Unsafe code
+
+Read for decisions 111 and 112.
+
+- **Clippy.** `undocumented_unsafe_blocks` checks that an `unsafe` block has a `// SAFETY:` comment. It sits in the `restriction` group, so it is off by default in Rust. Open issues show false positives around attributes. Lucid has no attributes, and its check looks only at the block's own line and the line above, so most of those cases cannot arise. Security.md already asked for this comment, so a compile error only enforces it. No evidence shows how often such comments are true.
+- **Not read.** Rust's RFC 2585 on `unsafe` operations was not found in the search, so it is not evidence here.
+- **Weak ground.** Decision 112 rests on the small size of the feature, and on `AGENTS.md` asking for no unneeded work. No source was read on pointer design.
+
+Sources: [Clippy lint source](https://rust.googlesource.com/rust-clippy/+/refs/heads/beta/clippy_lints/src/undocumented_unsafe_blocks.rs).
+
 ## Open research
 
 | Topic | Needed by |

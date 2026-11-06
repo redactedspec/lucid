@@ -1,0 +1,2 @@
+unsafe_show.lcd:2:11: error E0320: `pointer[byte]` does not have `Show`
+unsafe_show.lcd:3:11: error E0303: `==` needs a number, found `pointer[byte]`

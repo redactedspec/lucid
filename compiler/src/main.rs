@@ -16,7 +16,7 @@ use diag::{Diagnostic, Span};
 use std::io::Write;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: lucid run FILE\n       lucid check [--json] [--costs] FILE\n       lucid test [--json] FILE";
+const USAGE: &str = "usage: lucid run FILE\n       lucid check [--json] [--costs | --unsafe] FILE\n       lucid test [--json] FILE";
 
 /// Set for the child process of `lucid test`, to the place of its first test.
 const TEST_FROM: &str = "LUCID_TEST_FROM";
@@ -45,6 +45,10 @@ fn cli(args: &[String]) -> ExitCode {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let (run, json, costs, path) = match args.as_slice() {
         ["test", path] if !path.starts_with('-') => return test(path, false),
+        ["check", "--unsafe", path] if !path.starts_with('-') => return unsafe_sites(path, false),
+        ["check", "--json", "--unsafe", path] if !path.starts_with('-') => {
+            return unsafe_sites(path, true);
+        }
         ["test", "--json", path] if !path.starts_with('-') => return test(path, true),
         ["run", path] => (true, false, false, *path),
         ["check", path] => (false, false, false, *path),
@@ -60,7 +64,7 @@ fn cli(args: &[String]) -> ExitCode {
     if diags.is_empty()
         && let Some(file) = &file
     {
-        let (mut program, errors) = check::check(file, !run);
+        let (mut program, errors) = check::check(file, &src, !run);
         diags = errors;
         if diags.is_empty() {
             diags = mono::run(&mut program);
@@ -89,6 +93,42 @@ fn cli(args: &[String]) -> ExitCode {
     if diags.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
 
+/// `lucid check --unsafe`: each `unsafe` block and `extern` task, in file order.
+fn unsafe_sites(path: &str, json: bool) -> ExitCode {
+    let (src, file, mut diags) = load(path);
+    let mut sites = Vec::new();
+    if diags.is_empty()
+        && let Some(file) = &file
+    {
+        let (program, errors) = check::check(file, &src, true);
+        diags = errors;
+        sites = program.unsafe_sites;
+    }
+    if !diags.is_empty() {
+        if json {
+            emit(std::io::stdout(), &diag::render_json(path, &src, &diags));
+        } else {
+            emit(std::io::stderr(), &diag::render_text(path, &src, &diags));
+        }
+        return ExitCode::FAILURE;
+    }
+    sites.sort_by_key(|(_, span)| span.start);
+    let lines = diag::Lines::new(&src);
+    let file = diag::json_string(path);
+    let items = sites.iter().map(|(kind, span)| {
+        let (line, column) = lines.position(span.start);
+        if json {
+            format!("{{\"kind\":\"{kind}\",\"file\":{file},\"line\":{line},\"column\":{column}}}")
+        } else {
+            format!("{path}:{line}:{column}: unsafe: {kind}\n")
+        }
+    });
+    let report: String =
+        if json { format!("[{}]\n", items.collect::<Vec<_>>().join(",")) } else { items.collect() };
+    emit(std::io::stdout(), &report);
+    ExitCode::SUCCESS
+}
+
 /// The result of one test.
 struct Outcome {
     failed: bool,
@@ -104,7 +144,7 @@ fn test(path: &str, json: bool) -> ExitCode {
     if diags.is_empty()
         && let Some(file) = &file
     {
-        let (mut program, errors) = check::check(file, true);
+        let (mut program, errors) = check::check(file, &src, true);
         diags = errors;
         if diags.is_empty() {
             diags = mono::run(&mut program);

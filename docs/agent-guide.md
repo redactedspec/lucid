@@ -545,9 +545,27 @@ test "adds numbers"
 
 `expect` also works outside tests. A failed comparison shows both values, as `expect failed: 4 == 5`, and what passes narrows: after `expect x is int`, `x` is an `int`.
 
+## Foreign code
+
+```lucid
+unsafe extern task strlen(s: pointer[byte]) -> u64
+
+var raw = "hello".bytes()
+raw.push(0)
+
+# `raw` ends in a zero byte, and stays unchanged for the call.
+unsafe
+    print strlen(raw.pointer())
+```
+
+- An `extern` task is a C function in the C runtime or `kernel32`. It takes and gives numbers, `bool`, and `pointer[byte]`. A C `int` is `i32`.
+- Only an `unsafe` block can use one, or call `.pointer()`. The block needs a `#` comment above it that says why it is sound.
+- `.pointer()` works on a `list[byte]` in a name, and is valid until the list changes. A C string is `.bytes()` with a zero byte pushed.
+- `lucid check --unsafe file.lcd` lists every site.
+
 ## What is not available
 
-Some keywords parse but do not run yet, and report E0901: `spawn`, `shared`, `weak`, `use`, `public`, `unsafe`.
+Some keywords parse but do not run yet, and report E0901: `spawn`, `shared`, `weak`, `use`, `public`.
 
 There are no modules, file or console input, or standard library. These do not exist, so write your own: `sort`, `split`, `join`, `trim`, `contains`, `replace`, `abs`, `min`, `max`, `sum`, `range`, `enumerate`, `zip`, `.map`, `.filter`, `.keys`, `.values`, `.insert`, `.clear`, text to number, and number to text other than interpolation. There is no way to turn a number into a character. To map characters to numbers, search a text such as `"abcdefghijklmnopqrstuvwxyz"`.
 
@@ -576,4 +594,6 @@ Each error has a stable code and usually says what to do.
 | E0327 | `try` or `else` on a value that cannot fail |
 | E0328 | An error is not used: add `try`, `else`, or `match` |
 | E0329 | A `test` name holds `{}`, or repeats |
+| E0330 | An `extern` task or `.pointer()` is outside `unsafe` |
+| E0332 | An `unsafe` block has no comment |
 | E0901 | The feature parses, but does not run yet |

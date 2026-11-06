@@ -26,7 +26,9 @@ Map and set hashes use SipHash through Rust's `RandomState`, with keys chosen on
 
 ## Unsafe code
 
-`unsafe` blocks are the only place for raw pointers and foreign calls. Each block needs a comment that states why it is sound. `lucid check` reports all `unsafe` sites, including those in dependencies.
+`unsafe` blocks are the only place for foreign calls and for taking a raw pointer. Error E0330 enforces this. Each block needs a comment, and error E0332 enforces that one exists, not that it is true. `lucid check --unsafe` lists all `unsafe` sites in a file. Listing those in dependencies waits for packages.
+
+Inside `unsafe`, the guarantees above are the author's job. A C call can do anything, a wrong declared type corrupts values, and a pointer used after its list changes is a use after free. `bool` from C is normalized, and integer results are extended from their declared width, so a correct declaration gives a valid Lucid value.
 
 ## Package permissions
 

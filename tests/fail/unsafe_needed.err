@@ -1,0 +1,5 @@
+unsafe_needed.lcd:7:7: error E0330: `strlen`, an `extern` task, needs an `unsafe` block
+unsafe_needed.lcd:7:14: error E0330: `.pointer()` needs an `unsafe` block
+unsafe_needed.lcd:8:9: error E0330: `strlen`, an `extern` task, needs an `unsafe` block
+unsafe_needed.lcd:11:11: error E0330: `strlen`, an `extern` task, needs an `unsafe` block
+unsafe_needed.lcd:15:12: error E0330: `.pointer()` needs an `unsafe` block

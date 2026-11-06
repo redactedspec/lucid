@@ -72,7 +72,7 @@ Build a thin end-to-end path first. Depth comes later.
 ## M5: A usable language
 
 - [x] `try`, `else`, the `Error` trait, unused-error check
-- [ ] `test`, `expect`, `unsafe`, and stack traces on a trap
+- [x] `test`, `expect`, `unsafe`, and stack traces on a trap
 - [ ] Modules, `use`, `public`, packages, `lucid.toml`
 - [ ] `std.fs`, `std.json`, `std.env`, `std.args`, `std.time`
 - [ ] `lucid build`, `test`, `fix`, `explain`, `context`

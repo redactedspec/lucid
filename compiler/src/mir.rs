@@ -22,6 +22,8 @@ pub enum Ty {
     U64,
     F32,
     None,
+    /// `pointer[byte]`, a raw address. No count, and no traits.
+    Pointer,
     /// A counted heap value, as are the three below. See "Counting".
     Text,
     List(&'static Ty),
@@ -74,6 +76,7 @@ impl Ty {
             Ty::U64 => "u64".into(),
             Ty::F32 => "f32".into(),
             Ty::None => "none".into(),
+            Ty::Pointer => "pointer[byte]".into(),
             Ty::Text => "text".into(),
             Ty::List(item) => format!("list[{}]", item.name()),
             Ty::Map(key, value) => format!("map[{}, {}]", key.name(), value.name()),
@@ -444,6 +447,8 @@ pub struct Program {
     pub tasks: Vec<Task>,
     /// The `test` blocks in file order, if this build keeps them.
     pub tests: Vec<TestCase>,
+    /// Each `unsafe` block and `extern` task, as a kind and a position.
+    pub unsafe_sites: Vec<(&'static str, Span)>,
     /// The top-level statements of the entry file.
     pub main: Task,
     pub types: Types,
@@ -640,6 +645,11 @@ pub enum ExprKind {
     TextQuote(Box<Expr>),
     /// The number of Unicode characters.
     TextLen(Box<Expr>),
+    /// A call to foreign code, by its symbol. Only the task that `check.rs`
+    /// writes for an `extern` holds one.
+    Foreign(&'static str, Vec<Expr>),
+    /// The address of the first element of a `list[byte]`.
+    ListPointer(Box<Expr>),
     TextIsEmpty(Box<Expr>),
     /// A new text from these characters, up to but not including `end`.
     /// Traps unless `0 <= start <= end <= len`.
@@ -785,6 +795,7 @@ pub trait Visit {
             ExprKind::Call(_, _, values)
             | ExprKind::Method(_, values)
             | ExprKind::Join(values)
+            | ExprKind::Foreign(_, values)
             | ExprKind::ListOf(values) => {
                 values.iter_mut().for_each(|value| self.expr(value));
             }
@@ -808,6 +819,7 @@ pub trait Visit {
             | ExprKind::ToText(inner)
             | ExprKind::TextQuote(inner)
             | ExprKind::TextLen(inner)
+            | ExprKind::ListPointer(inner)
             | ExprKind::TextIsEmpty(inner)
             | ExprKind::TextByteLen(inner)
             | ExprKind::TextBytes(inner)
