@@ -1,0 +1,43 @@
+# Each test runs after a failure, and top-level statements do not run.
+print "top level never runs"
+
+task add(a: int, b: int) -> int
+    return a + b
+
+test "adds numbers"
+    print "a passing test keeps this to itself"
+    expect add(2, 3) == 5
+
+test "a wrong sum"
+    print "a failing test shows this"
+    expect add(2, 2) == 5
+
+task divide(n: int) -> int
+    return 1 // n
+
+test "a trap in a task"
+    expect divide(add(0, 0)) == 0
+
+task parse(n: int) -> int or Oops
+    if n < 0
+        return Oops(why: "negative")
+    return n
+
+type Oops
+    why: text
+
+task error_message(self: Oops) -> text
+    return "oops: {self.why}"
+
+test "try ends a test"
+    expect try parse(1) == 1
+    print try parse(-1)
+    print "not reached"
+
+test "a test can return"
+    return
+    expect false
+
+test "last one still runs"
+    let counts = [1, 2]
+    expect counts.len() == 2

@@ -1,0 +1,8 @@
+# Values stay out of each other's way, and nothing leaks.
+test "one"
+    var items = ["a"]
+    items.push("b")
+    expect items == ["a", "b"]
+
+test "two"
+    expect "{1}" == "1"

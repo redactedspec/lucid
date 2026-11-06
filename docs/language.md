@@ -603,12 +603,14 @@ var leaf = shared TreeNode(value: 2, children: [], parent: weak root)
 
 ## Tests
 
-Tests live next to the code and are removed from normal builds.
+Tests live next to the code. `lucid run` drops them unread. `lucid check` and `lucid test` check them.
 
 ```lucid
 test "adds numbers"
     expect add(2, 3) == 5
 ```
+
+A test sits at top level, and its name is plain text, new in the file, with no `{}`. It is a task with no parameters, so it sees what a task sees. `lucid test` runs each test in file order, and runs no top-level statements. A test fails if it traps or a `try` in it fails, as at top level. A failure does not stop the tests after it, and a test shares no values with another. Output of a passing test is hidden.
 
 `expect` takes a `bool`, traps when it is false, and also works outside tests. On a comparison such as `==` or `<`, each side runs once, and the trap shows both values: `expect failed: 5 < 4`. Text has quotes. Any other condition, or a side with no `Show`, gives `expect failed`. What passes narrows what follows, as an `if` that ends does: after `expect x is int`, `x` is an `int`.
 

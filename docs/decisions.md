@@ -115,6 +115,7 @@ Add new entries at the end of the list. To reverse a decision, add a new entry t
 | 107 | 2026-11-06 | `try` may sit anywhere in an expression, and `ownership.rs` moves what is in flight to locals only when a part can return | The grammar already allowed this, and banning it would break `(try f()).x`. Turning off moves for such a statement would not help, since a `Retain` in flight leaks as well. Only such a statement pays. |
 | 108 | 2026-11-06 | A stack trace walks frame pointers, with a table from return address to source position, and no unwinding tables | It costs one small table per program, and no measured time, see "Stack traces" in `research.md`. It shows at most 16 calls, since a stack overflow has millions. |
 | 109 | 2026-11-06 | `expect` shows both sides of a comparison, each run once, and shows only `expect failed` otherwise. A pass narrows like an `if` that ends | The spec promised both values. One form means no `expect_eq`, by rule 1 in `agents.md`. See "`expect`" in `research.md`. A generic with no `Show` bound must still compile, so a side with no `Show` drops the values. |
+| 110 | 2026-11-06 | `lucid test` runs tests in one child process, and starts a new child after each failure. A test is a task, and a failed `try` ends it as at top level | A trap must stay uncatchable, so only a process boundary contains it. See "Test isolation" in `research.md`. A test that sees top-level values would need top-level statements to run, and decision 27 rules that out. |
 
 ## Open questions
 

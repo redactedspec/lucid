@@ -442,12 +442,21 @@ pub type Local = usize;
 
 pub struct Program {
     pub tasks: Vec<Task>,
+    /// The `test` blocks in file order, if this build keeps them.
+    pub tests: Vec<TestCase>,
     /// The top-level statements of the entry file.
     pub main: Task,
     pub types: Types,
     pub datas: Vec<Shape>,
     /// The tasks with a `self` parameter, by name.
     pub methods: HashMap<String, Vec<usize>>,
+}
+
+pub struct TestCase {
+    pub name: String,
+    /// Its task. Starts as a place in `check.rs`, then one from `mono.rs`.
+    pub task: usize,
+    pub span: Span,
 }
 
 #[derive(Clone)]

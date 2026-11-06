@@ -1,0 +1,12 @@
+ok adds numbers
+FAIL a wrong sum
+    a failing test shows this
+    results.lcd:13:5: trap: expect failed: 4 == 5
+FAIL a trap in a task
+    results.lcd:16:12: trap: division by zero
+        at results.lcd:19:12 in test "a trap in a task"
+FAIL try ends a test
+    oops: negative
+ok a test can return
+ok last one still runs
+6 tests, 3 failed

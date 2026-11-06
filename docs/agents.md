@@ -22,7 +22,7 @@ Every tool has a stable `--json` output.
 | `lucid check --json` | Fast diagnostics, no code generation |
 | `lucid fix` | Apply machine-suggested fixes |
 | `lucid explain E0123` | Cause, example, and fix for an error code |
-| `lucid test --json` | Per-test results with values on failure |
+| `lucid test --json` | Per-test results with values on failure: `name`, `passed`, `file`, `line`, `column`, and `output`, which holds what the test printed and, on failure, the trap message and trace |
 | `lucid context <module>` | Compact public API of a module or package: signatures and doc comments only |
 | `lucid doc --json` | Full docs as data |
 | `lucid check --costs` | Copy and reference count sites: `file:line:column: kind: message` on stdout, or `kind`, `type`, `file`, `line`, and `column` with `--json`. A `copy` is a value held twice that a later write changes, which costs O(n) if both holders stay. A `count` costs one count operation. Exit code 0. A program with an error or an unbuilt feature reports that instead, with exit code 1 |
@@ -113,6 +113,7 @@ The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and 
 | E0326 | A value is used while something changes it: two `change` arguments overlap, a statement uses what it changes, a `for` body changes what it visits, or a `for change` body uses it |
 | E0327 | `try` or `else` on a value with no error type or `none` to act on, or with nothing left after it |
 | E0328 | An error that nothing uses: a statement drops it, or a name holds it and is never read |
+| E0329 | A `test` name holds `{}`, or repeats |
 | E0901 | Parses, but cannot run at this milestone |
 | E0902 | Task frame is too large for the stack check: over 512 KiB, or half the stack for top-level code |
 | E0903 | Too many generic instances: over 20,000, or a type argument of over 256 parts |

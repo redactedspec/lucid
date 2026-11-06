@@ -16,7 +16,10 @@ use diag::{Diagnostic, Span};
 use std::io::Write;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: lucid run FILE\n       lucid check [--json] [--costs] FILE";
+const USAGE: &str = "usage: lucid run FILE\n       lucid check [--json] [--costs] FILE\n       lucid test [--json] FILE";
+
+/// Set for the child process of `lucid test`, to the place of its first test.
+const TEST_FROM: &str = "LUCID_TEST_FROM";
 
 /// What every file sees. The checker treats these like the file's own.
 const PRELUDE: &str = "trait Error
@@ -41,6 +44,8 @@ fn main() -> ExitCode {
 fn cli(args: &[String]) -> ExitCode {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let (run, json, costs, path) = match args.as_slice() {
+        ["test", path] if !path.starts_with('-') => return test(path, false),
+        ["test", "--json", path] if !path.starts_with('-') => return test(path, true),
         ["run", path] => (true, false, false, *path),
         ["check", path] => (false, false, false, *path),
         ["check", "--json", path] => (false, true, false, *path),
@@ -55,7 +60,7 @@ fn cli(args: &[String]) -> ExitCode {
     if diags.is_empty()
         && let Some(file) = &file
     {
-        let (mut program, errors) = check::check(file);
+        let (mut program, errors) = check::check(file, !run);
         diags = errors;
         if diags.is_empty() {
             diags = mono::run(&mut program);
@@ -82,6 +87,130 @@ fn cli(args: &[String]) -> ExitCode {
         emit(std::io::stderr(), &diag::render_text(path, &src, &diags));
     }
     if diags.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+}
+
+/// The result of one test.
+struct Outcome {
+    failed: bool,
+    /// What it printed. If it failed, also what stopped it.
+    output: String,
+}
+
+/// `lucid test`. A trap ends a process, so tests run in a child, which goes on
+/// after a failure in a new child. That compiles once more per failure.
+fn test(path: &str, json: bool) -> ExitCode {
+    let (src, file, mut diags) = load(path);
+    let mut tests = Vec::new();
+    if diags.is_empty()
+        && let Some(file) = &file
+    {
+        let (mut program, errors) = check::check(file, true);
+        diags = errors;
+        if diags.is_empty() {
+            diags = mono::run(&mut program);
+        }
+        if diags.is_empty() {
+            if let Ok(from) = std::env::var(TEST_FROM) {
+                ownership::run(&mut program, std::env::var_os("LUCID_NAIVE").is_none());
+                let from = from.parse().unwrap_or(usize::MAX);
+                diags = native::run_tests(&program, path, &src, STACK_BYTES, from)
+                    .err()
+                    .unwrap_or_default();
+                emit(std::io::stderr(), &diag::render_text(path, &src, &diags));
+                return if diags.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE };
+            }
+            tests = std::mem::take(&mut program.tests);
+        }
+    }
+    if !diags.is_empty() {
+        if json {
+            emit(std::io::stdout(), &diag::render_json(path, &src, &diags));
+        } else {
+            emit(std::io::stderr(), &diag::render_text(path, &src, &diags));
+        }
+        return ExitCode::FAILURE;
+    }
+    let outcomes = match run_tests(path, tests.len()) {
+        Ok(outcomes) => outcomes,
+        Err(problem) => {
+            emit(std::io::stderr(), &problem);
+            return ExitCode::FAILURE;
+        }
+    };
+    let report = if json {
+        render_tests_json(path, &src, &tests, &outcomes)
+    } else {
+        render_tests(&tests, &outcomes)
+    };
+    emit(std::io::stdout(), &report);
+    if outcomes.iter().any(|outcome| outcome.failed) {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+/// Runs `count` tests in child processes. Each child gives a NUL before each
+/// test it starts, and stops at the first that does not pass. An error means
+/// that a child did not start a test, and holds what it said.
+fn run_tests(path: &str, count: usize) -> Result<Vec<Outcome>, String> {
+    let lucid = std::env::current_exe().map_err(|e| format!("lucid: {e}\n"))?;
+    let mut outcomes = Vec::with_capacity(count);
+    while outcomes.len() < count {
+        let child = std::process::Command::new(&lucid)
+            .args(["test", path])
+            .env(TEST_FROM, outcomes.len().to_string())
+            .output()
+            .map_err(|e| format!("lucid: cannot start a test process: {e}\n"))?;
+        let stdout = String::from_utf8_lossy(&child.stdout);
+        let stderr = String::from_utf8_lossy(&child.stderr);
+        let parts: Vec<&str> = stdout.split('\0').skip(1).collect();
+        if parts.is_empty() {
+            return Err(stderr.into_owned());
+        }
+        for (place, part) in parts.iter().enumerate() {
+            let failed = !child.status.success() && place + 1 == parts.len();
+            let printed = part.strip_prefix('\n').unwrap_or(part);
+            let output = format!("{printed}{}", if failed { stderr.as_ref() } else { "" });
+            outcomes.push(Outcome { failed, output });
+        }
+    }
+    Ok(outcomes)
+}
+
+fn render_tests(tests: &[mir::TestCase], outcomes: &[Outcome]) -> String {
+    let mut report = String::new();
+    for (test, outcome) in tests.iter().zip(outcomes) {
+        report += &format!("{} {}\n", if outcome.failed { "FAIL" } else { "ok" }, test.name);
+        if outcome.failed {
+            report.extend(outcome.output.lines().map(|line| format!("    {line}\n")));
+        }
+    }
+    let failed = outcomes.iter().filter(|outcome| outcome.failed).count();
+    report + &format!("{} tests, {failed} failed\n", tests.len())
+}
+
+fn render_tests_json(
+    path: &str,
+    src: &str,
+    tests: &[mir::TestCase],
+    outcomes: &[Outcome],
+) -> String {
+    let lines = diag::Lines::new(src);
+    let file = diag::json_string(path);
+    let items: Vec<String> = tests
+        .iter()
+        .zip(outcomes)
+        .map(|(test, outcome)| {
+            let name = diag::json_string(&test.name);
+            let (line, column) = lines.position(test.span.start);
+            let (passed, output) = (!outcome.failed, diag::json_string(&outcome.output));
+            format!(
+                "{{\"name\":{name},\"passed\":{passed},\"file\":{file},\"line\":{line},\"column\":{column},\"output\":{output}}}"
+            )
+        })
+        .collect();
+    format!("[{}]\n", items.join(","))
 }
 
 fn usage() -> ExitCode {

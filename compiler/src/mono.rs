@@ -42,6 +42,10 @@ pub fn run(program: &mut Program) -> Vec<Diagnostic> {
             mono.instance(id, &[], task.span);
         }
     }
+    for test in &mut program.tests {
+        let span = test.span;
+        test.task = mono.instance(test.task, &[], span);
+    }
     mono.task(&mut program.main, &[]);
     // A task that looks inside an `any` needs every type that goes in one, and
     // building those tasks can box more. So it is built again until nothing

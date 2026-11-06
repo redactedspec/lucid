@@ -3,6 +3,8 @@
 //! `tests/run/x.lcd` must run, print `x.out`, and exit 0.
 //! `tests/fail/x.lcd` must fail under `lucid run`, print `x.err`, and exit 1.
 //! `tests/trap/x.lcd` must start, then trap with `x.err`, and exit 101.
+//! `tests/test/x.lcd` must print `x.out` under `lucid test`, and exit 1 if a
+//! test failed.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -94,6 +96,48 @@ fn traps_stop_the_program() {
             format!("exit {:?}\nstderr: {stderr:?}\nexpected: {expected:?}", output.status.code())
         })
     });
+}
+
+#[test]
+fn test_blocks_report_results() {
+    let dir = repo().join("tests").join("test");
+    for source in files(&dir, "lcd") {
+        let name = file_name(&source);
+        let expected = text(&fs::read(source.with_extension("out")).expect("no .out file"));
+        for run in [lucid, naive] {
+            let output = run(&dir, &["test", name]);
+            assert_eq!(text(&output.stdout), expected, "{name}: {}", text(&output.stderr));
+            let code = if expected.contains("FAIL ") { 1 } else { 0 };
+            assert_eq!(output.status.code(), Some(code), "{name}");
+        }
+    }
+}
+
+#[test]
+fn test_blocks_report_json() {
+    let dir = repo().join("tests").join("test");
+    let report = text(&lucid(&dir, &["test", "--json", "passing.lcd"]).stdout);
+    let wanted = "[{\"name\":\"one\",\"passed\":true,\"file\":\"passing.lcd\",\"line\":2,";
+    assert!(report.starts_with(wanted), "{report}");
+    let report = text(&lucid(&dir, &["test", "--json", "results.lcd"]).stdout);
+    assert!(report.contains("\"passed\":false"), "{report}");
+    assert!(report.contains("expect failed: 4 == 5"), "{report}");
+}
+
+/// `lucid run` drops `test` blocks unread, so these need `lucid check`.
+#[test]
+fn test_names_are_plain_and_new() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let source =
+        "test \"a\"\n    expect true\ntest \"a\"\n    expect true\ntest \"{1}\"\n    expect true\n";
+    fs::write(dir.join("test_names.lcd"), source).expect("cannot write test file");
+    let output = lucid(dir, &["check", "test_names.lcd"]);
+    assert_eq!(output.status.code(), Some(1));
+    let errors = text(&output.stderr);
+    assert!(errors.contains("3:6: error E0329: there are two tests named \"a\""), "{errors}");
+    assert!(errors.contains("5:6: error E0329: a `test` name cannot hold"), "{errors}");
+    let output = lucid(dir, &["run", "test_names.lcd"]);
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
 }
 
 #[test]
@@ -271,8 +315,9 @@ fn failed_stdout_write_traps_without_a_position() {
 /// also be listed in docs/agents.md.
 #[test]
 fn every_error_code_is_tested_and_documented() {
-    // missing_file_is_reported and huge_frame_is_rejected
-    let mut tested = String::from("E0001 E0902");
+    // missing_file_is_reported, huge_frame_is_rejected, and
+    // test_names_are_plain_and_new
+    let mut tested = String::from("E0001 E0902 E0329");
     for err in files(&repo().join("tests").join("fail"), "err") {
         tested += &text(&fs::read(err).expect("cannot read .err file"));
     }

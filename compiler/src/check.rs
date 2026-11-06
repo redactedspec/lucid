@@ -8,8 +8,8 @@ use crate::ast::{
 };
 use crate::diag::{Diagnostic, Span};
 use crate::mir::{
-    Expr, ExprKind, Local, Program, Shape, ShapeVariant, Stmt, Task, Ty, Types, Update, Visit,
-    inner,
+    Expr, ExprKind, Local, Program, Shape, ShapeVariant, Stmt, Task, TestCase, Ty, Types, Update,
+    Visit, inner,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -42,7 +42,8 @@ const TEST_UNION: &str = "test it first, as in `if x is not none`. Only a name n
 
 /// Checks a file. A program using an unbuilt feature gets only E0901, because
 /// names and types that feature would supply make any other error unreliable.
-pub fn check(file: &ast::File) -> (Program, Vec<Diagnostic>) {
+/// With `keep_tests` false, `test` blocks are dropped unread.
+pub fn check(file: &ast::File, keep_tests: bool) -> (Program, Vec<Diagnostic>) {
     let mut checker = Checker::default();
     checker.declare_types(file);
     checker.declare(file);
@@ -54,12 +55,28 @@ pub fn check(file: &ast::File) -> (Program, Vec<Diagnostic>) {
             _ => None,
         })
         .collect();
-    checker.first_lifted = written.len();
+    let blocks: Vec<_> = file
+        .stmts
+        .iter()
+        .filter_map(|stmt| match &stmt.kind {
+            StmtKind::Test { name, body } if keep_tests => Some((name, body, stmt.span)),
+            _ => None,
+        })
+        .collect();
+    let first_test = written.len();
+    checker.first_lifted = first_test + blocks.len();
     let mut tasks: Vec<Task> = written
         .into_iter()
         .enumerate()
         .map(|(id, (def, body, span))| checker.task(id, def, body, span))
         .collect();
+    let mut tests = Vec::with_capacity(blocks.len());
+    for (name, body, span) in blocks {
+        let name = checker.test_name(name, &tests);
+        let task = first_test + tests.len();
+        tasks.push(checker.test(&name, body, span));
+        tests.push(TestCase { name, task, span });
+    }
     let main = checker.main(file);
     tasks.append(&mut checker.lifted);
 
@@ -69,7 +86,7 @@ pub fn check(file: &ast::File) -> (Program, Vec<Diagnostic>) {
     if diags.iter().any(|d| d.code == "E0901") {
         diags.retain(|d| d.code == "E0901");
     }
-    (Program { tasks, main, types: checker.table, datas, methods }, diags)
+    (Program { tasks, tests, main, types: checker.table, datas, methods }, diags)
 }
 
 /// Type parameters in scope, with the type that each one stands for.
@@ -84,6 +101,9 @@ struct Frame<'a> {
     mutable: Vec<bool>,
     /// The return type, or `None` at top level.
     returns: Option<Ty>,
+    /// True in a `test` block, where a failed `try` ends the program, as it
+    /// does at top level.
+    in_test: bool,
     /// True in a lambda whose result type comes from its own body.
     open_result: bool,
     /// The hidden locals of `try` and `else` in the statement being lowered,
@@ -1702,6 +1722,55 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// The name of a `test`, which must be plain and new.
+    fn test_name(&mut self, name: &ast::Expr, tests: &[TestCase]) -> String {
+        let text = match &name.kind {
+            Ast::Text(parts) => match parts.as_slice() {
+                [] => Some(String::new()),
+                [TextPart::Literal(text)] => Some(text.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        let Some(text) = text else {
+            self.fail("E0329", "a `test` name cannot hold `{}`".into(), name.span);
+            return String::new();
+        };
+        if tests.iter().any(|test| test.name == text) {
+            self.fail("E0329", format!("there are two tests named \"{text}\""), name.span);
+        }
+        text
+    }
+
+    /// A `test` is a task with no parameters. It sees what a task sees.
+    fn test(&mut self, name: &str, body: &'a [ast::Stmt], span: Span) -> Task {
+        self.frame.returns = Some(Ty::None);
+        self.frame.in_test = true;
+        self.frame.scopes.push(HashMap::new());
+        let body = self.stmts(body);
+        self.frame.scopes.pop();
+        self.check_errors_read();
+        self.frame.in_test = false;
+        self.frame.mutable.clear();
+        let name: &'static str = format!("test \"{name}\"").leak();
+        let locals = std::mem::take(&mut self.frame.locals);
+        let (captures, change, take) = (Vec::new(), Vec::new(), Vec::new());
+        let (params, type_params, returns, borrowed) = (0, 0, Ty::None, Vec::new());
+        Task {
+            name,
+            params,
+            type_params,
+            returns,
+            locals,
+            body,
+            span,
+            captures,
+            change,
+            take,
+            borrowed,
+        }
+    }
+
     fn main(&mut self, file: &'a ast::File) -> Task {
         self.frame.returns = None;
         self.frame.scopes.push(HashMap::new());
@@ -1988,8 +2057,10 @@ impl<'a> Checker<'a> {
             StmtKind::Placeholder => Stmt::Placeholder(span),
             StmtKind::Expr(value) => return self.expr_stmt(value, span),
             StmtKind::Use { .. } => return self.later("`use`", span),
-            StmtKind::Test { .. } => return self.later("`test`", span),
-            StmtKind::Type(_) | StmtKind::Choice(_) | StmtKind::Trait(_) => return None,
+            StmtKind::Test { .. }
+            | StmtKind::Type(_)
+            | StmtKind::Choice(_)
+            | StmtKind::Trait(_) => return None,
             StmtKind::Expect(value) => self.expect_stmt(value, span),
             StmtKind::Unsafe(_) => return self.later("`unsafe`", span),
         })
@@ -2438,9 +2509,10 @@ impl<'a> Checker<'a> {
             return poisoned(span);
         };
         let test = self.holder_has(holder, failed, span);
-        let leave = match self.frame.returns {
-            Some(_) => self.return_failure(holder, failed, span),
-            None => self.exit_failure(holder, failed, span),
+        let leave = if self.frame.returns.is_none() || self.frame.in_test {
+            self.exit_failure(holder, failed, span)
+        } else {
+            self.return_failure(holder, failed, span)
         };
         let leave = Stmt::If { branches: vec![(test, leave)], otherwise: Vec::new() };
         let kind = ExprKind::Seq(vec![set, leave], view(self.read(holder, span), rest).into());

@@ -45,13 +45,38 @@ pub fn run(
     // ponytail: a limit in the code fits one JIT thread. `lucid build` and
     // `spawn` need a per-thread limit that the runtime sets up.
     let stack_limit = (&raw const here) as usize - (stack_bytes - STACK_MARGIN);
-    let entry = compile(program, path, src, stack_limit, stack_bytes / 2)?;
+    let (entry, _) = compile(program, path, src, stack_limit, stack_bytes / 2)?;
+    run_entry(entry);
+    Ok(())
+}
+
+/// Compiles the program and runs its tests from place `from`, each after a NUL
+/// and a line break, which no `print` can give. See `test` in `main.rs`.
+pub fn run_tests(
+    program: &Program,
+    path: &str,
+    src: &str,
+    stack_bytes: usize,
+    from: usize,
+) -> Result<(), Vec<Diagnostic>> {
+    let here = 0u8;
+    let stack_limit = (&raw const here) as usize - (stack_bytes - STACK_MARGIN);
+    let (_, tests) = compile(program, path, src, stack_limit, stack_bytes / 2)?;
+    for entry in tests.into_iter().skip(from) {
+        let mark = b"\0";
+        // SAFETY: the range is `mark`.
+        unsafe { lucid_rt::lucid_print(mark.as_ptr(), mark.len()) };
+        run_entry(entry);
+    }
+    Ok(())
+}
+
+fn run_entry(entry: *const u8) {
     // SAFETY: `compile` built `entry` with no parameters and a one-byte `none`
     // result. Its module is leaked, so the code stays mapped.
     let entry = unsafe { std::mem::transmute::<*const u8, extern "C" fn() -> u8>(entry) };
     entry();
     lucid_rt::lucid_check_leaks();
-    Ok(())
 }
 
 fn clif(ty: Ty) -> Type {
@@ -153,7 +178,7 @@ fn compile(
     src: &str,
     stack_limit: usize,
     max_main_frame: usize,
-) -> Result<*const u8, Vec<Diagnostic>> {
+) -> Result<(*const u8, Vec<*const u8>), Vec<Diagnostic>> {
     let flags = [
         ("opt_level", "speed"),
         // Windows commits stack one page at a time, so large frames must probe.
@@ -356,12 +381,14 @@ fn compile(
     }
     module.finalize_definitions().expect(CODEGEN);
     let entry = module.get_finalized_function(main);
+    let tests = program.tests.iter();
+    let tests = tests.map(|test| module.get_finalized_function(ids[test.task])).collect();
     let address =
         |(id, offset, line)| (module.get_finalized_function(id) as usize + offset as usize, line);
     lucid_rt::set_call_sites(sites.into_iter().map(address).collect());
     // Leaked on purpose: `entry` points into memory that the module owns.
     std::mem::forget(module);
-    Ok(entry)
+    Ok((entry, tests))
 }
 
 struct Lower<'a, 'b> {

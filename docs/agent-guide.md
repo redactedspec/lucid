@@ -531,9 +531,23 @@ show_all([Dog(name: "Fido")])
 
 `any` needs an expected type, as a union does. An `any` value has only the tasks of its trait, and no test gets the value back: use a union if code must know the type. `any Show` is allowed, and `any Order` and `any Hash` are not.
 
+## Tests
+
+```lucid
+task add(a: int, b: int) -> int
+    return a + b
+
+test "adds numbers"
+    expect add(2, 3) == 5
+```
+
+`lucid test file.lcd` runs each `test` and lists the results, or `lucid test --json file.lcd` for data. It runs no top-level statements, and exits with 1 if a test fails. `lucid run` drops tests. A test sees what a task sees. A trap or failed `try` fails only that test.
+
+`expect` also works outside tests. A failed comparison shows both values, as `expect failed: 4 == 5`, and what passes narrows: after `expect x is int`, `x` is an `int`.
+
 ## What is not available
 
-Some keywords parse but do not run yet, and report E0901: `test`, `spawn`, `shared`, `weak`, `use`, `public`, `unsafe`.
+Some keywords parse but do not run yet, and report E0901: `spawn`, `shared`, `weak`, `use`, `public`, `unsafe`.
 
 There are no modules, file or console input, or standard library. These do not exist, so write your own: `sort`, `split`, `join`, `trim`, `contains`, `replace`, `abs`, `min`, `max`, `sum`, `range`, `enumerate`, `zip`, `.map`, `.filter`, `.keys`, `.values`, `.insert`, `.clear`, text to number, and number to text other than interpolation. There is no way to turn a number into a character. To map characters to numbers, search a text such as `"abcdefghijklmnopqrstuvwxyz"`.
 
@@ -561,4 +575,5 @@ Each error has a stable code and usually says what to do.
 | E0326 | A value is used while something changes it: split the statement |
 | E0327 | `try` or `else` on a value that cannot fail |
 | E0328 | An error is not used: add `try`, `else`, or `match` |
+| E0329 | A `test` name holds `{}`, or repeats |
 | E0901 | The feature parses, but does not run yet |

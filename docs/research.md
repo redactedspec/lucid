@@ -400,6 +400,16 @@ Read for decision 109. pytest documents that its rewritten `assert` shows "the v
 
 Sources: [pytest assertions](https://docs.pytest.org/en/7.1.x/assert.html).
 
+## Test isolation
+
+Read for decision 110.
+
+- **nextest.** It runs each test in its own process. Its design page says processes are natural fault boundaries, and lets it time, watch, and kill each test with operating system tools. It also lists the cost: tests that share state in a process do not fit.
+- **Cost here.** A Lucid process compiles from source, so one process per test would compile once per test. One child that goes on until a failure compiles once, plus once per failure.
+- **Not confirmed.** A Zig commit message mentions test runners "respawned as needed". The search did not show what it does, so it is not evidence here. Windows has no `fork`, so a compiled child cannot be copied per test.
+
+Sources: [nextest, why process per test](https://nexte.st/docs/design/why-process-per-test/), [nextest, how it works](https://nexte.st/book/how-it-works.html).
+
 ## Open research
 
 | Topic | Needed by |
