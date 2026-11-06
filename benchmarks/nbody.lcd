@@ -1,0 +1,104 @@
+# Five planets, in a list of records. Stresses field reads and writes.
+type Body
+    x: float
+    y: float
+    z: float
+    vx: float
+    vy: float
+    vz: float
+    mass: float
+
+let pi = 3.141592653589793
+let solar_mass = 4.0 * pi * pi
+let days = 365.24
+
+task energy(bodies: list[Body]) -> float
+    var total = 0.0
+    for i in 0..bodies.len()
+        let b = bodies[i]
+        total += 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy + b.vz * b.vz)
+        for j in i + 1..bodies.len()
+            let c = bodies[j]
+            let dx = b.x - c.x
+            let dy = b.y - c.y
+            let dz = b.z - c.z
+            total -= b.mass * c.mass / (dx * dx + dy * dy + dz * dz).sqrt()
+    return total
+
+task advance(change bodies: list[Body], dt: float)
+    let n = bodies.len()
+    for i in 0..n
+        for j in i + 1..n
+            let dx = bodies[i].x - bodies[j].x
+            let dy = bodies[i].y - bodies[j].y
+            let dz = bodies[i].z - bodies[j].z
+            let d2 = dx * dx + dy * dy + dz * dz
+            let mag = dt / (d2 * d2.sqrt())
+            let mi = bodies[i].mass * mag
+            let mj = bodies[j].mass * mag
+            bodies[i].vx -= dx * mj
+            bodies[i].vy -= dy * mj
+            bodies[i].vz -= dz * mj
+            bodies[j].vx += dx * mi
+            bodies[j].vy += dy * mi
+            bodies[j].vz += dz * mi
+    for change b in bodies
+        b.x += dt * b.vx
+        b.y += dt * b.vy
+        b.z += dt * b.vz
+
+var bodies = [
+    Body(x: 0.0, y: 0.0, z: 0.0, vx: 0.0, vy: 0.0, vz: 0.0, mass: solar_mass),
+    Body(
+        x: 4.84143144246472082945,
+        y: -1.16032004402742839362,
+        z: -0.10362204447112311340,
+        vx: 0.00166007664274403694 * days,
+        vy: 0.00769901118419740425 * days,
+        vz: -0.00006904600169720630 * days,
+        mass: 0.00095479193842432661 * solar_mass
+    ),
+    Body(
+        x: 8.34336671801457167004,
+        y: 4.12479856412430479603,
+        z: -0.40352341711432138415,
+        vx: -0.00276742510726862411 * days,
+        vy: 0.00499852801234917238 * days,
+        vz: 0.00002304172975737320 * days,
+        mass: 0.00028588598066613082 * solar_mass
+    ),
+    Body(
+        x: 12.89436956213913102,
+        y: -15.11115140169863110,
+        z: -0.22330757889265573,
+        vx: 0.00296460137564761618 * days,
+        vy: 0.00237847173959480950 * days,
+        vz: -0.00002965895685402375 * days,
+        mass: 0.00004366244043351564 * solar_mass
+    ),
+    Body(
+        x: 15.37969711094732300,
+        y: -25.91931460998796000,
+        z: 0.17925877295037118,
+        vx: 0.00268067772490389322 * days,
+        vy: 0.00162824170038242295 * days,
+        vz: -0.00009515922545197159 * days,
+        mass: 0.00005151389020466115 * solar_mass
+    )
+]
+
+var px = 0.0
+var py = 0.0
+var pz = 0.0
+for b in bodies
+    px += b.vx * b.mass
+    py += b.vy * b.mass
+    pz += b.vz * b.mass
+bodies[0].vx = -px / solar_mass
+bodies[0].vy = -py / solar_mass
+bodies[0].vz = -pz / solar_mass
+
+print energy(bodies)
+for step in 0..2000000
+    advance(change bodies, 0.01)
+print energy(bodies)

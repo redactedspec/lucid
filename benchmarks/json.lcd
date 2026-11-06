@@ -1,0 +1,142 @@
+# Parse a document of records into a tree, then walk it.
+choice Value
+    Null
+    Flag(on: bool)
+    Num(value: int)
+    Str(value: text)
+    Arr(items: list[Value])
+    Obj(fields: map[text, Value])
+
+task repeat(piece: text, count: int) -> text
+    if count == 1
+        return piece
+    let half = repeat(piece, count // 2)
+    if count % 2 == 0
+        return "{half}{half}"
+    return "{half}{half}{piece}"
+
+type Marks
+    space: byte
+    newline: byte
+    quote: byte
+    open_list: byte
+    close_list: byte
+    open_map: byte
+    close_map: byte
+    zero: byte
+    nine: byte
+    minus: byte
+    letter_t: byte
+    letter_f: byte
+
+task skip(b: list[byte], change at: int, m: Marks)
+    while b[at] == m.space or b[at] == m.newline
+        at += 1
+
+task read_text(src: text, b: list[byte], change at: int, m: Marks) -> text
+    at += 1
+    let start = at
+    while b[at] != m.quote
+        at += 1
+    at += 1
+    return src[start..at - 1]
+
+task read_value(src: text, b: list[byte], change at: int, m: Marks) -> Value
+    skip(b, change at, m)
+    let c = b[at]
+    if c == m.quote
+        return Str(value: read_text(src, b, change at, m))
+    if c == m.open_list
+        at += 1
+        var items: list[Value] = []
+        skip(b, change at, m)
+        if b[at] == m.close_list
+            at += 1
+            return Arr(items: items)
+        while true
+            items.push(read_value(src, b, change at, m))
+            skip(b, change at, m)
+            at += 1
+            if b[at - 1] == m.close_list
+                return Arr(items: items)
+    if c == m.open_map
+        at += 1
+        var fields: map[text, Value] = {}
+        skip(b, change at, m)
+        if b[at] == m.close_map
+            at += 1
+            return Obj(fields: fields)
+        while true
+            skip(b, change at, m)
+            let key = read_text(src, b, change at, m)
+            skip(b, change at, m)
+            at += 1
+            fields[key] = read_value(src, b, change at, m)
+            skip(b, change at, m)
+            at += 1
+            if b[at - 1] == m.close_map
+                return Obj(fields: fields)
+    if c == m.letter_t
+        at += 4
+        return Flag(on: true)
+    if c == m.letter_f
+        at += 5
+        return Flag(on: false)
+    if c == m.minus or (c >= m.zero and c <= m.nine)
+        let negative = c == m.minus
+        if negative
+            at += 1
+        var total = 0
+        while b[at] >= m.zero and b[at] <= m.nine
+            total = total * 10 + (b[at] - m.zero).to_int()
+            at += 1
+        return Num(value: if negative then -total else total)
+    at += 4
+    return Null
+
+task total(value: Value) -> int
+    return match value
+        Null -> 0
+        Flag(on) -> if on then 1 else 0
+        Num(n) -> n
+        Str(s) -> s.len()
+        Arr(items) -> total_items(items)
+        Obj(fields) -> total_fields(fields)
+
+task total_items(items: list[Value]) -> int
+    var sum = 0
+    for item in items
+        sum += total(item)
+    return sum
+
+task total_fields(fields: map[text, Value]) -> int
+    var sum = 0
+    for key in fields
+        sum += key.len() + total(fields[key])
+    return sum
+
+task mark(character: text) -> byte
+    return character.bytes()[0]
+
+let marks = Marks(
+    space: mark(" "),
+    newline: mark("\n"),
+    quote: mark("\""),
+    open_list: mark("["),
+    close_list: mark("]"),
+    open_map: mark("{{"),
+    close_map: mark("}}"),
+    zero: mark("0"),
+    nine: mark("9"),
+    minus: mark("-"),
+    letter_t: mark("t"),
+    letter_f: mark("f")
+)
+let record = "{{\"id\": 12345, \"name\": \"Ada Lovelace\", \"active\": true, \"tags\": [\"math\", \"code\", \"notes\"], \"score\": -42, \"next\": null}},\n"
+let doc = "[{repeat(record, 20000)}1]"
+var sum = 0
+for round in 0..5
+    let bytes = doc.bytes()
+    var at = 0
+    sum += total(read_value(doc, bytes, change at, marks))
+print sum

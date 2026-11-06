@@ -9,7 +9,7 @@ cargo build -q --release -p lucid --features bench-unchecked
 cp "target/release/lucid$exe" "target/bench/lucid-unchecked$exe"
 cargo build -q --release -p lucid
 
-for name in fib collatz sum; do
+for name in fib collatz sum nbody trees json hashmap strings; do
     rustc -O --edition 2024 -o "target/bench/$name$exe" "benchmarks/$name.rs"
     rustc -O -C overflow-checks=on --edition 2024 -o "target/bench/$name-checked$exe" "benchmarks/$name.rs"
 done

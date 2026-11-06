@@ -1,0 +1,5 @@
+# Grow one text by appending, the only form that Lucid has.
+var out = ""
+for i in 0..300000
+    out = "{out}{i},"
+print out.len()

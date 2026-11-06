@@ -1,0 +1,26 @@
+# Allocate and walk binary trees. Stresses allocation and counting.
+choice Tree
+    Leaf
+    Node(left: Tree, right: Tree)
+
+task build(depth: int) -> Tree
+    if depth == 0
+        return Leaf
+    return Node(left: build(depth - 1), right: build(depth - 1))
+
+task check(tree: Tree) -> int
+    return match tree
+        Leaf -> 1
+        Node(left, right) -> 1 + check(left) + check(right)
+
+let longest = build(18)
+var total = 0
+for depth in 4..=18
+    if depth % 2 == 0
+        var trees = 1
+        for shift in 0..18 - depth + 4
+            trees *= 2
+        for i in 0..trees
+            total += check(build(depth))
+print total
+print check(longest)
