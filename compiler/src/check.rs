@@ -304,6 +304,7 @@ fn wrapping_op(ty: Ty, name: &str) -> Option<BinaryOp> {
 /// True for a task that the language builds in for this type.
 fn builtin_method(ty: Ty, name: &str) -> bool {
     match ty {
+        ty if ty.is_float() && name == "sqrt" => true,
         ty if ty.is_number() => conversion(ty, name).is_some() || wrapping_op(ty, name).is_some(),
         Ty::Text => matches!(name, "len" | "is_empty" | "bytes"),
         Ty::List(_) => matches!(name, "len" | "is_empty" | "get" | "push" | "pop" | "swap"),
@@ -4495,6 +4496,7 @@ impl<'a> Checker<'a> {
         let int = |kind| Expr { kind, ty: Ty::Int, span };
         let boxed: Box<Expr> = value.clone().into();
         match (ty, text) {
+            (_, "sqrt") => Expr { kind: ExprKind::Sqrt(boxed), ty, span },
             (Ty::Text, "len") => int(ExprKind::TextLen(boxed)),
             (Ty::Text, "bytes") => {
                 Expr { kind: ExprKind::TextBytes(boxed), ty: Ty::List(&Ty::Byte), span }

@@ -56,6 +56,8 @@ There are no implicit conversions. Every number type has a task for each other o
 - To an integer type, a value that does not fit traps. A `float` rounds toward zero first, and NaN traps.
 - To `float` or `f32`, a value rounds to the nearest one. A `float` too large for `f32` becomes `inf`.
 
+`x.sqrt()` gives the square root of a `float` or `f32`, and NaN below zero, as IEEE 754 says.
+
 Integer overflow traps in every build. Wrapping math uses explicit tasks: `a.wrapping_add(b)`, `a.wrapping_sub(b)`, and `a.wrapping_mul(b)`, on any integer type, wrap at the width of that type. The argument has the same type as `a`.
 
 `/` always yields a `float` type, and follows IEEE 754, so `1 / 0` is `inf`. Two integers of any type are converted to `float` first. Two `f32` values give an `f32`.

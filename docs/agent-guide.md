@@ -106,7 +106,7 @@ var empty_map: map[text, int] = {}
 empty_map["a"] = 1
 ```
 
-These are all the built-in tasks on collections: `len`, `is_empty`, `get`, `push`, `pop`, `swap`, `add`, `remove`. Text has `len`, `is_empty`, `bytes`. Write anything else yourself.
+These are all the built-in tasks on collections: `len`, `is_empty`, `get`, `push`, `pop`, `swap`, `add`, `remove`. Text has `len`, `is_empty`, `bytes`. A `float` has `sqrt`. Write anything else yourself.
 
 - An index is an `int` from 0, and a negative one traps. `.get` with one gives `none`. Sized numbers need `.to_int()` to be an index.
 - A key can be an integer, `bool`, `text`, or a value made of those. A `float` cannot be a key.

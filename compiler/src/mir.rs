@@ -569,6 +569,8 @@ pub enum ExprKind {
     Capture(usize),
     /// Float only. Integer negation is `0 - x`, which checks for overflow.
     Neg(Box<Expr>),
+    /// Float only, and NaN below zero, as IEEE 754 says.
+    Sqrt(Box<Expr>),
     Not(Box<Expr>),
     /// Both sides have one type. Only arithmetic and comparison operators,
     /// and `Div` only on floats.
@@ -742,6 +744,7 @@ pub trait Visit {
                 }
             }
             ExprKind::Neg(inner)
+            | ExprKind::Sqrt(inner)
             | ExprKind::Not(inner)
             | ExprKind::Convert(inner)
             | ExprKind::ToText(inner)

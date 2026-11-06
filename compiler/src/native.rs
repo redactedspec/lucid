@@ -796,6 +796,10 @@ impl Lower<'_, '_> {
                 let value = self.expr(value);
                 self.body.ins().fneg(value)
             }
+            ExprKind::Sqrt(value) => {
+                let value = self.expr(value);
+                self.body.ins().sqrt(value)
+            }
             ExprKind::Not(value) => {
                 let value = self.expr(value);
                 self.body.ins().bxor_imm_s(value, 1)

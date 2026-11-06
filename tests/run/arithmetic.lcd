@@ -57,3 +57,7 @@ print (0.0 / 0.0) == (0.0 / 0.0)
 print 0.0 / 0.0
 print -0.0
 print -1.5.to_int()
+print 9.0.sqrt()
+let four: f32 = 4.0
+print four.sqrt()
+print (-1.0).sqrt()
