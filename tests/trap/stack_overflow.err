@@ -1,1 +1,18 @@
 stack_overflow.lcd:3:1: trap: stack overflow
+    at stack_overflow.lcd:4:12 in deep
+    at stack_overflow.lcd:4:12 in deep
+    at stack_overflow.lcd:4:12 in deep
+    at stack_overflow.lcd:4:12 in deep
+    at stack_overflow.lcd:4:12 in deep
+    at stack_overflow.lcd:4:12 in deep
+    at stack_overflow.lcd:4:12 in deep
+    at stack_overflow.lcd:4:12 in deep
+    at stack_overflow.lcd:4:12 in deep
+    at stack_overflow.lcd:4:12 in deep
+    at stack_overflow.lcd:4:12 in deep
+    at stack_overflow.lcd:4:12 in deep
+    at stack_overflow.lcd:4:12 in deep
+    at stack_overflow.lcd:4:12 in deep
+    at stack_overflow.lcd:4:12 in deep
+    at stack_overflow.lcd:4:12 in deep
+    ...

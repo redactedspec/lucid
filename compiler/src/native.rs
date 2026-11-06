@@ -5,8 +5,8 @@ use crate::diag::{Diagnostic, Lines, Span};
 use crate::mir::{Expr, ExprKind, HashOp, KeyTasks, Local, Program, Stmt, Task, Ty, Update};
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
-    AbiParam, Block, FuncRef, GlobalValue, InstBuilder, MemFlagsData, Signature, StackSlotData,
-    StackSlotKind, TrapCode, Type, Value, types,
+    AbiParam, Block, FuncRef, GlobalValue, InstBuilder, MemFlagsData, Signature, SourceLoc,
+    StackSlotData, StackSlotKind, TrapCode, Type, Value, types,
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
@@ -158,6 +158,8 @@ fn compile(
         // Windows commits stack one page at a time, so large frames must probe.
         ("enable_probestack", "true"),
         ("probestack_strategy", "inline"),
+        // A stack trace walks these, see `lucid_rt::lucid_trap`.
+        ("preserve_frame_pointers", "true"),
     ];
     let mut builder = JITBuilder::with_flags(&flags, default_libcall_names()).expect(CODEGEN);
     builder.symbol("lucid_print", lucid_rt::lucid_print as *const u8);
@@ -234,7 +236,7 @@ fn compile(
         print_float: import("lucid_print_float", &float, &[]),
         print_f32: import("lucid_print_f32", &small_float, &[]),
         print_bool: import("lucid_print_bool", &byte, &[]),
-        trap: import("lucid_trap", &text, &[]),
+        trap: import("lucid_trap", &[text[0], text[1], value[0]], &[]),
         exit: import("lucid_exit", &value, &[]),
         retain: import("lucid_retain", &value, &[]),
         release: import("lucid_release", &value, &[]),
@@ -294,6 +296,7 @@ fn compile(
     let mut context = module.make_context();
     let mut builder_context = FunctionBuilderContext::new();
     let mut statics = HashMap::new();
+    let mut sites = Vec::new();
     let tasks = program.tasks.iter().zip(&ids).map(|(task, id)| (task, *id));
     for (task, id) in tasks.chain([(&program.main, main)]) {
         context.func.signature = signature_of(&module, task);
@@ -326,6 +329,18 @@ fn compile(
         .task(task, data_id, stack_limit);
         module.define_function(id, &mut context).expect(CODEGEN);
         let code = context.compiled_code().expect(CODEGEN);
+        let locs = code.buffer.get_srclocs_sorted();
+        for call in code.buffer.call_sites() {
+            // The location that holds the call's last byte, if any.
+            let after = locs.partition_point(|loc| loc.end < call.ret_addr);
+            let held = locs.get(after).filter(|loc| loc.start < call.ret_addr);
+            let line =
+                held.map(|loc| loc.loc.as_abs()).filter(|loc| !loc.is_default()).map(|loc| {
+                    let (line, column) = lines.position(loc.bits() as usize);
+                    format!("{path}:{line}:{column} in {}", task.name)
+                });
+            sites.push((id, call.ret_addr, line.filter(|_| !task.name.is_empty())));
+        }
         let frame = code.buffer.frame_layout().expect(CODEGEN).frame_to_fp_offset as usize;
         if frame > if id == main { max_main_frame } else { MAX_FRAME } {
             let note = "split it into smaller tasks";
@@ -338,6 +353,9 @@ fn compile(
     }
     module.finalize_definitions().expect(CODEGEN);
     let entry = module.get_finalized_function(main);
+    let address =
+        |(id, offset, line)| (module.get_finalized_function(id) as usize + offset as usize, line);
+    lucid_rt::set_call_sites(sites.into_iter().map(address).collect());
     // Leaked on purpose: `entry` points into memory that the module owns.
     std::mem::forget(module);
     Ok(entry)
@@ -566,8 +584,9 @@ impl Lower<'_, '_> {
     /// Ends the current block with a trap at `span`.
     fn trap(&mut self, message: &str, span: Span) {
         let (line, column) = self.lines.position(span.start);
-        let text = self.text(&format!("{}:{line}:{column}: trap: {message}", self.path));
-        self.call(self.runtime.trap, &text);
+        let [text, len] = self.text(&format!("{}:{line}:{column}: trap: {message}", self.path));
+        let frame = self.body.ins().get_frame_pointer(self.pointer);
+        self.call(self.runtime.trap, &[text, len, frame]);
         self.body.ins().trap(UNREACHABLE);
     }
 
@@ -1068,7 +1087,7 @@ impl Lower<'_, '_> {
             ExprKind::Bool(value) => self.body.ins().iconst(types::I8, i64::from(*value)),
             ExprKind::None => self.none(),
             ExprKind::Local(local) => self.body.use_var(self.vars[*local]),
-            ExprKind::Call(task, _, args) => self.call_task(*task, args),
+            ExprKind::Call(task, _, args) => self.call_task(*task, args, expr.span),
             ExprKind::Neg(value) => {
                 let value = self.expr(value);
                 self.body.ins().fneg(value)
@@ -1215,7 +1234,7 @@ impl Lower<'_, '_> {
                 let code = self.body.ins().func_addr(self.pointer, func);
                 self.new_record(code, *counted, fields)
             }
-            ExprKind::CallValue(callee, args) => self.call_value(callee, args),
+            ExprKind::CallValue(callee, args) => self.call_value(callee, args, expr.span),
             ExprKind::Field(value, slot) => {
                 let value = self.expr(value);
                 self.load_slot(value, slot_offset(*slot), expr.ty)
@@ -1268,7 +1287,7 @@ impl Lower<'_, '_> {
 
     /// A `change` argument goes through a stack slot. The task loads it when it
     /// starts and stores it when it ends, so it stays in a register between.
-    fn call_task(&mut self, task: usize, args: &[Expr]) -> Value {
+    fn call_task(&mut self, task: usize, args: &[Expr], span: Span) -> Value {
         let mut values = Vec::with_capacity(args.len());
         let mut slots = Vec::new();
         for arg in args {
@@ -1284,6 +1303,7 @@ impl Lower<'_, '_> {
             values.push(self.body.ins().stack_addr(self.pointer, slot, 0));
             slots.push((local, slot, clif(arg.ty)));
         }
+        self.body.set_srcloc(SourceLoc::new(span.start as u32));
         let result = self.call(self.ids[task], &values).expect("every task returns a value");
         for (local, slot, ty) in slots {
             let value = self.body.ins().stack_load(self.pointer, ty, slot, 0);
@@ -1293,7 +1313,7 @@ impl Lower<'_, '_> {
     }
 
     /// The record comes first in the call, so that the code finds its captures.
-    fn call_value(&mut self, callee: &Expr, args: &[Expr]) -> Value {
+    fn call_value(&mut self, callee: &Expr, args: &[Expr], span: Span) -> Value {
         let Ty::Task(params, returns) = callee.ty else { unreachable!("it has a task type") };
         let mut signature = self.module.make_signature();
         signature.params.push(AbiParam::new(self.pointer));
@@ -1308,6 +1328,7 @@ impl Lower<'_, '_> {
         }
         let flags = MemFlagsData::trusted();
         let code = self.body.ins().load(self.pointer, flags, record, lucid_rt::TAG_OFFSET);
+        self.body.set_srcloc(SourceLoc::new(span.start as u32));
         let call = self.body.ins().call_indirect(signature, code, &values);
         self.body.inst_results(call)[0]
     }

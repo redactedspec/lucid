@@ -1,1 +1,2 @@
 placeholder.lcd:2:5: trap: reached a `...` placeholder
+    at placeholder.lcd:4:7 in top level

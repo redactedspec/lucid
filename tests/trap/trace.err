@@ -1,0 +1,5 @@
+trace.lcd:3:12: trap: division by zero
+    at trace.lcd:6:36 in lambda
+    at trace.lcd:7:12 in middle
+    at trace.lcd:13:14 in show
+    at trace.lcd:15:9 in top level

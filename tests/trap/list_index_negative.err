@@ -1,1 +1,2 @@
 list_index_negative.lcd:2:12: trap: list index out of bounds
+    at list_index_negative.lcd:4:7 in top level

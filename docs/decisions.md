@@ -113,6 +113,7 @@ Add new entries at the end of the list. To reverse a decision, add a new entry t
 | 105 | 2026-11-06 | `try` at top level prints `error_message()` alone to stderr, and `none` as `none` | A failed run is a result for the user, not a bug, so it has no source position, unlike a trap. Exit code 1 was in the spec. Evidence is weak: see `research.md`. |
 | 106 | 2026-11-06 | `else` takes the type of its value, or of the context if that accepts the value. The two sides do not join | One rule, like `if a then b else c`. `f() else none` on `int or E` with no annotation is an error, and an annotation fixes it. |
 | 107 | 2026-11-06 | `try` may sit anywhere in an expression, and `ownership.rs` moves what is in flight to locals only when a part can return | The grammar already allowed this, and banning it would break `(try f()).x`. Turning off moves for such a statement would not help, since a `Retain` in flight leaks as well. Only such a statement pays. |
+| 108 | 2026-11-06 | A stack trace walks frame pointers, with a table from return address to source position, and no unwinding tables | It costs one small table per program, and no measured time, see "Stack traces" in `research.md`. It shows at most 16 calls, since a stack overflow has millions. |
 
 ## Open questions
 

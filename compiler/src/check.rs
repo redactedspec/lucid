@@ -1653,7 +1653,20 @@ impl<'a> Checker<'a> {
         self.frame.params = 0;
         let params = params.len();
         let borrowed = Vec::new();
-        Task { params, type_params, returns, locals, body, span, captures, change, take, borrowed }
+        let name: &'static str = def.sig.name.text.clone().leak();
+        Task {
+            name,
+            params,
+            type_params,
+            returns,
+            locals,
+            body,
+            span,
+            captures,
+            change,
+            take,
+            borrowed,
+        }
     }
 
     /// A local holds a count of a `take` parameter, so the task can change it
@@ -1688,7 +1701,20 @@ impl<'a> Checker<'a> {
         let locals = std::mem::take(&mut self.frame.locals);
         let (captures, change, take) = (Vec::new(), Vec::new(), Vec::new());
         let (params, type_params, returns, borrowed) = (0, 0, Ty::None, Vec::new());
-        Task { params, type_params, returns, locals, body, span, captures, change, take, borrowed }
+        let name = "top level";
+        Task {
+            name,
+            params,
+            type_params,
+            returns,
+            locals,
+            body,
+            span,
+            captures,
+            change,
+            take,
+            borrowed,
+        }
     }
 
     fn new_local(&mut self, ty: Ty, mutable: bool) -> Local {
@@ -1982,6 +2008,7 @@ impl<'a> Checker<'a> {
         let params = params.len() + 1;
         let (change, take, borrowed) = (Vec::new(), Vec::new(), Vec::new());
         let task = Task {
+            name: "lambda",
             params,
             type_params,
             returns,
@@ -2192,6 +2219,7 @@ impl<'a> Checker<'a> {
                 let borrowed = Vec::new();
                 let body = vec![Stmt::Return(call)];
                 let code = Task {
+                    name: "",
                     params,
                     type_params,
                     returns,

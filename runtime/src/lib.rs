@@ -4,6 +4,7 @@
 //! never reuse their memory. So a leak or double free stops the program.
 
 use std::alloc::{Layout, alloc, dealloc};
+use std::collections::HashMap;
 use std::hash::{BuildHasher, RandomState};
 use std::io::Write;
 use std::mem::offset_of;
@@ -1434,11 +1435,53 @@ pub extern "C" fn lucid_print_bool(value: u8) {
 ///
 /// # Safety
 ///
-/// `message` must point to `len` readable bytes.
+/// `message` must point to `len` readable bytes, and `frame` must be the frame
+/// pointer of a compiled task.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn lucid_trap(message: *const u8, len: usize) -> ! {
+pub unsafe extern "C" fn lucid_trap(message: *const u8, len: usize, frame: *const usize) -> ! {
     // SAFETY: the caller guarantees the range, and compiled code passes static data.
-    trap(unsafe { std::slice::from_raw_parts(message, len) })
+    let mut report = unsafe { std::slice::from_raw_parts(message, len) }.to_vec();
+    // SAFETY: the caller guarantees the frame.
+    unsafe { add_trace(&mut report, frame) };
+    trap(&report)
+}
+
+/// Where each call in compiled code returns to, with its place in the source
+/// if a stack trace shows it. See `add_trace`.
+static CALL_SITES: OnceLock<HashMap<usize, Option<String>>> = OnceLock::new();
+
+/// How many calls a stack trace shows. A stack overflow has millions.
+const MAX_TRACE: usize = 16;
+
+/// Records the call sites of the one compiled program.
+pub fn set_call_sites(sites: HashMap<usize, Option<String>>) {
+    let _ = CALL_SITES.set(sites);
+}
+
+/// Adds a line for each call on the way to `frame`, innermost first. A return
+/// address that is not a call site means the caller is not compiled code,
+/// whose frames this walk cannot read, so it stops there.
+///
+/// # Safety
+///
+/// `frame` must be the frame pointer of a compiled task.
+unsafe fn add_trace(report: &mut Vec<u8>, mut frame: *const usize) {
+    let Some(sites) = CALL_SITES.get() else { return };
+    let mut shown = 0;
+    // SAFETY: a compiled frame holds its caller's frame pointer, then its
+    // return address. So a return address in compiled code makes the saved
+    // pointer another compiled frame.
+    while let Some(site) = sites.get(&unsafe { *frame.add(1) }) {
+        if let Some(site) = site {
+            if shown == MAX_TRACE {
+                report.extend_from_slice(b"\n    ...");
+                break;
+            }
+            report.extend_from_slice(format!("\n    at {site}").as_bytes());
+            shown += 1;
+        }
+        frame = unsafe { *frame } as *const usize;
+    }
 }
 
 /// Prints a text to stderr, and ends the program with exit code 1. This is

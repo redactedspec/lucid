@@ -385,6 +385,15 @@ No user study or agent trial has tested these. The full agent benchmark at M5 ca
 
 Sources: [Rust diagnostics attributes](https://doc.rust-lang.org/reference/attributes/diagnostics.html), [Rust Termination](https://doc.rust-lang.org/std/process/trait.Termination.html), [Zig language reference](https://ziglang.org/documentation/master/).
 
+## Stack traces
+
+Read for decision 108.
+
+- **Frame pointers.** PEP 831 reports under 2% geometric mean cost for CPython, and a 64-frame walk in 116 ns on x86-64 Linux. Fedora discussions put the cost at 0% to 2%, read only through a Phoronix report. A 2017 kernel thread reports 5% to 10% on some benchmarks, so the cost depends on the workload.
+- **Measured here.** Every Lucid task already calls a trap path, so Cranelift already gave it a frame, and the flag should change little. Three rounds each, with the flag and without: `fib` median 1.82x and 1.88x of Rust, `nbody` best 241 ms and 228 ms, median 248 ms and 266 ms. That is within noise, and three rounds cannot show a small cost.
+
+Sources: [PEP 831](https://peps.python.org/pep-0831/), [Phoronix](https://www.phoronix.com/news/Red-Hat-eu-stacktrace), [kernel thread](https://lkml.iu.edu/1706.0/01381.html).
+
 ## Open research
 
 | Topic | Needed by |

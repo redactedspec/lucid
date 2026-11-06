@@ -1,0 +1,15 @@
+# A trap names each call on the way to it. A derived task stays out.
+task inner(n: int) -> int
+    return 10 // n
+
+task middle[T](n: int, x: T) -> int
+    let f: task(int) -> int = m => inner(m)
+    return f(n) + 1
+
+type Box
+    n: int
+
+task show(self: Box) -> text
+    return "{middle(self.n, true)}"
+
+print "{[Box(n: 0)]}"

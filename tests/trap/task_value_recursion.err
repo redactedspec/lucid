@@ -1,1 +1,18 @@
 task_value_recursion.lcd:2:5: trap: stack overflow
+    at task_value_recursion.lcd:3:16 in lambda
+    at task_value_recursion.lcd:3:16 in lambda
+    at task_value_recursion.lcd:3:16 in lambda
+    at task_value_recursion.lcd:3:16 in lambda
+    at task_value_recursion.lcd:3:16 in lambda
+    at task_value_recursion.lcd:3:16 in lambda
+    at task_value_recursion.lcd:3:16 in lambda
+    at task_value_recursion.lcd:3:16 in lambda
+    at task_value_recursion.lcd:3:16 in lambda
+    at task_value_recursion.lcd:3:16 in lambda
+    at task_value_recursion.lcd:3:16 in lambda
+    at task_value_recursion.lcd:3:16 in lambda
+    at task_value_recursion.lcd:3:16 in lambda
+    at task_value_recursion.lcd:3:16 in lambda
+    at task_value_recursion.lcd:3:16 in lambda
+    at task_value_recursion.lcd:3:16 in lambda
+    ...

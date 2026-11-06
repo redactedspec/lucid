@@ -452,6 +452,8 @@ pub struct Program {
 
 #[derive(Clone)]
 pub struct Task {
+    /// What a stack trace calls it. Empty for a derived task, which stays out.
+    pub name: &'static str,
     pub params: usize,
     /// How many type parameters it declares. After `mono.rs`, none.
     pub type_params: usize,

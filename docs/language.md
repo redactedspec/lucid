@@ -467,7 +467,7 @@ match load("app.toml")
 
 `Error` is a trait that every file has, so its name is taken. Use it as a bound, or as `any Error` for a task that can return any error type.
 
-A **trap** is an unrecoverable bug: out-of-bounds index or slice, a missing map key, overflow, a zero divisor, a failed conversion, stack overflow, a reached `...`, failed `expect`, a `shared` access conflict, running out of memory, or a failed write to stdout. A trap prints its source position and exits with code 101, except that running out of memory and a failed write to stdout have no position. A stack trace is planned for M5. Traps cannot be caught.
+A **trap** is an unrecoverable bug: out-of-bounds index or slice, a missing map key, overflow, a zero divisor, a failed conversion, stack overflow, a reached `...`, failed `expect`, a `shared` access conflict, running out of memory, or a failed write to stdout. A trap prints its source position and exits with code 101, except that running out of memory and a failed write to stdout have no position. After the position, a stack trace lists up to 16 calls that led to the trap, innermost first, as `at file:line:column in name`. The list stops at a call made by the runtime, such as a written `equal` that a map runs. Traps cannot be caught.
 
 ## Generics
 
