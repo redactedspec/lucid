@@ -2677,13 +2677,23 @@ impl<'a> Checker<'a> {
         if let (true, Step::Slot(slot)) = (self.frame.opening, step) {
             self.frame.opened.push((parent, slot, value));
         }
-        place.setup.push(Stmt::Set(value, read));
-        let empty = Expr { kind: ExprKind::None, ty: Ty::None, span };
-        place.take.push(self.write(place.local, key.clone(), empty, span));
         let stored = self.read(value, span);
-        let write = self.write(place.local, key, stored, span);
-        place.finish.insert(0, write);
-        place.finish.push(Stmt::Clear(value));
+        if matches!(self.frame.locals[place.local], Ty::List(_) | Ty::Data(..)) {
+            // The slot's own count moves to the local and back, so no count
+            // changes. Until `take`, the local borrows from the slot.
+            place.setup.push(Stmt::Bind(value, read));
+            let local = place.local;
+            place.take.push(Stmt::Update { local, op: Update::Take, args: vec![key.clone()], span });
+            let (op, args) = (Update::Put, vec![key, stored]);
+            place.finish.insert(0, Stmt::Update { local, op, args, span });
+        } else {
+            place.setup.push(Stmt::Set(value, read));
+            let empty = Expr { kind: ExprKind::None, ty: Ty::None, span };
+            place.take.push(self.write(place.local, key.clone(), empty, span));
+            let write = self.write(place.local, key, stored, span);
+            place.finish.insert(0, write);
+            place.finish.push(Stmt::Clear(value));
+        }
         place.local = value;
         place
     }
@@ -3219,19 +3229,20 @@ impl<'a> Checker<'a> {
         let inside = self.binary_values(BinaryOp::Lt, local(position, Ty::Int), len, span);
         let next = self.binary_values(BinaryOp::Add, local(position, Ty::Int), int(1), span);
         let element = ExprKind::ListGet(local(list, list_ty).into(), local(at, Ty::Int).into());
-        let mut start = vec![
-            Stmt::Set(at, local(position, Ty::Int)),
-            Stmt::Set(position, next),
-            Stmt::Set(current, expr(element, item)),
-        ];
-        if item.is_counted() {
-            let none = expr(ExprKind::None, Ty::None);
-            start.push(self.write(list, local(at, Ty::Int), none, span));
-        }
-        let back = vec![
-            self.write(list, local(at, Ty::Int), local(current, item), span),
-            Stmt::Clear(current),
-        ];
+        let mut start =
+            vec![Stmt::Set(at, local(position, Ty::Int)), Stmt::Set(position, next)];
+        let back = if item.is_counted() {
+            // As in `step`: the slot's own count moves to the loop name and back.
+            let key = local(at, Ty::Int);
+            start.push(Stmt::Bind(current, expr(element, item)));
+            let (op, args) = (Update::Take, vec![key.clone()]);
+            start.push(Stmt::Update { local: list, op, args, span });
+            let (op, args) = (Update::Put, vec![key, local(current, item)]);
+            vec![Stmt::Update { local: list, op, args, span }]
+        } else {
+            start.push(Stmt::Set(current, expr(element, item)));
+            vec![self.write(list, local(at, Ty::Int), local(current, item), span)]
+        };
         let mut leave = back.clone();
         leave.extend(place.finish.iter().cloned());
         self.put_back(&mut inner, &back, &leave, true);

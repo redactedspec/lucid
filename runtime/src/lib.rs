@@ -692,6 +692,17 @@ unsafe fn unique_list(list: *mut List, cap: usize) -> *mut List {
     }
 }
 
+/// Returns the list that this caller alone holds, in place of `list`.
+///
+/// # Safety
+///
+/// `list` must point to a live list that this caller gives one count of.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_list_unique(list: *mut List) -> *mut List {
+    // SAFETY: the caller guarantees this.
+    unsafe { unique_list(list, (*list).cap) }
+}
+
 /// An empty list with room for `cap` slots, which it holds counts of if
 /// `counted` is true.
 #[unsafe(no_mangle)]
@@ -859,26 +870,40 @@ unsafe fn record_slots<'a>(record: *mut Record) -> &'a mut [i64] {
 /// keeps the caller's count.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lucid_record_set(
-    mut record: *mut Record,
+    record: *mut Record,
     slot: usize,
     value: i64,
 ) -> *mut Record {
     // SAFETY: the caller guarantees this.
     unsafe {
-        let (tag, len, counted) = ((*record).tag, (*record).len, (*record).counted);
-        if (*record).head.count > 1 {
-            let copy = lucid_record_new(tag, len, counted);
-            let old = record_slots(record);
-            std::ptr::copy_nonoverlapping(old.as_ptr(), copy.add(1).cast(), len);
-            old[..counted].iter().for_each(|&held| retain_slot(held));
-            (*record).head.count -= 1;
-            record = copy;
-        }
+        let record = lucid_record_unique(record);
         let old = std::mem::replace(&mut record_slots(record)[slot], value);
-        if slot < counted {
+        if slot < (*record).counted {
             release_slot(old);
         }
         record
+    }
+}
+
+/// Returns the record that this caller alone holds, in place of `record`.
+///
+/// # Safety
+///
+/// `record` must point to a live record that this caller gives one count of.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_record_unique(record: *mut Record) -> *mut Record {
+    // SAFETY: the caller guarantees this.
+    unsafe {
+        if (*record).head.count == 1 {
+            return record;
+        }
+        let (tag, len, counted) = ((*record).tag, (*record).len, (*record).counted);
+        let copy = lucid_record_new(tag, len, counted);
+        let old = record_slots(record);
+        std::ptr::copy_nonoverlapping(old.as_ptr(), copy.add(1).cast(), len);
+        old[..counted].iter().for_each(|&held| retain_slot(held));
+        (*record).head.count -= 1;
+        copy
     }
 }
 

@@ -104,6 +104,8 @@ struct Runtime {
     text_quote: FuncId,
     list_new: FuncId,
     list_push: FuncId,
+    list_unique: FuncId,
+    record_unique: FuncId,
     list_set: FuncId,
     list_pop: FuncId,
     list_swap: FuncId,
@@ -179,6 +181,8 @@ fn compile(
     builder.symbol("lucid_text_quote", lucid_rt::lucid_text_quote as *const u8);
     builder.symbol("lucid_list_new", lucid_rt::lucid_list_new as *const u8);
     builder.symbol("lucid_list_push", lucid_rt::lucid_list_push as *const u8);
+    builder.symbol("lucid_list_unique", lucid_rt::lucid_list_unique as *const u8);
+    builder.symbol("lucid_record_unique", lucid_rt::lucid_record_unique as *const u8);
     builder.symbol("lucid_list_set", lucid_rt::lucid_list_set as *const u8);
     builder.symbol("lucid_list_pop", lucid_rt::lucid_list_pop as *const u8);
     builder.symbol("lucid_list_swap", lucid_rt::lucid_list_swap as *const u8);
@@ -242,6 +246,8 @@ fn compile(
         text_quote: import("lucid_text_quote", &value, &value),
         list_new: import("lucid_list_new", &[int[0], byte[0]], &value),
         list_push: import("lucid_list_push", &two, &value),
+        list_unique: import("lucid_list_unique", &value, &value),
+        record_unique: import("lucid_record_unique", &value, &value),
         list_set: import("lucid_list_set", &with_two, &value),
         list_pop: import("lucid_list_pop", &value, &value),
         list_swap: import("lucid_list_swap", &with_two, &value),
@@ -886,8 +892,44 @@ impl Lower<'_, '_> {
         self.update_paths(local, test, fast, self.runtime.record_set, &args, None);
     }
 
+    /// The address and offset of a slot of the list or record in `local`.
+    fn slot_of(&mut self, local: Local, key: &Expr) -> (Value, i32) {
+        let holder = self.body.use_var(self.vars[local]);
+        match key.kind {
+            ExprKind::Int(slot) if !matches!(self.types[local], Ty::List(_)) => {
+                (holder, slot_offset(slot as usize))
+            }
+            _ => {
+                let index = self.expr(key);
+                let offset = self.body.ins().ishl_imm_s(index, 3);
+                (self.body.ins().iadd(holder, offset), lucid_rt::SLOTS_OFFSET)
+            }
+        }
+    }
+
+    fn take(&mut self, local: Local, key: &Expr) {
+        let value = self.body.use_var(self.vars[local]);
+        let test = self.is_unique(value);
+        let task = match self.types[local] {
+            Ty::List(_) => self.runtime.list_unique,
+            _ => self.runtime.record_unique,
+        };
+        self.update_paths(local, test, |_| value, task, &[value], None);
+        let (address, offset) = self.slot_of(local, key);
+        let empty = self.body.ins().iconst(types::I64, 0);
+        self.body.ins().store(MemFlagsData::trusted(), empty, address, offset);
+    }
+
+    fn put(&mut self, local: Local, args: &[Expr]) {
+        let value = self.slot(&args[1]);
+        let (address, offset) = self.slot_of(local, &args[0]);
+        self.body.ins().store(MemFlagsData::trusted(), value, address, offset);
+    }
+
     fn update(&mut self, local: Local, op: Update, args: &[Expr], span: Span) {
         match op {
+            Update::Take => return self.take(local, &args[0]),
+            Update::Put => return self.put(local, args),
             Update::ListSet => return self.list_set(local, args, span),
             Update::ListPush => return self.list_push(local, args),
             Update::FieldSet => return self.field_set(local, args),
@@ -905,9 +947,11 @@ impl Lower<'_, '_> {
             Update::MapRemove => runtime.map_remove,
             Update::UnionSet => unreachable!("`mono.rs` replaces these"),
             Update::ListPop => runtime.list_pop,
-            Update::ListSet | Update::ListPush | Update::FieldSet => {
-                unreachable!("handled above")
-            }
+            Update::ListSet
+            | Update::ListPush
+            | Update::FieldSet
+            | Update::Take
+            | Update::Put => unreachable!("handled above"),
         };
         let result = self.call(task, &values).expect("it returns the new value");
         if op == Update::ListSwap {

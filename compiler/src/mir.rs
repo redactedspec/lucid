@@ -428,8 +428,9 @@ pub type Local = usize;
 // too, since their container cannot change until the statement ends.
 //
 // A write through a path takes the element out of its slot, which holds null
-// until the write ends. The checker reads every index and value before that,
-// so no expression sees the null. A trap on the way ends the process.
+// until the write ends, and the count moves with it. The checker reads every
+// index and value before that, so no expression sees the null. A trap on the
+// way ends the process.
 //
 // A statement that passes a local by `change` may replace its value, so a
 // borrow of that local would not stay valid. The exclusivity checks in the
@@ -471,8 +472,10 @@ pub struct Task {
 #[derive(Clone)]
 pub enum Stmt {
     Set(Local, Expr),
-    /// Holds a borrow of a value that stays valid for the whole task, with no
-    /// count. Added by `ownership.rs`.
+    /// Holds a borrow with no count, which no exit releases. `ownership.rs`
+    /// adds this for what stays valid for the whole task. `check.rs` adds this
+    /// before `Update::Take`, which gives the local the slot's own count until
+    /// `Update::Put` hands it back.
     Bind(Local, Expr),
     /// Changes the list, map, set, or record in this local, which may then move.
     /// Traps at `span` if a list index is out of bounds.
@@ -535,6 +538,13 @@ pub enum Update {
     UnionSet,
     /// Nothing. Drops the last value of a list that is not empty.
     ListPop,
+    /// Index or slot, of a list or record. Makes this value unique, and leaves
+    /// the slot null, with its count going to whoever read it first. The read
+    /// proved the index, and nothing ran since.
+    Take,
+    /// Index or slot, value. Fills a slot that `Take` left, with no count
+    /// change. A value in a slot that `Take` did not leave would leak.
+    Put,
 }
 
 /// The tasks that hash a compound key and compare two, which a map keeps and

@@ -25,8 +25,11 @@ pub fn run(program: &mut Program, moves: bool) {
         .collect();
     for task in program.tasks.iter_mut().chain([&mut program.main]) {
         if moves {
-            task.borrowed = borrow_locals(task);
+            borrow_locals(task);
         }
+        let mut bound = Bound::default();
+        bound.stmts(&mut task.body);
+        task.borrowed = bound.0.into_iter().collect();
         let live = Bits::new(task.locals.len());
         let Task { params, locals, body, take, borrowed, .. } = task;
         let mut pass = Owners {
@@ -184,11 +187,30 @@ impl Visit for Sites<'_> {
     }
 }
 
+/// Lists the locals that `Stmt::Bind` sets, in order.
+#[derive(Default)]
+struct Bound(BTreeSet<Local>);
+
+impl Visit for Bound {
+    fn expr(&mut self, value: &mut Expr) {
+        self.expr_parts(value);
+    }
+
+    fn stmts(&mut self, stmts: &mut [Stmt]) {
+        for stmt in stmts {
+            if let Stmt::Bind(local, _) = stmt {
+                self.0.insert(*local);
+            }
+            self.stmt_parts(stmt);
+        }
+    }
+}
+
 /// Finds locals that need no count, and gives them `Stmt::Bind`. Such a local
 /// only ever holds a path into a read parameter, or into another such local,
 /// and nothing changes it. The caller keeps a read parameter alive and fixed
-/// for the whole call, so what it holds stays valid. Returns them in order.
-fn borrow_locals(task: &mut Task) -> Vec<Local> {
+/// for the whole call, so what it holds stays valid.
+fn borrow_locals(task: &mut Task) {
     let may_borrow = |(local, ty): (usize, &Ty)| local >= task.params && ty.is_counted();
     let locals = task.locals.iter().enumerate();
     let mut finder = Borrows {
@@ -202,9 +224,7 @@ fn borrow_locals(task: &mut Task) -> Vec<Local> {
     while std::mem::take(&mut finder.changed) {
         finder.stmts(&mut task.body);
     }
-    let can = finder.can;
-    Bind { can: &can }.stmts(&mut task.body);
-    (0..can.len()).filter(|&local| can[local]).collect()
+    Bind { can: &finder.can }.stmts(&mut task.body);
 }
 
 /// Strikes out each local that cannot borrow.
@@ -248,7 +268,7 @@ impl Visit for Borrows<'_> {
                 Stmt::Set(local, value) if self.can[*local] && !self.is_path(value) => {
                     self.strike(*local);
                 }
-                Stmt::Update { local, .. } => self.strike(*local),
+                Stmt::Update { local, .. } | Stmt::Bind(local, _) => self.strike(*local),
                 _ => {}
             }
             self.stmt_parts(stmt);
@@ -551,8 +571,9 @@ impl Owners<'_> {
             return;
         }
         for arg in args {
-            // `MapRemove` only looks at its key.
-            if op == Update::MapRemove {
+            // `MapRemove` only looks at its key, and `Put` hands back a count
+            // that the local already holds.
+            if matches!(op, Update::MapRemove | Update::Put) {
                 self.expr(arg);
             } else {
                 self.give(arg);
