@@ -98,7 +98,7 @@ pub fn render_json(file: &str, src: &str, diags: &[Diagnostic]) -> String {
     format!("[{}]\n", items.join(","))
 }
 
-fn json_string(s: &str) -> String {
+pub fn json_string(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
         match c {

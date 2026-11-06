@@ -16,7 +16,7 @@ use diag::{Diagnostic, Span};
 use std::io::Write;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: lucid run FILE\n       lucid check [--json] FILE";
+const USAGE: &str = "usage: lucid run FILE\n       lucid check [--json] [--costs] FILE";
 
 /// Debug builds use large stack frames, and `MAX_DEPTH` levels of nesting must fit.
 const STACK_BYTES: usize = 256 * 1024 * 1024;
@@ -35,10 +35,12 @@ fn main() -> ExitCode {
 
 fn cli(args: &[String]) -> ExitCode {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let (run, json, path) = match args.as_slice() {
-        ["run", path] => (true, false, *path),
-        ["check", path] => (false, false, *path),
-        ["check", "--json", path] => (false, true, *path),
+    let (run, json, costs, path) = match args.as_slice() {
+        ["run", path] => (true, false, false, *path),
+        ["check", path] => (false, false, false, *path),
+        ["check", "--json", path] => (false, true, false, *path),
+        ["check", "--costs", path] => (false, false, true, *path),
+        ["check", "--json", "--costs", path] => (false, true, true, *path),
         _ => return usage(),
     };
     if path.starts_with('-') {
@@ -53,8 +55,15 @@ fn cli(args: &[String]) -> ExitCode {
         if diags.is_empty() {
             diags = mono::run(&mut program);
         }
-        if run && diags.is_empty() {
+        if diags.is_empty() && (run || costs) {
             ownership::run(&mut program, std::env::var_os("LUCID_NAIVE").is_none());
+        }
+        if costs && diags.is_empty() {
+            let found = ownership::costs(&mut program);
+            emit(std::io::stdout(), &ownership::render_costs(path, &src, &found, json));
+            return ExitCode::SUCCESS;
+        }
+        if run && diags.is_empty() {
             diags = native::run(&program, path, &src, STACK_BYTES).err().unwrap_or_default();
         } else if !run {
             // `check` reports errors in the program. An unbuilt feature is not one.

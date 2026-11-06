@@ -1,0 +1,4 @@
+shared.lcd:11:12: copy: this `list[int]` is held twice, so the next write copies it
+shared.lcd:14:12: copy: this `list[int]` is held twice, so the next write copies it
+shared.lcd:20:14: count: this `text` gets one more count here
+shared.lcd:20:20: count: this `text` gets one more count here

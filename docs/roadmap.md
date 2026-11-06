@@ -62,7 +62,7 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] Borrow elision of count operations
 - [ ] Reuse analysis, if measurements justify it
 - [x] Shifts for division and remainder by a constant power of two
-- [ ] `lucid check --costs`
+- [x] `lucid check --costs`
 - [ ] Benchmark suite: n-body, binary trees, JSON parse, hash map, string building
 
 **Exit:** benchmark suite meets the speed and memory targets in `vision.md`. If not, decide in `decisions.md`: change the model or add an LLVM backend.

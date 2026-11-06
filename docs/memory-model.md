@@ -41,7 +41,7 @@ let numbers = [1, 2, 3]
 let more = add_all(numbers, 4)   # last use of numbers: moved, in place
 ```
 
-If `numbers` is used after the call, the list is shared at the call and `push` copies once. The program stays correct either way. Only its cost changes, and `lucid check --costs` will report the copy.
+If `numbers` is used after the call, the list is shared at the call and `push` copies once. The program stays correct either way. Only its cost changes, and `lucid check --costs` reports the copy.
 
 ## The exclusivity law
 
@@ -117,7 +117,7 @@ This is the hardest part of the compiler, so it comes with a staged plan:
 
 Stage 2 runs on MIR after monomorphization. A local moves into a place that keeps it if it is not a parameter, nothing can read it after the statement, and the statement reads it once. The last rule is what keeps a borrow valid: in `f(x.name, take x)` the first argument borrows from `x`, so `x` is retained, not moved. A `take` argument is such a place, so a `take` parameter of a top-level task arrives with a count. A task that runs through a task value, and a written `equal`, which the runtime calls, keep the borrowed form with a retain on entry, since those callers cannot pass a count. Statements that one expression holds move nothing.
 
-Stage 3 runs first. A local needs no count if every value it ever holds is a path into a read parameter, or into another such local, and nothing changes it. So `let left = pair.left`, a `for` over a parameter, and a `match` on one and its bound names add no count operation. The caller holds a read parameter and keeps it fixed for the whole call, so such a path stays valid. Keeping one of these values anywhere still adds a count there. A local of the top level or one that holds a new value keeps its count, for now.
+Stage 3 runs first. A local needs no count if every value it ever holds is a path into a read parameter, or into another such local, and nothing changes it. So `let left = pair.left`, a `for` over a parameter, and a `match` on one and its bound names add no count operation. The caller holds a read parameter and keeps it fixed for the whole call, so such a path stays valid. Keeping one of these values anywhere still adds a count there. A local of the top level or one that holds a new value keeps its count, for now. When `shared` arrives, a value read out of a cell must hold a count for as long as a call borrows it, since a write through another copy of the cell could otherwise free it.
 
 If benchmarks miss the target in `vision.md` after these stages, revisit the model in `decisions.md`.
 

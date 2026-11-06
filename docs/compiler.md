@@ -124,6 +124,7 @@ ROUNDS=3 sh benchmarks/run.sh                 # fewer rounds
 | --- | --- | --- |
 | `lucid run file.lcd` | Compile with JIT and run | Works for the features under "Status" |
 | `lucid check [--json] file.lcd` | Report diagnostics only | Syntax, name, and type errors, see `agents.md`. Takes a file until packages exist at M5 |
+| `lucid check [--json] --costs file.lcd` | List copy and count sites | Works, from the MIR after `ownership.rs`. A task that `derive.rs` wrote stays out |
 | `lucid build` | Produce a native executable | Planned |
 | `lucid build --target web` | Produce WebAssembly and a loader | Planned |
 | `lucid test` | Run `test` blocks | Planned |
@@ -143,6 +144,7 @@ Exit codes: 0 for success, 1 for compile errors, 2 for bad usage, and 101 for a 
 
 - **Golden run tests:** `tests/run/name.lcd` with `name.out` for expected output.
 - **Golden error tests:** `tests/fail/name.lcd` with `name.err` for expected diagnostics, under `lucid run`.
+- **Golden cost tests:** `tests/costs/name.lcd` with `name.out` for what `lucid check --costs` reports.
 - **Golden trap tests:** `tests/trap/name.lcd` with `name.err` for the trap message, and exit code 101.
 - **Error code check:** `compiler/tests/golden.rs` fails if a code in the source has no golden test or is missing from `docs/agents.md`.
 - **Examples:** everything in `examples/` must parse. Later milestones raise this to compile.

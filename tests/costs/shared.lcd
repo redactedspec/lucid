@@ -1,0 +1,21 @@
+task grow(take items: list[int]) -> list[int]
+    items.push(1)
+    return items
+
+task length(items: list[int]) -> int
+    return items.len()
+
+let kept = [1]
+let moved = [2]
+print grow(moved)
+print grow(kept)
+print length(kept)
+
+var copy = kept
+copy.push(3)
+print copy
+print kept
+
+let note = "hi"
+let boxes = [note, note]
+print boxes

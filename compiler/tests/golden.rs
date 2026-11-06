@@ -137,6 +137,23 @@ fn check_json_reports_on_stdout() {
     assert_eq!((output.status.code(), text(&output.stdout).as_str()), (Some(0), "[]\n"));
 }
 
+/// `tests/costs/x.lcd` must report `x.out` under `lucid check --costs`.
+#[test]
+fn costs_are_reported() {
+    let dir = repo().join("tests").join("costs");
+    for source in files(&dir, "lcd") {
+        let name = file_name(&source);
+        let expected = fs::read(source.with_extension("out")).expect("no .out file");
+        let output = lucid(&dir, &["check", "--costs", name]);
+        assert_eq!(output.status.code(), Some(0), "{name}: {}", text(&output.stderr));
+        assert_eq!(text(&output.stdout), text(&expected), "{name}");
+    }
+    let output = lucid(&dir, &["check", "--json", "--costs", "shared.lcd"]);
+    let report = text(&output.stdout);
+    assert!(report.starts_with("[{\"kind\":\""), "{report}");
+    assert!(report.contains("\"type\":\"list[int]\",\"file\":\"shared.lcd\",\"line\":"));
+}
+
 #[test]
 fn missing_file_is_reported() {
     let output = lucid(&repo(), &["run", "no_such_file.lcd"]);

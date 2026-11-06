@@ -10,8 +10,9 @@
 //! value goes to a `Temp`, and everything that keeps a value retains it. Tests
 //! run both ways, since a program must not depend on an optimization.
 
+use crate::diag::{Lines, Span, json_string};
 use crate::mir::{Expr, ExprKind, Local, Program, Stmt, Task, Ty, Update, Visit};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 pub fn run(program: &mut Program, moves: bool) {
     let takes: Vec<Vec<Local>> = program
@@ -50,6 +51,136 @@ pub fn run(program: &mut Program, moves: bool) {
         }
         pass.rewrite = true;
         pass.walk(body);
+    }
+}
+
+/// A place where a program pays for a value being held twice.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+pub struct Cost {
+    start: usize,
+    kind: &'static str,
+    ty: String,
+}
+
+/// Lists each `Retain` of `program`, which `run` has lowered. A count on a value
+/// that a later write changes is a copy. A derived task has its own code at the
+/// span of its first use, so it stays out, since no source line shows it.
+pub fn costs(program: &mut Program) -> BTreeSet<Cost> {
+    let takes: Vec<Vec<Local>> = program.tasks.iter().map(|task| task.take.clone()).collect();
+    let mut found = BTreeSet::new();
+    for task in program.tasks.iter_mut().chain([&mut program.main]) {
+        let mut updates = Updated(vec![false; task.locals.len()]);
+        updates.stmts(&mut task.body);
+        let mut sites = Sites {
+            task: task.span,
+            takes: &takes,
+            written: &updates.0,
+            params: task.params,
+            found: &mut found,
+        };
+        sites.stmts(&mut task.body);
+    }
+    let copies: Vec<(usize, String)> = (found.iter())
+        .filter(|cost| cost.kind == "copy")
+        .map(|cost| (cost.start, cost.ty.clone()))
+        .collect();
+    found.retain(|cost| {
+        cost.kind == "copy" || !copies.iter().any(|c| c.0 == cost.start && c.1 == cost.ty)
+    });
+    found
+}
+
+/// Renders `costs` the way `lucid check` renders errors.
+pub fn render_costs(file: &str, src: &str, costs: &BTreeSet<Cost>, json: bool) -> String {
+    let lines = Lines::new(src);
+    let mut items = costs.iter().map(|cost| {
+        let (line, column) = lines.position(cost.start);
+        let meaning = match cost.kind {
+            "copy" => "is held twice, so the next write copies it",
+            _ => "gets one more count here",
+        };
+        let (kind, ty) = (cost.kind, &cost.ty);
+        if json {
+            let (file, ty) = (json_string(file), json_string(ty));
+            format!(
+                "{{\"kind\":\"{kind}\",\"type\":{ty},\"file\":{file},\"line\":{line},\"column\":{column}}}"
+            )
+        } else {
+            format!("{file}:{line}:{column}: {kind}: this `{ty}` {meaning}\n")
+        }
+    });
+    if json {
+        format!("[{}]\n", items.collect::<Vec<_>>().join(","))
+    } else {
+        items.by_ref().collect()
+    }
+}
+
+/// Marks each local that `Stmt::Update` or a `change` argument writes.
+struct Updated(Vec<bool>);
+
+impl Visit for Updated {
+    fn expr(&mut self, value: &mut Expr) {
+        if let ExprKind::Change(local) = value.kind {
+            self.0[local] = true;
+        }
+        self.expr_parts(value);
+    }
+
+    fn stmts(&mut self, stmts: &mut [Stmt]) {
+        for stmt in stmts {
+            if let Stmt::Update { local, .. } = stmt {
+                self.0[*local] = true;
+            }
+            self.stmt_parts(stmt);
+        }
+    }
+}
+
+/// Collects the sites of one task.
+struct Sites<'a> {
+    task: Span,
+    takes: &'a [Vec<Local>],
+    written: &'a [bool],
+    params: usize,
+    found: &'a mut BTreeSet<Cost>,
+}
+
+impl Sites<'_> {
+    fn add(&mut self, kind: &'static str, value: &Expr) {
+        if value.span != self.task {
+            let (start, ty) = (value.span.start, value.ty.name());
+            self.found.insert(Cost { start, kind, ty });
+        }
+    }
+}
+
+impl Visit for Sites<'_> {
+    fn expr(&mut self, value: &mut Expr) {
+        if matches!(value.kind, ExprKind::Retain(_)) {
+            self.add("count", value);
+        }
+        if let ExprKind::Call(task, _, args) = &value.kind {
+            for (param, arg) in args.iter().enumerate() {
+                if self.takes[*task].contains(&param) && matches!(arg.kind, ExprKind::Retain(_)) {
+                    self.add("copy", arg);
+                }
+            }
+        }
+        self.expr_parts(value);
+    }
+
+    fn stmts(&mut self, stmts: &mut [Stmt]) {
+        for stmt in stmts {
+            if let Stmt::Set(local, value) = stmt
+                && *local >= self.params
+                && self.written[*local]
+                && matches!(value.kind, ExprKind::Retain(_))
+            {
+                self.add("copy", value);
+            }
+            self.stmt_parts(stmt);
+        }
     }
 }
 

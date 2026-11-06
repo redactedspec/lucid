@@ -126,6 +126,8 @@ grid[0].push(5)
 print grid            # [[1, 2, 5], [9, 4]]
 ```
 
+`lucid check --costs file.lcd` lists where a value is held twice and a write copies it.
+
 ## Control flow
 
 ```lucid

@@ -25,7 +25,7 @@ Every tool has a stable `--json` output.
 | `lucid test --json` | Per-test results with values on failure |
 | `lucid context <module>` | Compact public API of a module or package: signatures and doc comments only |
 | `lucid doc --json` | Full docs as data |
-| `lucid check --costs` | Copy and reference count sites |
+| `lucid check --costs` | Copy and reference count sites: `file:line:column: kind: message` on stdout, or `kind`, `type`, `file`, `line`, and `column` with `--json`. A `copy` is a value held twice that a later write changes, which costs O(n) if both holders stay. A `count` costs one count operation. Exit code 0 |
 
 ## Diagnostics format
 
