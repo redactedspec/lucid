@@ -276,6 +276,15 @@ Decision 81. The Go post: **Snippet** of the primary source. Python: **Snippet**
 
 Sources: [Go blog](https://go.dev/blog/loopvar-preview), [CodeQL on loop capture](https://codeql.github.com/codeql-query-help/python/py-loop-variable-capture/).
 
+## Task values
+
+Decisions 82 and 83. Level: **Snippet**: the spec itself was not read, so check "Comparison operators" before relying on the wording.
+
+- **Calling convention, decision 82.** No source was read. It follows from decision 49 and from wanting one call form, so it is a judgment call. M4 benchmarks will show its cost.
+- **Go.** A 2011 spec change allows a slice, map, or function value to be compared only to `nil`, and the type checker's test data expects "func can only be compared to nil". A mailing list thread says that function comparison was removed because it made closures surprising. That thread is a discussion, not the spec.
+
+Sources: [spec change, in a Japanese write-up](https://kijimad.github.io/comemo/10370.html), [go/types test data](https://golang.google.cn/src/internal/types/testdata/spec/comparisons.go), [golang-nuts thread](https://groups.google.com/g/golang-nuts/c/b-WtVh3H_oY).
+
 ## Open research
 
 | Topic | Needed by |

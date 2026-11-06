@@ -64,7 +64,7 @@ Integer overflow traps in every build. Wrapping math uses explicit tasks: `a.wra
 
 Arithmetic and comparison need one type on both sides. `==` and `!=` also work on `bool`. `and` and `or` skip their right side when the left side decides the result. `-x` needs a signed type or a `float` type.
 
-A number literal is an `int` or `float`, unless its context asks for a sized type. An annotation, parameter, field, or element gives that type, and so does the other side of an operator or `in`:
+A number literal is an `int` or `float`, unless its context asks for a sized type. An annotation, parameter, field, or element gives that type, and so does the other side of an operator or `in`. A list, map, or set literal on the right of `==`, `in`, and the like takes its type from the left in the same way:
 
 ```lucid
 let a: u8 = 200
@@ -263,7 +263,7 @@ task total(n: int) -> int
     return sum(n)
 ```
 
-A lambda or nested task reads names around it by capturing their values when it is made, so it can outlive them. Each pass of a loop makes a new capture. A `var` cannot be captured, which is error E0325, since a later change would not be seen and a captured name cannot change: write `let copy = count` first. A captured name keeps the type it was narrowed to, and does not narrow further inside.
+A lambda or nested task reads names around it by capturing their values when it is made, so it can outlive them. Each pass of a loop makes a new capture. A `var` cannot be captured, which is error E0325, since a later change would not be seen and a captured name cannot change: write `let copy = count` first. A captured name keeps the type it was narrowed to, and does not narrow further inside: test a `let` copy of it.
 
 A task value has `Show`, and prints as its type. It has no `Equal`, `Order`, or `Hash`, so it cannot be a key, and a value that holds one cannot use `==`. In an `any`, `==` is true only for one value that was copied.
 

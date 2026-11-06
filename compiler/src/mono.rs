@@ -111,20 +111,22 @@ pub struct Mono<'a> {
     args: &'static [Ty],
     /// The locals of that task, with real types.
     locals: Vec<Ty>,
-    /// What that task captured, with real types.
-    captures: Vec<Ty>,
+    /// The slot of each capture of that task.
+    captures: Vec<usize>,
 }
 
-/// The slot of each capture. Counted ones take the first slots, as in a record.
-fn capture_slots(types: &[Ty]) -> Vec<usize> {
-    let mut counted = types.iter().filter(|ty| ty.is_counted()).count();
-    let mut held = 0;
-    let slot = |ty: &Ty| {
-        let next = if ty.is_counted() { &mut held } else { &mut counted };
+/// The slot of each value of a record, and how many hold counted values, which
+/// take the first slots. So a record needs only that number to know what it holds.
+fn slots(counted: impl Iterator<Item = bool>) -> (Vec<usize>, usize) {
+    let counted: Vec<bool> = counted.collect();
+    let (mut held, mut plain) = (0, counted.iter().filter(|&&c| c).count());
+    let total = plain;
+    let slot = |&c: &bool| {
+        let next = if c { &mut held } else { &mut plain };
         *next += 1;
         *next - 1
     };
-    types.iter().map(slot).collect()
+    (counted.iter().map(slot).collect(), total)
 }
 
 impl Mono<'_> {
@@ -244,27 +246,20 @@ impl Mono<'_> {
         task.type_params = 0;
         task.returns = self.types.subst(task.returns, args);
         self.locals = task.locals.iter().map(|&ty| self.types.subst(ty, args)).collect();
-        self.captures = task.captures.iter().map(|&ty| self.types.subst(ty, args)).collect();
+        let captures: Vec<Ty> =
+            task.captures.iter().map(|&ty| self.types.subst(ty, args)).collect();
+        self.captures = slots(captures.iter().map(|ty| ty.is_counted())).0;
         self.stmts(&mut task.body);
         task.locals = std::mem::take(&mut self.locals);
     }
 
     /// The slot of a field, and how many counted slots its variant has.
-    /// Counted fields take the first slots, so that a record needs only their
-    /// number to know what it holds.
     pub fn layout(&mut self, data: Ty, variant: usize, field: usize) -> (usize, usize) {
         let Ty::Data(_, id, args) = data else { unreachable!("only a `type` or `choice`") };
         let fields = &self.datas[id].variants[variant].fields;
-        let counted: Vec<bool> =
-            fields.iter().map(|&(_, ty)| self.types.subst(ty, args).is_counted()).collect();
-        let before = |want: bool, end: usize| counted[..end].iter().filter(|&&c| c == want).count();
-        let total = before(true, counted.len());
-        let slot = match counted.get(field) {
-            Some(true) => before(true, field),
-            Some(false) => total + before(false, field),
-            None => 0,
-        };
-        (slot, total)
+        let (found, total) =
+            slots(fields.iter().map(|&(_, ty)| self.types.subst(ty, args).is_counted()));
+        (found.get(field).copied().unwrap_or(0), total)
     }
 
     /// A value as the wider type `to`.
@@ -364,16 +359,14 @@ impl Visit for Mono<'_> {
             }
             ExprKind::Closure { task, args, fields, .. } => {
                 let args = self.types.subst_all(args, self.args);
-                let types: Vec<Ty> = fields.iter().map(|(_, value)| value.ty).collect();
-                let counted = types.iter().filter(|ty| ty.is_counted()).count();
-                let slots = capture_slots(&types);
-                let fields = fields.into_iter().zip(slots).map(|((_, v), slot)| (slot, v));
+                let (found, counted) = slots(fields.iter().map(|(_, v)| v.ty.is_counted()));
+                let fields = fields.into_iter().zip(found).map(|((_, v), slot)| (slot, v));
                 let task = self.instance(task, args, span);
                 ExprKind::Closure { task, args: &[], counted, fields: fields.collect() }
             }
             ExprKind::Capture(index) => {
                 let record = Expr { kind: ExprKind::Local(0), ty: self.locals[0], span };
-                ExprKind::Field(record.into(), capture_slots(&self.captures)[index])
+                ExprKind::Field(record.into(), self.captures[index])
             }
             ExprKind::Wrap(inner) => {
                 *value = self.wrap(*inner, ty, span);

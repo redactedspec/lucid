@@ -127,3 +127,10 @@ for c in "é".bytes()
 
 let shown: list[i8] = [-1]
 print "{shown} {p.gamma}"
+
+# A collection literal takes its type from the left.
+print same in [200, 13]
+print same in set([200])
+var optional: list[u8?] = [1, none]
+print 1 in optional
+print bytes == [2, 2, 255]

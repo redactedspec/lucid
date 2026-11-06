@@ -230,3 +230,7 @@ task describe[T: Show](self: task() -> T) -> text
 
 let gives: task() -> int = () => 1
 print gives.describe()
+
+let wrapped: (task() -> int)? = () => 1
+let held: list[(task() -> int)?] = [wrapped]
+print held

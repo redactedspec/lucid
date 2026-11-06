@@ -54,3 +54,13 @@ print m == m
 print map3(x => x, 1)
 task map3[T](f: task(T) -> T, x: T) -> T
     return f(x)
+task with_self(self: int) -> int
+    return self
+let n = with_self
+task captures_union(u: int?) -> task() -> int
+    task inner() -> int
+        if u is int
+            return u + 1
+        return 0
+    return inner
+print [1] == 1

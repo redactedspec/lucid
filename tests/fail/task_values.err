@@ -1,9 +1,7 @@
 task_values.lcd:1:9: error E0324: a lambda needs a task type here
-  note: write its type, as in `let f: task(int) -> int = x => x`, or pass it after 
-                     the values that show its type
+  note: write its type, as in `let f: task(int) -> int = x => x`, or pass it after the values that show its type
 task_values.lcd:2:14: error E0324: a lambda needs a task type here
-  note: write its type, as in `let f: task(int) -> int = x => x`, or pass it after 
-                     the values that show its type
+  note: write its type, as in `let f: task(int) -> int = x => x`, or pass it after the values that show its type
 task_values.lcd:3:27: error E0307: this lambda has 2 parameters, and needs 1
 task_values.lcd:4:33: error E0303: this lambda needs `text`, found `int`
 task_values.lcd:6:30: error E0325: `count` is a `var`, so it cannot be captured
@@ -32,10 +30,13 @@ task_values.lcd:39:16: error E0325: `v` is a `var`, so it cannot be captured
   note: copy it first, with `let copy = v`
 task_values.lcd:41:16: error E0301: name `not_yet` is not defined
 task_values.lcd:45:17: error E0324: a lambda needs a task type here
-  note: write its type, as in `let f: task(int) -> int = x => x`, or pass it after 
-                     the values that show its type
+  note: write its type, as in `let f: task(int) -> int = x => x`, or pass it after the values that show its type
 task_values.lcd:52:7: error E0303: `other` does not work on `Holds`
 task_values.lcd:53:7: error E0320: `Holds` does not have `Equal`
 task_values.lcd:54:12: error E0324: a lambda needs a task type here
-  note: write its type, as in `let f: task(int) -> int = x => x`, or pass it after 
-                     the values that show its type
+  note: write its type, as in `let f: task(int) -> int = x => x`, or pass it after the values that show its type
+task_values.lcd:59:9: error E0301: name `with_self` is not defined
+  note: `with_self` has `self`, so it has no value form: write a lambda
+task_values.lcd:63:20: error E0303: `+` needs one type on both sides, found `int?` and `int`
+  note: test a union with `is`. A captured name does not narrow, so test a `let` copy of it
+task_values.lcd:66:7: error E0303: `==` needs one type on both sides, found `list[int]` and `int`

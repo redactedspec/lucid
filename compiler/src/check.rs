@@ -45,16 +45,17 @@ pub fn check(file: &ast::File) -> (Program, Vec<Diagnostic>) {
     let mut checker = Checker::default();
     checker.declare_types(file);
     checker.declare(file);
-    let written =
-        |stmt: &&ast::Stmt| matches!(&stmt.kind, StmtKind::Task(def) if def.body.is_some());
-    checker.first_lifted = file.stmts.iter().filter(written).count();
-    let mut tasks: Vec<Task> = file
+    let written: Vec<_> = file
         .stmts
         .iter()
         .filter_map(|stmt| match &stmt.kind {
             StmtKind::Task(def) => def.body.as_ref().map(|body| (def, body, stmt.span)),
             _ => None,
         })
+        .collect();
+    checker.first_lifted = written.len();
+    let mut tasks: Vec<Task> = written
+        .into_iter()
         .enumerate()
         .map(|(id, (def, body, span))| checker.task(id, def, body, span))
         .collect();
@@ -73,17 +74,22 @@ pub fn check(file: &ast::File) -> (Program, Vec<Diagnostic>) {
 /// Type parameters in scope, with the type that each one stands for.
 type TypeEnv<'a> = Vec<(&'a str, Ty)>;
 
-/// What a task being checked keeps for itself, while a lambda or nested task
-/// inside it is checked. `Checker` holds the same fields for the innermost one.
+/// What belongs to one task while it is checked. A lambda or nested task gets
+/// a new one, and the one around it waits in `Checker::frames`.
 #[derive(Default)]
 struct Frame<'a> {
     scopes: Vec<HashMap<&'a str, Local>>,
     locals: Vec<Ty>,
     mutable: Vec<bool>,
+    /// The return type, or `None` at top level.
     returns: Option<Ty>,
     loops: usize,
+    /// What tests have proved about locals, latest last. See `forget`.
     narrowed: Vec<(Local, Ty)>,
+    /// What this lambda or nested task captured so far, with each value as the
+    /// task around it reads it. A position here is a `Capture`.
     captures: Vec<(String, Expr)>,
+    /// The name of this nested task, which reads as its own first parameter.
     own_name: Option<&'a str>,
 }
 
@@ -201,22 +207,11 @@ struct Checker<'a> {
     /// The aliases being resolved, innermost last.
     resolving: Vec<&'a str>,
     top: HashMap<&'a str, Top<'a>>,
-    scopes: Vec<HashMap<&'a str, Local>>,
-    locals: Vec<Ty>,
-    mutable: Vec<bool>,
-    /// The return type, or `None` at top level.
-    returns: Option<Ty>,
-    loops: usize,
     table: Types,
-    /// What tests have proved about locals, latest last. See `forget`.
-    narrowed: Vec<(Local, Ty)>,
-    /// The tasks around the one being checked, outermost first.
+    /// The task being checked.
+    frame: Frame<'a>,
+    /// The tasks around it, outermost first.
     frames: Vec<Frame<'a>>,
-    /// What this lambda or nested task captured so far, with each value as the
-    /// task around it reads it. A position here is a `Capture`.
-    captures: Vec<(String, Expr)>,
-    /// The name of this nested task, which reads as its own first parameter.
-    own_name: Option<&'a str>,
     /// Lambdas, nested tasks, and the code behind tasks used as values.
     /// Their ids start at `first_lifted`, after the tasks of the file.
     lifted: Vec<Task>,
@@ -490,16 +485,16 @@ impl<'a> Checker<'a> {
 
     /// The type that this local holds here.
     fn current(&self, local: Local) -> Ty {
-        let found = self.narrowed.iter().rev().find(|(narrowed, _)| *narrowed == local);
-        found.map_or(self.locals[local], |&(_, ty)| ty)
+        let found = self.frame.narrowed.iter().rev().find(|(narrowed, _)| *narrowed == local);
+        found.map_or(self.frame.locals[local], |&(_, ty)| ty)
     }
 
     /// Ends what tests proved about a local that was assigned. Entries stay on
     /// the stack, so that a block can still cut it back to its own length. So
     /// an assignment on any path ends the narrowing on all that follow.
     fn forget(&mut self, local: Local) {
-        let declared = self.locals[local];
-        for entry in self.narrowed.iter_mut().filter(|(narrowed, _)| *narrowed == local) {
+        let declared = self.frame.locals[local];
+        for entry in self.frame.narrowed.iter_mut().filter(|(narrowed, _)| *narrowed == local) {
             entry.1 = declared;
         }
     }
@@ -547,10 +542,10 @@ impl<'a> Checker<'a> {
             {
                 // The right side runs knowing the left, so it splits what is left.
                 let mut facts = self.facts(left, truth);
-                let start = self.narrowed.len();
-                self.narrowed.extend(facts.iter().copied());
+                let start = self.frame.narrowed.len();
+                self.frame.narrowed.extend(facts.iter().copied());
                 let more = self.facts(right, truth);
-                self.narrowed.truncate(start);
+                self.frame.narrowed.truncate(start);
                 facts.extend(more);
                 facts
             }
@@ -1465,7 +1460,7 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> Task {
         let returns = self.signatures[id].returns;
-        self.returns = Some(returns);
+        self.frame.returns = Some(returns);
         self.type_params.clone_from(&self.signatures[id].type_params);
         self.bounds.clone_from(&self.signatures[id].bounds);
         let params: Vec<(&'a str, Ty)> =
@@ -1474,68 +1469,72 @@ impl<'a> Checker<'a> {
         for &(name, ty) in &params {
             scope.insert(name, self.new_local(ty, false));
         }
-        self.scopes.push(scope);
+        self.frame.scopes.push(scope);
         let body = self.stmts(body);
-        self.scopes.pop();
-        if returns != Ty::None && returns != Ty::Error && !ends(&body, false) {
-            let name = &def.sig.name;
-            let message = format!("`{}` must return `{}` on every path", name.text, returns.name());
-            self.fail("E0309", message, name.span);
-        }
-        self.mutable.clear();
+        self.frame.scopes.pop();
+        self.check_returns(&def.sig.name, returns, &body);
+        self.frame.mutable.clear();
         let type_params = self.type_params.len();
         self.type_params.clear();
         self.bounds.clear();
-        let locals = std::mem::take(&mut self.locals);
+        let locals = std::mem::take(&mut self.frame.locals);
         let captures = Vec::new();
         Task { params: params.len(), type_params, returns, locals, body, span, captures }
     }
 
+    /// Reports E0309 unless a body with a return type returns on every path.
+    fn check_returns(&mut self, name: &ast::Name, returns: Ty, body: &[Stmt]) {
+        if returns != Ty::None && returns != Ty::Error && !ends(body, false) {
+            let message = format!("`{}` must return `{}` on every path", name.text, returns.name());
+            self.fail("E0309", message, name.span);
+        }
+    }
+
     fn main(&mut self, file: &'a ast::File) -> Task {
-        self.returns = None;
-        self.scopes.push(HashMap::new());
+        self.frame.returns = None;
+        self.frame.scopes.push(HashMap::new());
         let body = self.stmts(&file.stmts);
         let span = Span { start: 0, end: 0 };
-        let locals = std::mem::take(&mut self.locals);
+        let locals = std::mem::take(&mut self.frame.locals);
         let captures = Vec::new();
         Task { params: 0, type_params: 0, returns: Ty::None, locals, body, span, captures }
     }
 
     fn new_local(&mut self, ty: Ty, mutable: bool) -> Local {
-        self.locals.push(ty);
-        self.mutable.push(mutable);
-        self.locals.len() - 1
+        self.frame.locals.push(ty);
+        self.frame.mutable.push(mutable);
+        self.frame.locals.len() - 1
     }
 
     /// Adds a name to the innermost scope. Shadowing there is an error.
     fn bind(&mut self, name: &'a ast::Name, ty: Ty, mutable: bool) -> Local {
         let text = name.text.as_str();
-        let top_level = self.returns.is_none() && self.scopes.len() == 1;
-        let scope = self.scopes.last().expect("a scope is open");
+        let top_level = self.frame.returns.is_none() && self.frame.scopes.len() == 1;
+        let scope = self.frame.scopes.last().expect("a scope is open");
         let global = self.task_ids.contains_key(text) || self.constructors.contains_key(text);
         if scope.contains_key(text) || (top_level && global) {
             self.fail("E0304", format!("`{text}` is already defined"), name.span);
         }
         let local = self.new_local(ty, mutable);
-        self.scopes.last_mut().expect("a scope is open").insert(text, local);
+        self.frame.scopes.last_mut().expect("a scope is open").insert(text, local);
         local
     }
 
     fn lookup(&self, name: &str) -> Option<Local> {
-        self.scopes.iter().rev().find_map(|scope| scope.get(name).copied())
+        self.frame.scopes.iter().rev().find_map(|scope| scope.get(name).copied())
     }
 
     fn block(&mut self, stmts: &'a [ast::Stmt]) -> Vec<Stmt> {
-        self.scopes.push(HashMap::new());
+        self.frame.scopes.push(HashMap::new());
         let stmts = self.stmts(stmts);
-        self.scopes.pop();
+        self.frame.scopes.pop();
         stmts
     }
 
     fn stmts(&mut self, stmts: &'a [ast::Stmt]) -> Vec<Stmt> {
-        let start = self.narrowed.len();
+        let start = self.frame.narrowed.len();
         let stmts = stmts.iter().filter_map(|stmt| self.stmt(stmt)).collect();
-        self.narrowed.truncate(start);
+        self.frame.narrowed.truncate(start);
         stmts
     }
 
@@ -1549,7 +1548,7 @@ impl<'a> Checker<'a> {
         let span = stmt.span;
         Some(match &stmt.kind {
             StmtKind::Task(def) => {
-                if self.returns.is_some() || self.scopes.len() > 1 {
+                if self.frame.returns.is_some() || self.frame.scopes.len() > 1 {
                     return self.nested_task(def, span);
                 }
                 return None;
@@ -1557,7 +1556,7 @@ impl<'a> Checker<'a> {
             StmtKind::Let { mutable, name, ty, value } => {
                 let want = ty.as_ref().map(|ty| self.ty(ty));
                 if let Some((held, result)) = self.statement_value(value, want) {
-                    let ty = want.unwrap_or(self.locals[result]);
+                    let ty = want.unwrap_or(self.frame.locals[result]);
                     let read = self.held_value(result, ty, "this annotation", value.span);
                     let set = Stmt::Set(self.bind(name, ty, *mutable), read);
                     return Some(self.with_held(vec![held, set], result));
@@ -1571,14 +1570,14 @@ impl<'a> Checker<'a> {
             StmtKind::If { branches, otherwise } => self.if_stmt(branches, otherwise.as_deref()),
             StmtKind::While { condition, body } => {
                 self.forget_assigned(body);
-                let start = self.narrowed.len();
+                let start = self.frame.narrowed.len();
                 let test = self.condition(condition, "`while`");
                 let facts = self.facts(condition, true);
-                self.narrowed.extend(facts);
-                self.loops += 1;
+                self.frame.narrowed.extend(facts);
+                self.frame.loops += 1;
                 let body = self.block(body);
-                self.loops -= 1;
-                self.narrowed.truncate(start);
+                self.frame.loops -= 1;
+                self.frame.narrowed.truncate(start);
                 Stmt::While { condition: test, body }
             }
             StmtKind::For { change, name, iterable, body } => {
@@ -1588,20 +1587,20 @@ impl<'a> Checker<'a> {
                 let none = Expr { kind: ExprKind::None, ty: Ty::None, span };
                 let mut matched = None;
                 let value = match value {
-                    Some(value) => match self.statement_value(value, self.returns) {
+                    Some(value) => match self.statement_value(value, self.frame.returns) {
                         Some((stmt, result)) => {
                             matched = Some(stmt);
                             let read = self.read(result, value.span);
-                            match self.returns {
+                            match self.frame.returns {
                                 Some(want) => self.widen(read, want),
                                 None => read,
                             }
                         }
-                        None => self.expected(value, self.returns),
+                        None => self.expected(value, self.frame.returns),
                     },
                     None => none,
                 };
-                match self.returns {
+                match self.frame.returns {
                     Some(returns) => self.expect(&value, returns, "this `return`"),
                     None => {
                         self.fail("E0310", "`return` is only allowed in a task".into(), span);
@@ -1623,7 +1622,7 @@ impl<'a> Checker<'a> {
                     Stmt::Print(self.showable(value))
                 }
             },
-            StmtKind::Break | StmtKind::Continue if self.loops == 0 => {
+            StmtKind::Break | StmtKind::Continue if self.frame.loops == 0 => {
                 self.fail("E0311", "`break` and `continue` need a loop".into(), span);
                 return None;
             }
@@ -1639,34 +1638,20 @@ impl<'a> Checker<'a> {
         })
     }
 
-    /// Swaps the fields of the task being checked with those of `frame`.
-    fn swap_frame(&mut self, frame: &mut Frame<'a>) {
-        std::mem::swap(&mut self.scopes, &mut frame.scopes);
-        std::mem::swap(&mut self.locals, &mut frame.locals);
-        std::mem::swap(&mut self.mutable, &mut frame.mutable);
-        std::mem::swap(&mut self.returns, &mut frame.returns);
-        std::mem::swap(&mut self.loops, &mut frame.loops);
-        std::mem::swap(&mut self.narrowed, &mut frame.narrowed);
-        std::mem::swap(&mut self.captures, &mut frame.captures);
-        std::mem::swap(&mut self.own_name, &mut frame.own_name);
-    }
-
     /// Starts a lambda or nested task. Local 0 is its record, of type `ty`,
     /// which a lambda with an open return type fills in at `end_closure`.
     fn start_closure(&mut self, ty: Ty, returns: Ty) {
-        let mut frame = Frame::default();
-        self.swap_frame(&mut frame);
-        self.frames.push(frame);
-        self.returns = Some(returns);
+        self.frames.push(std::mem::take(&mut self.frame));
+        self.frame.returns = Some(returns);
         self.new_local(ty, false);
-        self.scopes.push(HashMap::new());
+        self.frame.scopes.push(HashMap::new());
     }
 
     /// Ends what `start_closure` began. Gives the new value, which the task
     /// around it builds from what the body captured.
     fn end_closure(&mut self, params: &[Ty], returns: Ty, body: Vec<Stmt>, span: Span) -> Expr {
-        let mut frame = self.frames.pop().expect("`start_closure` pushed a frame");
-        self.swap_frame(&mut frame);
+        let outer = self.frames.pop().expect("`start_closure` pushed a frame");
+        let frame = std::mem::replace(&mut self.frame, outer);
         let ty = Ty::Task(params.to_vec().leak(), inner(returns));
         let mut locals = frame.locals;
         locals[0] = ty;
@@ -1714,16 +1699,12 @@ impl<'a> Checker<'a> {
         let returns = sig.returns.as_ref().map_or(Ty::None, |ty| self.ty(ty));
         let ty = Ty::Task(params.clone().leak(), inner(returns));
         self.start_closure(ty, returns);
-        self.own_name = Some(&sig.name.text);
+        self.frame.own_name = Some(&sig.name.text);
         for (param, &ty) in sig.params.iter().zip(&params) {
             self.bind(&param.name, ty, false);
         }
         let body = self.stmts(body);
-        if returns != Ty::None && returns != Ty::Error && !ends(&body, false) {
-            let name = &sig.name;
-            let message = format!("`{}` must return `{}` on every path", name.text, returns.name());
-            self.fail("E0309", message, name.span);
-        }
+        self.check_returns(&sig.name, returns, &body);
         let value = self.end_closure(&params, returns, body, span);
         Some(Stmt::Set(self.bind(&sig.name, ty, false), value))
     }
@@ -1751,7 +1732,7 @@ impl<'a> Checker<'a> {
             _ => {
                 let diag = Diagnostic::new("E0324", "a lambda needs a task type here", span);
                 self.report(diag.note(
-                    "write its type, as in `let f: task(int) -> int = x => x`, or pass it after \n                     the values that show its type",
+                    "write its type, as in `let f: task(int) -> int = x => x`, or pass it after the values that show its type",
                 ))
             }
         }
@@ -1782,7 +1763,7 @@ impl<'a> Checker<'a> {
             frame.own_name == Some(name) || frame.scopes.iter().any(|s| s.contains_key(name))
         };
         self.lookup(name).is_some()
-            || self.own_name == Some(name)
+            || self.frame.own_name == Some(name)
             || self.frames.iter().any(in_frame)
     }
 
@@ -1790,17 +1771,17 @@ impl<'a> Checker<'a> {
     /// `None` if no such task has the name.
     fn captured(&mut self, name: &str, span: Span) -> Option<Expr> {
         let kind = ExprKind::Local(0);
-        if self.own_name == Some(name) {
-            return Some(Expr { kind, ty: self.locals[0], span });
+        if self.frame.own_name == Some(name) {
+            return Some(Expr { kind, ty: self.frame.locals[0], span });
         }
-        if let Some(index) = self.captures.iter().position(|(known, _)| known == name) {
-            let ty = self.captures[index].1.ty;
+        if let Some(index) = self.frame.captures.iter().position(|(known, _)| known == name) {
+            let ty = self.frame.captures[index].1.ty;
             return Some(Expr { kind: ExprKind::Capture(index), ty, span });
         }
-        let mut frame = self.frames.pop()?;
-        self.swap_frame(&mut frame);
+        let outer = self.frames.pop()?;
+        let inside = std::mem::replace(&mut self.frame, outer);
         let found = match self.lookup(name) {
-            Some(local) if self.mutable[local] => {
+            Some(local) if self.frame.mutable[local] => {
                 let message = format!("`{name}` is a `var`, so it cannot be captured");
                 let note = format!("copy it first, with `let copy = {name}`");
                 Some(self.report(Diagnostic::new("E0325", message, span).note(note)))
@@ -1808,15 +1789,14 @@ impl<'a> Checker<'a> {
             Some(local) => Some(view(self.read(local, span), self.current(local))),
             None => self.captured(name, span),
         };
-        self.swap_frame(&mut frame);
-        self.frames.push(frame);
+        self.frames.push(std::mem::replace(&mut self.frame, inside));
         let value = found?;
         if value.ty == Ty::Error {
             return Some(value);
         }
         let ty = value.ty;
-        self.captures.push((name.into(), value));
-        Some(Expr { kind: ExprKind::Capture(self.captures.len() - 1), ty, span })
+        self.frame.captures.push((name.into(), value));
+        Some(Expr { kind: ExprKind::Capture(self.frame.captures.len() - 1), ty, span })
     }
 
     /// A task used as a value. Its code is a small task that takes a record
@@ -1902,21 +1882,21 @@ impl<'a> Checker<'a> {
         branches: &'a [(ast::Expr, Vec<ast::Stmt>)],
         otherwise: Option<&'a [ast::Stmt]>,
     ) -> Stmt {
-        let start = self.narrowed.len();
+        let start = self.frame.narrowed.len();
         let mut lowered = Vec::with_capacity(branches.len());
         for (condition, then) in branches {
             let test = self.condition(condition, "`if`");
             let (found, rest) = (self.facts(condition, true), self.facts(condition, false));
-            let outer = self.narrowed.len();
-            self.narrowed.extend(found);
+            let outer = self.frame.narrowed.len();
+            self.frame.narrowed.extend(found);
             let then = self.block(then);
-            self.narrowed.truncate(outer);
-            self.narrowed.extend(rest);
+            self.frame.narrowed.truncate(outer);
+            self.frame.narrowed.extend(rest);
             lowered.push((test, then));
         }
         let otherwise = otherwise.map_or(Vec::new(), |body| self.block(body));
         if !lowered.iter().all(|(_, then)| ends(then, true)) {
-            self.narrowed.truncate(start);
+            self.frame.narrowed.truncate(start);
         }
         Stmt::If { branches: lowered, otherwise }
     }
@@ -1947,7 +1927,7 @@ impl<'a> Checker<'a> {
 
     /// Runs `stmts`, then lets go of the local from `statement_value`.
     fn with_held(&self, mut stmts: Vec<Stmt>, result: Local) -> Stmt {
-        stmts.extend(self.locals[result].is_counted().then_some(Stmt::Clear(result)));
+        stmts.extend(self.frame.locals[result].is_counted().then_some(Stmt::Clear(result)));
         Stmt::Block(stmts)
     }
 
@@ -1995,7 +1975,7 @@ impl<'a> Checker<'a> {
                 let message = "this arm can never run: earlier arms cover everything";
                 self.fail("E0317", message.into(), arm.pattern.span);
             }
-            self.scopes.push(HashMap::new());
+            self.frame.scopes.push(HashMap::new());
             let (test, mut body) = self.pattern(&arm.pattern, holder, ty, &mut covered);
             match &arm.body {
                 ast::ArmBody::Expr(arm_value) if value.is_some() => {
@@ -2016,7 +1996,7 @@ impl<'a> Checker<'a> {
                 }
                 ast::ArmBody::Block(stmts) => body.extend(self.stmts(stmts)),
             }
-            self.scopes.pop();
+            self.frame.scopes.pop();
             lowered.push((test, body));
         }
         let missing = self.missing(ty, &covered);
@@ -2028,7 +2008,7 @@ impl<'a> Checker<'a> {
             let span = arms.last().map_or(subject.span, |arm| arm.pattern.span);
             self.report(Diagnostic::new("E0316", message, span).note(note));
         }
-        self.locals[result] = want.unwrap_or(Ty::None);
+        self.frame.locals[result] = want.unwrap_or(Ty::None);
 
         let otherwise = lowered.pop().map_or(Vec::new(), |(_, body)| body);
         let span = subject.span;
@@ -2309,7 +2289,7 @@ impl<'a> Checker<'a> {
             self.expected(value, Some(Ty::Error));
             return None;
         };
-        let ty = self.locals[local];
+        let ty = self.frame.locals[local];
         let value = match compound(op) {
             Some(op) => {
                 let value = self.binary(op, target, value, None, span);
@@ -2342,10 +2322,10 @@ impl<'a> Checker<'a> {
             }
             return None;
         };
-        if self.locals[local] == Ty::Error {
+        if self.frame.locals[local] == Ty::Error {
             return None;
         }
-        if !self.mutable[local] {
+        if !self.frame.mutable[local] {
             let diag = Diagnostic::new("E0305", format!("`{name}` cannot change"), span);
             self.report(diag.note("only a name declared with `var` can change"));
         }
@@ -2353,7 +2333,7 @@ impl<'a> Checker<'a> {
     }
 
     fn read(&self, local: Local, span: Span) -> Expr {
-        Expr { kind: ExprKind::Local(local), ty: self.locals[local], span }
+        Expr { kind: ExprKind::Local(local), ty: self.frame.locals[local], span }
     }
 
     /// Finds what a write changes. Each index runs once, before the value
@@ -2365,7 +2345,7 @@ impl<'a> Checker<'a> {
                 let place =
                     Place { local, setup: Vec::new(), take: Vec::new(), finish: Vec::new() };
                 let (ty, span) = (self.current(local), target.span);
-                if ty == self.locals[local] || matches!(ty, Ty::Union(_)) {
+                if ty == self.frame.locals[local] || matches!(ty, Ty::Union(_)) {
                     return Some(place);
                 }
                 // A narrowed union: what it holds is a field of its record.
@@ -2375,7 +2355,7 @@ impl<'a> Checker<'a> {
             }
             Ast::Index { base, indices } => {
                 let mut place = self.place(base)?;
-                let (key, item) = self.key(self.locals[place.local], indices, target.span)?;
+                let (key, item) = self.key(self.frame.locals[place.local], indices, target.span)?;
                 let key = self.hoist(key, &mut place);
                 let read = self.element(place.local, key, item, target.span);
                 let key = self.read(key, target.span);
@@ -2383,7 +2363,7 @@ impl<'a> Checker<'a> {
             }
             Ast::Field { base, name } => {
                 let mut place = self.place(base)?;
-                let (slot, ty) = self.field(self.locals[place.local], name)?;
+                let (slot, ty) = self.field(self.frame.locals[place.local], name)?;
                 let span = target.span;
                 let read = self.slot_of(place.local, slot, ty, span);
                 let key = Expr { kind: ExprKind::Int(slot as i64), ty: Ty::Int, span };
@@ -2427,7 +2407,7 @@ impl<'a> Checker<'a> {
     /// Reads an element from the container in `local`.
     fn element(&self, local: Local, key: Local, ty: Ty, span: Span) -> Expr {
         let (container, key) = (self.read(local, span).into(), self.read(key, span).into());
-        let kind = match self.locals[local] {
+        let kind = match self.frame.locals[local] {
             Ty::List(_) => ExprKind::ListGet(container, key),
             _ => ExprKind::MapGet(container, key),
         };
@@ -2435,7 +2415,7 @@ impl<'a> Checker<'a> {
     }
 
     fn write(&self, local: Local, key: Expr, value: Expr, span: Span) -> Stmt {
-        let op = match self.locals[local] {
+        let op = match self.frame.locals[local] {
             Ty::List(_) => Update::ListSet,
             Ty::Data(..) => Update::FieldSet,
             Ty::Union(_) => Update::UnionSet,
@@ -2457,7 +2437,7 @@ impl<'a> Checker<'a> {
             return None;
         };
         let local = place.local;
-        let Some((key, item)) = self.key(self.locals[local], indices, span) else {
+        let Some((key, item)) = self.key(self.frame.locals[local], indices, span) else {
             self.expected(value, Some(Ty::Error));
             return None;
         };
@@ -2465,7 +2445,7 @@ impl<'a> Checker<'a> {
         let value = match compound(op) {
             Some(op) => {
                 let old = self.element(local, key, item, span);
-                let value = self.lower(value, Some(old.ty).filter(|ty| ty.is_number()));
+                let value = self.lower(value, self.number_want(Some(old.ty)));
                 self.binary_values(op, old, value, span)
             }
             None => self.expected(value, Some(item)),
@@ -2489,14 +2469,14 @@ impl<'a> Checker<'a> {
             return None;
         };
         let local = place.local;
-        let Some((slot, ty)) = self.field(self.locals[local], name) else {
+        let Some((slot, ty)) = self.field(self.frame.locals[local], name) else {
             self.expected(value, Some(Ty::Error));
             return None;
         };
         let value = match compound(op) {
             Some(op) => {
                 let old = self.slot_of(local, slot, ty, span);
-                let value = self.lower(value, Some(old.ty).filter(|ty| ty.is_number()));
+                let value = self.lower(value, self.number_want(Some(old.ty)));
                 self.binary_values(op, old, value, span)
             }
             None => self.expected(value, Some(ty)),
@@ -2761,7 +2741,7 @@ impl<'a> Checker<'a> {
         }
         let mut place = self.place(base)?;
         let local = place.local;
-        let ty = self.locals[local];
+        let ty = self.frame.locals[local];
         let (op, wants): (Update, &[Ty]) = match (ty, name.text.as_str()) {
             (Ty::List(item), "push") => (Update::ListPush, std::slice::from_ref(item)),
             (Ty::List(_), "swap") => (Update::ListSwap, &[Ty::Int, Ty::Int]),
@@ -2801,8 +2781,8 @@ impl<'a> Checker<'a> {
             return (nothing, self.new_local(Ty::Error, false));
         };
         let local = place.local;
-        let Ty::List(item) = self.locals[local] else {
-            let ty = self.locals[local].name();
+        let Ty::List(item) = self.frame.locals[local] else {
+            let ty = self.frame.locals[local].name();
             self.fail("E0303", format!("`pop` does not work on `{ty}`"), span);
             return (nothing, self.new_local(Ty::Error, false));
         };
@@ -2842,12 +2822,12 @@ impl<'a> Checker<'a> {
         body: &'a [ast::Stmt],
     ) -> (Local, Vec<Stmt>) {
         self.forget_assigned(body);
-        self.scopes.push(HashMap::new());
+        self.frame.scopes.push(HashMap::new());
         let local = self.bind(name, ty, false);
-        self.loops += 1;
+        self.frame.loops += 1;
         let body = self.stmts(body);
-        self.loops -= 1;
-        self.scopes.pop();
+        self.frame.loops -= 1;
+        self.frame.scopes.pop();
         (local, body)
     }
 
@@ -2950,7 +2930,7 @@ impl<'a> Checker<'a> {
         if let Some(value) = self.captured(name, span) {
             return value;
         }
-        if self.returns.is_some() {
+        if self.frame.returns.is_some() {
             match self.top.get(name) {
                 Some(&Top::Literal(value, ty)) => {
                     // Its own statement reports any error.
@@ -2981,7 +2961,10 @@ impl<'a> Checker<'a> {
             let diag = Diagnostic::new("E0307", format!("`{name}` needs its fields"), span);
             return self.report(diag.note(format!("write `{name}(field: value)`")));
         }
-        self.fail("E0301", format!("name `{name}` is not defined"), span)
+        let diag = Diagnostic::new("E0301", format!("name `{name}` is not defined"), span);
+        let dotted = self.methods.contains_key(name);
+        let note = format!("`{name}` has `self`, so it has no value form: write a lambda");
+        self.report(if dotted { diag.note(note) } else { diag })
     }
 
     /// A literal has `want` if that is an integer type, or else `int`.
@@ -3062,14 +3045,14 @@ impl<'a> Checker<'a> {
             Ast::Map(entries) => self.map(entries, want, span),
             Ast::If { condition, then, otherwise } => {
                 let test = self.condition(condition, "`if`");
-                let start = self.narrowed.len();
+                let start = self.frame.narrowed.len();
                 let (found, rest) = (self.facts(condition, true), self.facts(condition, false));
-                self.narrowed.extend(found);
+                self.frame.narrowed.extend(found);
                 let then = self.expected(then, want);
-                self.narrowed.truncate(start);
-                self.narrowed.extend(rest);
+                self.frame.narrowed.truncate(start);
+                self.frame.narrowed.extend(rest);
                 let otherwise = self.expected(otherwise, want.or(Some(then.ty)));
-                self.narrowed.truncate(start);
+                self.frame.narrowed.truncate(start);
                 self.expect(&otherwise, then.ty, "`else`, to match `then`,");
                 let ty = then.ty;
                 let kind = ExprKind::If(test.into(), then.into(), otherwise.into());
@@ -3527,23 +3510,29 @@ impl<'a> Checker<'a> {
             }
             BinaryOp::And | BinaryOp::Or => {
                 let first = self.expr(left);
-                let start = self.narrowed.len();
+                let start = self.frame.narrowed.len();
                 let facts = self.facts(left, op == BinaryOp::And);
-                self.narrowed.extend(facts);
+                self.frame.narrowed.extend(facts);
                 let right = self.expr(right);
-                self.narrowed.truncate(start);
+                self.frame.narrowed.truncate(start);
                 return self.binary_values(op, first, right, span);
             }
             _ => {}
         }
-        let other = |value: &Expr| Some(value.ty).filter(|ty| ty.is_number()).or(hint);
         let (left, right) = if literal_math(left) && !literal_math(right) {
             let right = self.lower(right, hint);
-            (self.lower(left, other(&right)), right)
+            let want = self.number_want(Some(right.ty)).or(hint);
+            (self.lower(left, want), right)
         } else {
-            let left = self.lower(left, hint);
-            let right = self.lower(right, other(&left));
-            (left, right)
+            let first = self.lower(left, hint);
+            // A collection literal takes its element type from the other side.
+            let want = if matches!(right.kind, Ast::List(_) | Ast::Map(_)) {
+                Some(first.ty).filter(|ty| ty.is_collection())
+            } else {
+                self.number_want(Some(first.ty)).or(hint)
+            };
+            let right = self.lower(right, want);
+            (first, right)
         };
         self.binary_values(op, left, right, span)
     }
@@ -3555,22 +3544,40 @@ impl<'a> Checker<'a> {
         right: &'a ast::Expr,
         span: Span,
     ) -> Expr {
-        // The right side goes first, since a literal takes its type from it.
-        let right = self.expr(right);
+        // A literal takes its type from the other side, so that side goes first.
+        let first = (!literal_math(left)).then(|| self.expr(left));
+        let want = first.as_ref().map(|value| value.ty).filter(|ty| ty.is_number());
+        let collection = want.and_then(|item| match &right.kind {
+            Ast::List(_) => Some(Ty::List(inner(item))),
+            Ast::Call { callee, .. }
+                if matches!(&callee.kind, Ast::Name(name) if self.is_set_call(name)) =>
+            {
+                Some(Ty::Set(inner(item)))
+            }
+            _ => None,
+        });
+        let right = self.lower(right, collection);
         let (item, list) = match right.ty {
             Ty::Error => {
-                self.expr(left);
+                if first.is_none() {
+                    self.expr(left);
+                }
                 return poisoned(span);
             }
             Ty::List(item) => (*item, true),
             Ty::Set(item) | Ty::Map(item, _) => (*item, false),
             ty => {
-                self.expr(left);
+                if first.is_none() {
+                    self.expr(left);
+                }
                 let message = format!("`in` needs a list, map, or set, found `{}`", ty.name());
                 return self.fail("E0303", message, right.span);
             }
         };
-        let left = self.lower(left, Some(item).filter(|ty| ty.is_number()));
+        let left = match first {
+            Some(left) => left,
+            None => self.lower(left, self.number_want(Some(item))),
+        };
         if list && !self.require(item, "Equal", right.span) {
             return poisoned(span);
         }
@@ -3607,24 +3614,24 @@ impl<'a> Checker<'a> {
         if left.ty != right.ty {
             let (a, b) = (left.ty.name(), right.ty.name());
             let message = format!("`{name}` needs one type on both sides, found `{a}` and `{b}`");
-            let sized = format!("conversions are explicit: use `.to_{a}()`");
-            let note = if left.ty == Ty::None
-                || right.ty == Ty::None
-                || matches!(left.ty, Ty::Union(_))
-                || matches!(right.ty, Ty::Union(_))
-            {
-                "test a union with `is`, as in `x is none`"
+            let diag = Diagnostic::new("E0303", message, span);
+            let union =
+                [left.ty, right.ty].iter().any(|ty| *ty == Ty::None || matches!(ty, Ty::Union(_)));
+            let numbers = left.ty.is_number() && right.ty.is_number();
+            let plain = matches!((left.ty, right.ty), (Ty::Int, Ty::Float) | (Ty::Float, Ty::Int));
+            return self.report(if union && !self.frames.is_empty() {
+                diag.note("test a union with `is`. A captured name does not narrow, so test a `let` copy of it")
+            } else if union {
+                diag.note("test a union with `is`, as in `x is none`")
             } else if left.ty == Ty::Text || right.ty == Ty::Text {
-                JOIN_TEXT
-            } else if left.ty.is_number()
-                && right.ty.is_number()
-                && !matches!((left.ty, right.ty), (Ty::Int, Ty::Float) | (Ty::Float, Ty::Int))
-            {
-                sized.as_str()
+                diag.note(JOIN_TEXT)
+            } else if numbers && !plain {
+                diag.note(format!("conversions are explicit: use `.to_{a}()`"))
+            } else if numbers {
+                diag.note("conversions are explicit: use `.to_float()` or `.to_int()`")
             } else {
-                "conversions are explicit: use `.to_float()` or `.to_int()`"
-            };
-            return self.report(Diagnostic::new("E0303", message, span).note(note));
+                diag
+            });
         }
         let ty = left.ty;
         let equality = matches!(op, BinaryOp::Eq | BinaryOp::Ne);

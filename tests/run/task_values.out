@@ -61,3 +61,4 @@ a 2 w
 3.0
 2
 gives 1
+[task() -> int]

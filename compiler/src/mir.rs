@@ -94,8 +94,13 @@ impl Ty {
                 }
             }
             Ty::Union(members) => {
+                // A task's return type would otherwise take in what follows it.
+                let member = |ty: &Ty| match ty {
+                    Ty::Task(..) => format!("({})", ty.name()),
+                    _ => ty.name(),
+                };
                 let mut names: Vec<String> =
-                    members.iter().filter(|&&ty| ty != Ty::None).map(|ty| ty.name()).collect();
+                    members.iter().filter(|&&ty| ty != Ty::None).map(member).collect();
                 if names.len() == members.len() {
                     return names.join(" or ");
                 }

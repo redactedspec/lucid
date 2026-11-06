@@ -30,7 +30,6 @@ collection_types.lcd:31:1: error E0303: text cannot change
 collection_types.lcd:32:10: error E0303: `for` cannot loop over `int`
 collection_types.lcd:34:17: error E0303: a key cannot change
 collection_types.lcd:36:9: error E0303: `+` needs one type on both sides, found `int` and `list[int]`
-  note: conversions are explicit: use `.to_float()` or `.to_int()`
 collection_types.lcd:37:9: error E0320: `list[int]` does not have `Add`
 collection_types.lcd:38:20: error E0303: an empty map does not fit `set[int]`
   note: an empty set is `set([])`
