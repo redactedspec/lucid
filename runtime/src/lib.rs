@@ -340,6 +340,11 @@ unsafe fn add_bytes(first: *mut Text, part: &[u8]) -> *mut Text {
     unsafe {
         let start = (*first).len;
         let len = start.saturating_add(part.len());
+        let Kind::Text { ascii } = (*first).head.kind else {
+            unreachable!("the caller holds a text");
+        };
+        // Unknown stays unknown, so a scan waits until something needs it.
+        let ascii = if ascii == Ascii::Yes && !part.is_ascii() { Ascii::No } else { ascii };
         let text = if (*first).head.count == 1 && len <= (*first).cap {
             first
         } else {
@@ -352,7 +357,7 @@ unsafe fn add_bytes(first: *mut Text, part: &[u8]) -> *mut Text {
         let end = text.add(1).cast::<u8>().add(start);
         std::ptr::copy_nonoverlapping(part.as_ptr(), end, part.len());
         (*text).len = len;
-        (*text).head.kind = Kind::Text { ascii: Ascii::Unknown };
+        (*text).head.kind = Kind::Text { ascii };
         text
     }
 }
@@ -893,7 +898,8 @@ pub unsafe extern "C" fn lucid_list_slice(list: *mut List, start: i64, end: i64)
 }
 
 /// A record with a count of one. Compiled code fills all `len` slots at once,
-/// and retains those below `counted`, before anything can read them.
+/// before anything can read them. Each slot below `counted` keeps a count that
+/// the caller gives.
 #[unsafe(no_mangle)]
 pub extern "C" fn lucid_record_new(tag: usize, len: u32, counted: u32) -> *mut Record {
     let head = Head { count: 1, kind: Kind::Record };
@@ -1527,6 +1533,24 @@ mod tests {
             lucid_release(list.cast());
             assert_eq!((*text).head.count, 1);
             lucid_release(text.cast());
+        }
+    }
+
+    #[test]
+    fn appends_keep_what_is_known_about_ascii() {
+        let _serial = serial();
+        // SAFETY: each pointer is live for as long as this test holds a count.
+        unsafe {
+            let text = text_from(b"a");
+            assert!(is_ascii(text));
+            let text = lucid_text_append_int(text, -5);
+            assert!(matches!((*text).head.kind, Kind::Text { ascii: Ascii::Yes }));
+            let other = text_from("é".as_bytes());
+            let text = lucid_text_append(text, other);
+            assert!(matches!((*text).head.kind, Kind::Text { ascii: Ascii::No }));
+            assert_eq!(lucid_text_len(text), 4);
+            lucid_release(text.cast());
+            lucid_release(other.cast());
         }
     }
 

@@ -113,8 +113,13 @@ fn agent_guide_runs_and_fits() {
     assert!(source.len() / 4 < 15_000, "guide is over the token budget");
 
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let blocks: Vec<&str> = source.split("```lucid
-").skip(1).collect();
+    let blocks: Vec<&str> = source
+        .split(
+            "```lucid
+",
+        )
+        .skip(1)
+        .collect();
     assert!(!blocks.is_empty());
     for (i, block) in blocks.iter().enumerate() {
         let code = block.split("```").next().expect("split gives one part");
@@ -148,6 +153,12 @@ fn costs_are_reported() {
         assert_eq!(output.status.code(), Some(0), "{name}: {}", text(&output.stderr));
         assert_eq!(text(&output.stdout), text(&expected), "{name}");
     }
+    // A program that cannot compile has no costs to report, which is not zero.
+    let scratch = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    fs::write(scratch.join("unbuilt.lcd"), "use foo\nprint 1\n").expect("cannot write test file");
+    let output = lucid(scratch, &["check", "--costs", "unbuilt.lcd"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(text(&output.stderr).contains("E0901"), "{}", text(&output.stderr));
     let output = lucid(&dir, &["check", "--json", "--costs", "shared.lcd"]);
     let report = text(&output.stdout);
     assert!(report.starts_with("[{\"kind\":\""), "{report}");

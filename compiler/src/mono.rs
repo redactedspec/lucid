@@ -323,7 +323,10 @@ impl Visit for Mono<'_> {
                 Stmt::Update { local, op: Update::Take | Update::Put, .. }
                     if matches!(self.locals[*local], Ty::List(_)) => {}
                 Stmt::Update {
-                    local, op: Update::FieldSet | Update::Take | Update::Put, args, ..
+                    local,
+                    op: Update::FieldSet | Update::Take | Update::Put,
+                    args,
+                    ..
                 } => {
                     let ExprKind::Int(field) = args[0].kind else {
                         unreachable!("a field write names its field")

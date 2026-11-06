@@ -8,3 +8,5 @@ for person in people
 
 if people is empty
     print "nobody home"
+
+print "the square root of 2 is {2.0.sqrt()}"

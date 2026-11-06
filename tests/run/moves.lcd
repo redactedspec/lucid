@@ -159,6 +159,13 @@ let fourteen = [1]
 let once: task() -> int = () => fourteen.len()
 print once()
 
+# A task named `equal` that is not a method takes its count like any other.
+task equal(take items: list[int], extra: int) -> list[int]
+    items.push(extra)
+    return items
+
+print equal([1], 2)
+
 print early(true)
 print early(false)
 print in_place([])

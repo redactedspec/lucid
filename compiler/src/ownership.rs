@@ -19,7 +19,9 @@ pub fn run(program: &mut Program, moves: bool) {
         .tasks
         .iter_mut()
         .map(|task| {
-            task.take.retain(|_| moves);
+            if !moves {
+                task.take.clear();
+            }
             task.take.clone()
         })
         .collect();
@@ -45,7 +47,8 @@ pub fn run(program: &mut Program, moves: bool) {
             heads: Vec::new(),
             next_loop: 0,
             changed: false,
-            moving: None,
+            reads: HashMap::new(),
+            moving: false,
             temps: Vec::new(),
         };
         pass.walk(body);
@@ -96,7 +99,7 @@ pub fn costs(program: &mut Program) -> BTreeSet<Cost> {
 /// Renders `costs` the way `lucid check` renders errors.
 pub fn render_costs(file: &str, src: &str, costs: &BTreeSet<Cost>, json: bool) -> String {
     let lines = Lines::new(src);
-    let mut items = costs.iter().map(|cost| {
+    let items = costs.iter().map(|cost| {
         let (line, column) = lines.position(cost.start);
         let meaning = match cost.kind {
             "copy" => "is held twice, so the next write copies it",
@@ -112,11 +115,7 @@ pub fn render_costs(file: &str, src: &str, costs: &BTreeSet<Cost>, json: bool) -
             format!("{file}:{line}:{column}: {kind}: this `{ty}` {meaning}\n")
         }
     });
-    if json {
-        format!("[{}]\n", items.collect::<Vec<_>>().join(","))
-    } else {
-        items.by_ref().collect()
-    }
+    if json { format!("[{}]\n", items.collect::<Vec<_>>().join(",")) } else { items.collect() }
 }
 
 /// Marks each local that `Stmt::Update` or a `change` argument writes.
@@ -392,14 +391,6 @@ impl Visit for Reads {
     }
 }
 
-/// What the statement in progress may move: locals that it reads once, and
-/// that nothing reads after it. A local read twice in one statement may be
-/// borrowed by the other read, and that borrow must stay valid to the end.
-struct Moving {
-    reads: HashMap<Local, usize>,
-    after: Bits,
-}
-
 struct Owners<'a> {
     moves: bool,
     params: usize,
@@ -420,7 +411,12 @@ struct Owners<'a> {
     heads: Vec<Bits>,
     next_loop: usize,
     changed: bool,
-    moving: Option<Moving>,
+    /// What the statement in progress reads, and how often.
+    reads: HashMap<Local, usize>,
+    /// True if that statement may move a local that it reads once, and that
+    /// nothing reads after it. A local read twice in one statement may be
+    /// borrowed by the other read, and that borrow must stay valid to the end.
+    moving: bool,
     /// The temporaries of the statement in progress.
     temps: Vec<Local>,
 }
@@ -469,9 +465,9 @@ impl Owners<'_> {
                 let mut reads = Reads::default();
                 reads.add(*local);
                 args.iter_mut().for_each(|arg| reads.expr(arg));
-                self.start(&reads);
+                self.start(reads);
                 self.update_args(*op, args);
-                self.finish(reads);
+                self.finish();
             }
             Stmt::Clear(local) => self.live.remove(*local),
             Stmt::Block(stmts) => self.flow(stmts),
@@ -536,34 +532,33 @@ impl Owners<'_> {
     fn give_one(&mut self, value: &mut Expr) {
         let mut reads = Reads::default();
         reads.expr(value);
-        self.start(&reads);
+        self.start(reads);
         if self.rewrite {
             self.give(value);
         }
-        self.finish(reads);
+        self.finish();
     }
 
     fn borrow_one(&mut self, value: &mut Expr) {
         let mut reads = Reads::default();
         reads.expr(value);
-        self.start(&reads);
+        self.start(reads);
         if self.rewrite {
             self.expr(value);
         }
-        self.finish(reads);
+        self.finish();
     }
 
     /// Starts one statement. `self.live` holds what is live after it.
-    fn start(&mut self, reads: &Reads) {
-        if self.rewrite && self.moves {
-            self.moving = Some(Moving { reads: reads.0.clone(), after: self.live.clone() });
-        }
+    fn start(&mut self, reads: Reads) {
+        self.reads = reads.0;
+        self.moving = self.rewrite && self.moves;
     }
 
     /// Ends one statement, with `self.live` as what is live before it.
-    fn finish(&mut self, reads: Reads) {
-        self.moving = None;
-        reads.0.into_keys().for_each(|local| self.live.add(local));
+    fn finish(&mut self) {
+        self.moving = false;
+        std::mem::take(&mut self.reads).into_keys().for_each(|local| self.live.add(local));
     }
 
     fn update_args(&mut self, op: Update, args: &mut [Expr]) {
@@ -582,12 +577,11 @@ impl Owners<'_> {
     }
 
     fn can_move(&self, local: Local) -> bool {
-        self.moving.as_ref().is_some_and(|moving| {
-            local >= self.params
-                && moving.reads.get(&local) == Some(&1)
-                && !moving.after.has(local)
-                && self.borrowed.binary_search(&local).is_err()
-        })
+        self.moving
+            && local >= self.params
+            && self.reads.get(&local) == Some(&1)
+            && !self.live.has(local)
+            && self.borrowed.binary_search(&local).is_err()
     }
 
     /// Makes `value` give a count to what keeps it.
@@ -632,7 +626,7 @@ impl Owners<'_> {
     /// Statements inside an expression. What they hold may be read later in
     /// the same statement, so they move nothing.
     fn nested(&mut self, stmts: &mut [Stmt]) {
-        let moving = self.moving.take();
+        let moving = std::mem::take(&mut self.moving);
         self.stmts(stmts);
         self.moving = moving;
     }

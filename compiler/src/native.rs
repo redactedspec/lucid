@@ -349,7 +349,7 @@ struct Lower<'a, 'b> {
     vars: Vec<Variable>,
     /// The type of each local.
     types: &'a [Ty],
-    /// Counted locals that are not parameters, released on return.
+    /// Counted locals that are not parameters or borrows, released on return.
     owned: Vec<Variable>,
     /// Each `change` parameter, with the address of the caller's stack slot.
     changed: Vec<(Variable, Value)>,
@@ -938,11 +938,9 @@ impl Lower<'_, '_> {
             Update::MapRemove => runtime.map_remove,
             Update::UnionSet => unreachable!("`mono.rs` replaces these"),
             Update::ListPop => runtime.list_pop,
-            Update::ListSet
-            | Update::ListPush
-            | Update::FieldSet
-            | Update::Take
-            | Update::Put => unreachable!("handled above"),
+            Update::ListSet | Update::ListPush | Update::FieldSet | Update::Take | Update::Put => {
+                unreachable!("handled above")
+            }
         };
         let result = self.call(task, &values).expect("it returns the new value");
         if op == Update::ListSwap {
@@ -1015,12 +1013,10 @@ impl Lower<'_, '_> {
         let len = self.body.ins().load(types::I64, flags, list, lucid_rt::LEN_OFFSET);
         let outside = self.body.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, index, len);
         self.trap_if(outside, OUT_OF_BOUNDS, span);
+        let address = self.list_slot(list, index, ty);
         if ty == Ty::Byte {
-            let address = self.body.ins().iadd(list, index);
             return self.body.ins().uload8(types::I64, flags, address, lucid_rt::SLOTS_OFFSET);
         }
-        let offset = self.body.ins().ishl_imm_s(index, 3);
-        let address = self.body.ins().iadd(list, offset);
         self.load_slot(address, lucid_rt::SLOTS_OFFSET, ty)
     }
 
@@ -1338,21 +1334,15 @@ impl Lower<'_, '_> {
     fn append(&mut self, parts: &[Expr]) -> Value {
         let mut text = self.expr(&parts[0]);
         for part in &parts[1..] {
-            let added = match &part.kind {
-                ExprKind::Temp(_, inner) => match &inner.kind {
-                    ExprKind::ToText(number) if number.ty == Ty::Int => {
-                        let number = self.expr(number);
-                        self.call(self.runtime.text_append_int, &[text, number])
-                    }
-                    _ => {
-                        let part = self.expr(part);
-                        self.call(self.runtime.text_append, &[text, part])
-                    }
-                },
-                _ => {
-                    let part = self.expr(part);
-                    self.call(self.runtime.text_append, &[text, part])
-                }
+            let added = if let ExprKind::Temp(_, inner) = &part.kind
+                && let ExprKind::ToText(number) = &inner.kind
+                && number.ty == Ty::Int
+            {
+                let number = self.expr(number);
+                self.call(self.runtime.text_append_int, &[text, number])
+            } else {
+                let part = self.expr(part);
+                self.call(self.runtime.text_append, &[text, part])
             };
             text = added.expect("it returns a text");
         }

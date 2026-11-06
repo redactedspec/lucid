@@ -65,8 +65,9 @@ fn cli(args: &[String]) -> ExitCode {
         }
         if run && diags.is_empty() {
             diags = native::run(&program, path, &src, STACK_BYTES).err().unwrap_or_default();
-        } else if !run {
+        } else if !run && !costs {
             // `check` reports errors in the program. An unbuilt feature is not one.
+            // `--costs` needs compiled code, so there it stays an error.
             diags.retain(|d| d.code != "E0901");
         }
     }

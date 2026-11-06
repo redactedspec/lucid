@@ -1563,7 +1563,8 @@ impl<'a> Checker<'a> {
         let mut scope = HashMap::new();
         let mut change = Vec::new();
         // The runtime calls a written `equal` directly, and passes no count.
-        let written = self.signatures[id].name.text != "equal";
+        let method = params.first().is_some_and(|param| param.0 == "self");
+        let written = !(method && self.signatures[id].name.text == "equal");
         let mut take = Vec::new();
         for &(name, ty, mode) in &params {
             let changes = mode == ast::ParamMode::Change;
@@ -2082,19 +2083,18 @@ impl<'a> Checker<'a> {
                 let (captures, change, take) = (Vec::new(), Vec::new(), Vec::new());
                 let borrowed = Vec::new();
                 let body = vec![Stmt::Return(call)];
-                let code =
-                    Task {
-                        params,
-                        type_params,
-                        returns,
-                        locals,
-                        body,
-                        span,
-                        captures,
-                        change,
-                        take,
-                        borrowed,
-                    };
+                let code = Task {
+                    params,
+                    type_params,
+                    returns,
+                    locals,
+                    body,
+                    span,
+                    captures,
+                    change,
+                    take,
+                    borrowed,
+                };
                 self.lifted.push(code);
                 let task = self.first_lifted + self.lifted.len() - 1;
                 self.task_values.insert(id, task);
@@ -2683,7 +2683,12 @@ impl<'a> Checker<'a> {
             // changes. Until `take`, the local borrows from the slot.
             place.setup.push(Stmt::Bind(value, read));
             let local = place.local;
-            place.take.push(Stmt::Update { local, op: Update::Take, args: vec![key.clone()], span });
+            place.take.push(Stmt::Update {
+                local,
+                op: Update::Take,
+                args: vec![key.clone()],
+                span,
+            });
             let (op, args) = (Update::Put, vec![key, stored]);
             place.finish.insert(0, Stmt::Update { local, op, args, span });
         } else {
@@ -3229,8 +3234,7 @@ impl<'a> Checker<'a> {
         let inside = self.binary_values(BinaryOp::Lt, local(position, Ty::Int), len, span);
         let next = self.binary_values(BinaryOp::Add, local(position, Ty::Int), int(1), span);
         let element = ExprKind::ListGet(local(list, list_ty).into(), local(at, Ty::Int).into());
-        let mut start =
-            vec![Stmt::Set(at, local(position, Ty::Int)), Stmt::Set(position, next)];
+        let mut start = vec![Stmt::Set(at, local(position, Ty::Int)), Stmt::Set(position, next)];
         let back = if item.is_counted() {
             // As in `step`: the slot's own count moves to the loop name and back.
             let key = local(at, Ty::Int);

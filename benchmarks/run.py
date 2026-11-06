@@ -90,4 +90,5 @@ for name in sys.argv[1:] or NAMES:
         for base in ("rust", "checked"):
             if base in table:
                 print(f"{name} lucid/{base} {title}: {table['lucid'] / table[base]:.2f}")
-    print(f"{name} lucid/rust memory: {memory['lucid'] / memory['rust']:.2f}")
+    if memory.get("lucid") and memory.get("rust"):
+        print(f"{name} lucid/rust memory: {memory['lucid'] / memory['rust']:.2f}")
