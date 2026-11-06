@@ -572,7 +572,7 @@ impl Owners<'_> {
                 self.live.clear();
                 self.give_one(value);
             }
-            Stmt::Exit(value) => {
+            Stmt::Exit(value) | Stmt::Fail(value, _) => {
                 self.live.clear();
                 self.borrow_one(value);
             }

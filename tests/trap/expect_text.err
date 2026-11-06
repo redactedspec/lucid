@@ -1,0 +1,2 @@
+expect_text.lcd:9:5: trap: expect failed: "Ada Lovelace" != "Ada Lovelace"
+    at expect_text.lcd:11:1 in top level

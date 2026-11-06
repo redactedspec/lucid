@@ -1,0 +1,11 @@
+# Text has quotes, so that a space shows.
+let name = "Ada Lovelace"
+type Point
+    x: int
+    y: int
+
+task check(a: text, b: Point)
+    expect b == Point(x: 1, y: 2)
+    expect a != "Ada Lovelace"
+
+check(name, Point(x: 1, y: 2))

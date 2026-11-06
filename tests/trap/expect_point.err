@@ -1,0 +1,1 @@
+expect_point.lcd:5:1: trap: expect failed: Point(x: 1, y: 2) == Point(x: 1, y: 3)

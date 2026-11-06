@@ -394,6 +394,12 @@ Read for decision 108.
 
 Sources: [PEP 831](https://peps.python.org/pep-0831/), [Phoronix](https://www.phoronix.com/news/Red-Hat-eu-stacktrace), [kernel thread](https://lkml.iu.edu/1706.0/01381.html).
 
+## `expect`
+
+Read for decision 109. pytest documents that its rewritten `assert` shows "the values of the most common subexpressions including calls, attributes, comparisons, and binary and unary operators", and that re-evaluating an expression after a failure has a side-effect risk. Lucid has one `expect` form, so showing both sides needs no second `expect_eq`. Each side runs once, which avoids that risk. Rust's `assert_eq!` was not read for this. No study compares failure output for agents, and the M5 agent benchmark may show if it helps.
+
+Sources: [pytest assertions](https://docs.pytest.org/en/7.1.x/assert.html).
+
 ## Open research
 
 | Topic | Needed by |

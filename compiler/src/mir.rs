@@ -522,6 +522,8 @@ pub enum Stmt {
     Placeholder(Span),
     /// Traps with this message.
     Trap(&'static str, Span),
+    /// Traps with this text, made at run time.
+    Fail(Expr, Span),
     /// A path that no value can take. Reaching it is a compiler bug.
     Unreachable,
     Expr(Expr),
@@ -729,6 +731,7 @@ pub trait Visit {
             | Stmt::Bind(_, value)
             | Stmt::Return(value)
             | Stmt::Exit(value)
+            | Stmt::Fail(value, _)
             | Stmt::Print(value)
             | Stmt::Expr(value) => self.expr(value),
             Stmt::Update { args, .. } => args.iter_mut().for_each(|arg| self.expr(arg)),

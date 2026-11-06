@@ -88,6 +88,7 @@ struct Runtime {
     print_f32: FuncId,
     print_bool: FuncId,
     trap: FuncId,
+    trap_text: FuncId,
     exit: FuncId,
     retain: FuncId,
     release: FuncId,
@@ -169,6 +170,7 @@ fn compile(
     builder.symbol("lucid_print_f32", lucid_rt::lucid_print_f32 as *const u8);
     builder.symbol("lucid_print_bool", lucid_rt::lucid_print_bool as *const u8);
     builder.symbol("lucid_trap", lucid_rt::lucid_trap as *const u8);
+    builder.symbol("lucid_trap_text", lucid_rt::lucid_trap_text as *const u8);
     builder.symbol("lucid_exit", lucid_rt::lucid_exit as *const u8);
     builder.symbol("lucid_retain", lucid_rt::lucid_retain as *const u8);
     builder.symbol("lucid_release", lucid_rt::lucid_release as *const u8);
@@ -237,6 +239,7 @@ fn compile(
         print_f32: import("lucid_print_f32", &small_float, &[]),
         print_bool: import("lucid_print_bool", &byte, &[]),
         trap: import("lucid_trap", &[text[0], text[1], value[0]], &[]),
+        trap_text: import("lucid_trap_text", &[text[0], text[1], value[0], value[0]], &[]),
         exit: import("lucid_exit", &value, &[]),
         retain: import("lucid_retain", &value, &[]),
         release: import("lucid_release", &value, &[]),
@@ -706,6 +709,15 @@ impl Lower<'_, '_> {
             }
             Stmt::Trap(message, span) => {
                 self.trap(message, *span);
+                return true;
+            }
+            Stmt::Fail(value, span) => {
+                let value = self.expr(value);
+                let (line, column) = self.lines.position(span.start);
+                let [text, len] = self.text(&format!("{}:{line}:{column}: trap: ", self.path));
+                let frame = self.body.ins().get_frame_pointer(self.pointer);
+                self.call(self.runtime.trap_text, &[text, len, value, frame]);
+                self.body.ins().trap(UNREACHABLE);
                 return true;
             }
             Stmt::Expr(value) => {

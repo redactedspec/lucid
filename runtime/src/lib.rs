@@ -1446,6 +1446,25 @@ pub unsafe extern "C" fn lucid_trap(message: *const u8, len: usize, frame: *cons
     trap(&report)
 }
 
+/// Ends the program as `lucid_trap` does, with `text` after the message.
+///
+/// # Safety
+///
+/// As `lucid_trap`, and `text` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_trap_text(
+    message: *const u8,
+    len: usize,
+    text: *const Text,
+    frame: *const usize,
+) -> ! {
+    // SAFETY: the caller guarantees all three.
+    let mut report = unsafe { std::slice::from_raw_parts(message, len) }.to_vec();
+    report.extend_from_slice(unsafe { bytes(text) });
+    unsafe { add_trace(&mut report, frame) };
+    trap(&report)
+}
+
 /// Where each call in compiled code returns to, with its place in the source
 /// if a stack trace shows it. See `add_trace`.
 static CALL_SITES: OnceLock<HashMap<usize, Option<String>>> = OnceLock::new();

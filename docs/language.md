@@ -610,7 +610,7 @@ test "adds numbers"
     expect add(2, 3) == 5
 ```
 
-`expect` traps with both values printed when it fails, and it also works outside tests.
+`expect` takes a `bool`, traps when it is false, and also works outside tests. On a comparison such as `==` or `<`, each side runs once, and the trap shows both values: `expect failed: 5 < 4`. Text has quotes. Any other condition, or a side with no `Show`, gives `expect failed`. What passes narrows what follows, as an `if` that ends does: after `expect x is int`, `x` is an `int`.
 
 ## Foreign code
 

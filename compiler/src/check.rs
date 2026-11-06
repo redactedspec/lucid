@@ -391,6 +391,16 @@ fn ends(stmts: &[Stmt], jumps: bool) -> bool {
     })
 }
 
+/// One side of a failed `expect`. Text has quotes, so that a space shows.
+fn shown_side(value: Expr) -> Expr {
+    let span = value.span;
+    let kind = match value.ty {
+        Ty::Text => ExprKind::TextQuote(value.into()),
+        _ => ExprKind::ToText(value.into()),
+    };
+    Expr { kind, ty: Ty::Text, span }
+}
+
 /// A union value as a narrower type.
 fn view(value: Expr, ty: Ty) -> Expr {
     if ty == value.ty || ty == Ty::Error {
@@ -1980,7 +1990,7 @@ impl<'a> Checker<'a> {
             StmtKind::Use { .. } => return self.later("`use`", span),
             StmtKind::Test { .. } => return self.later("`test`", span),
             StmtKind::Type(_) | StmtKind::Choice(_) | StmtKind::Trait(_) => return None,
-            StmtKind::Expect(_) => return self.later("`expect`", span),
+            StmtKind::Expect(value) => self.expect_stmt(value, span),
             StmtKind::Unsafe(_) => return self.later("`unsafe`", span),
         })
     }
@@ -2290,6 +2300,47 @@ impl<'a> Checker<'a> {
             self.frame.narrowed.truncate(start);
         }
         Stmt::If { branches: lowered, otherwise }
+    }
+
+    /// `expect`. A comparison keeps both sides in locals, to show them if it
+    /// fails. What passes narrows what follows, like an `if` that ends.
+    fn expect_stmt(&mut self, value: &'a ast::Expr, span: Span) -> Stmt {
+        let test = self.condition(value, "`expect`");
+        let facts = self.facts(value, true);
+        self.frame.narrowed.extend(facts);
+        let mut stmts = Vec::new();
+        let shows = |checker: &mut Self, a: &Expr, b: &Expr| {
+            checker.satisfies(a.ty, "Show") && checker.satisfies(b.ty, "Show")
+        };
+        let (test, failed) = match test.kind {
+            ExprKind::Binary(op, left, right) if shows(self, &left, &right) => {
+                let left = self.keep(*left, &mut stmts);
+                let right = self.keep(*right, &mut stmts);
+                let word = format!(" {} ", symbol(op));
+                let text = |text: String| Expr { kind: ExprKind::Text(text), ty: Ty::Text, span };
+                let parts = vec![
+                    text("expect failed: ".into()),
+                    shown_side(left.clone()),
+                    text(word),
+                    shown_side(right.clone()),
+                ];
+                let message = Expr { kind: ExprKind::Join(parts), ty: Ty::Text, span };
+                let kind = ExprKind::Binary(op, left.into(), right.into());
+                (Expr { kind, ..test }, Stmt::Fail(message, span))
+            }
+            kind => (Expr { kind, ..test }, Stmt::Trap("expect failed", span)),
+        };
+        stmts.push(Stmt::If { branches: vec![(test, Vec::new())], otherwise: vec![failed] });
+        Stmt::Block(stmts)
+    }
+
+    /// Runs `value` into a hidden local that lasts for this statement.
+    fn keep(&mut self, value: Expr, stmts: &mut Vec<Stmt>) -> Expr {
+        let (ty, span) = (value.ty, value.span);
+        let local = self.new_local(ty, false);
+        self.frame.held.push(local);
+        stmts.push(Stmt::Set(local, value));
+        Expr { kind: ExprKind::Local(local), ty, span }
     }
 
     /// Lowers a value that needs its own statements first, which only the

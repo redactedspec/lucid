@@ -533,7 +533,7 @@ show_all([Dog(name: "Fido")])
 
 ## What is not available
 
-Some keywords parse but do not run yet, and report E0901: `try`, `else` as a fallback, `test`, `expect`, `spawn`, `shared`, `weak`, `use`, `public`, `unsafe`.
+Some keywords parse but do not run yet, and report E0901: `test`, `spawn`, `shared`, `weak`, `use`, `public`, `unsafe`.
 
 There are no modules, file or console input, or standard library. These do not exist, so write your own: `sort`, `split`, `join`, `trim`, `contains`, `replace`, `abs`, `min`, `max`, `sum`, `range`, `enumerate`, `zip`, `.map`, `.filter`, `.keys`, `.values`, `.insert`, `.clear`, text to number, and number to text other than interpolation. There is no way to turn a number into a character. To map characters to numbers, search a text such as `"abcdefghijklmnopqrstuvwxyz"`.
 

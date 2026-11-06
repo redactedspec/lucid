@@ -1,0 +1,2 @@
+expect_generic.lcd:3:5: trap: expect failed
+    at expect_generic.lcd:5:1 in top level

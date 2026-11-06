@@ -1,0 +1,5 @@
+# With no `Show` to rely on, there is nothing to print.
+task same[T: Equal](a: T, b: T)
+    expect a == b
+
+same(1, 2)

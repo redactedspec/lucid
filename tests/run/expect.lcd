@@ -1,0 +1,30 @@
+# `expect` that holds prints nothing, and a side runs once.
+task twice(n: int) -> int
+    print "ran with {n}"
+    return n * 2
+
+type Point
+    x: int
+    y: int
+
+expect 1 + 1 == 2
+expect true
+expect "a" < "b"
+expect twice(2) == twice(2)
+expect Point(x: 1, y: 2) == Point(x: 1, y: 2)
+expect [1, 2] != [1, 3]
+expect 3 in [1, 2, 3]
+expect "ab".len() >= 2 and not false
+
+# What passes narrows what follows.
+let found: int? = [4].get(0)
+expect found is int
+print found + 1
+
+task same[T: Equal](a: T, b: T)
+    expect a == b
+
+same(1, 1)
+same("x", "x")
+
+print "done"
