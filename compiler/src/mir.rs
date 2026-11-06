@@ -435,6 +435,10 @@ pub type Local = usize;
 // A statement that passes a local by `change` may replace its value, so a
 // borrow of that local would not stay valid. The exclusivity checks in the
 // checker reject any such borrow. See "Parameters" in docs/compiler.md.
+//
+// A `Return` inside an expression is the one way that a statement can stop
+// half done. `ownership.rs` first moves each sibling of such an expression
+// that a keeper holds to a local, so no count is outside a local at that point.
 
 pub struct Program {
     pub tasks: Vec<Task>,
@@ -507,6 +511,8 @@ pub enum Stmt {
         body: Vec<Stmt>,
     },
     Return(Expr),
+    /// Prints this text to stderr, and ends the program with exit code 1.
+    Exit(Expr),
     Break,
     Continue,
     Print(Expr),
@@ -698,6 +704,7 @@ pub enum ExprKind {
     Hash(HashOp, Box<Expr>, Box<Expr>),
     /// Runs these statements, then gives a value. They only touch hidden
     /// locals, or a place that a `change` argument took out and puts back.
+    /// A `try` may also return from here, or exit.
     Seq(Vec<Stmt>, Box<Expr>),
     /// Evaluates a new value, and stores its count in this local, whose old
     /// value is released. Added by `ownership.rs`.
@@ -719,6 +726,7 @@ pub trait Visit {
             Stmt::Set(_, value)
             | Stmt::Bind(_, value)
             | Stmt::Return(value)
+            | Stmt::Exit(value)
             | Stmt::Print(value)
             | Stmt::Expr(value) => self.expr(value),
             Stmt::Update { args, .. } => args.iter_mut().for_each(|arg| self.expr(arg)),

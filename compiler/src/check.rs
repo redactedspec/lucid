@@ -8,7 +8,8 @@ use crate::ast::{
 };
 use crate::diag::{Diagnostic, Span};
 use crate::mir::{
-    Expr, ExprKind, Local, Program, Shape, ShapeVariant, Stmt, Task, Ty, Types, Update, inner,
+    Expr, ExprKind, Local, Program, Shape, ShapeVariant, Stmt, Task, Ty, Types, Update, Visit,
+    inner,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -30,7 +31,7 @@ const MAX_FINITE_CHECK: usize = 256;
 const BUILT_IN_TRAITS: [&str; 8] = ["Equal", "Order", "Show", "Hash", "Add", "Sub", "Mul", "Div"];
 
 /// Traits in the spec that are not built yet.
-const LATER_TRAITS: [&str; 3] = ["Copy", "Json", "Error"];
+const LATER_TRAITS: [&str; 2] = ["Copy", "Json"];
 
 /// Dot calls that change their receiver, so they only work as statements, or
 /// for `pop`, as the whole value of one.
@@ -83,9 +84,17 @@ struct Frame<'a> {
     mutable: Vec<bool>,
     /// The return type, or `None` at top level.
     returns: Option<Ty>,
-    /// The first scope of each open loop, and its loop name, if it has one. A
-    /// loop name stays out of `Frame::leaving`, since `for` lets go of it.
-    loop_scopes: Vec<(usize, Option<Local>)>,
+    /// True in a lambda whose result type comes from its own body.
+    open_result: bool,
+    /// The hidden locals of `try` and `else` in the statement being lowered,
+    /// which let go of their value when it ends.
+    held: Vec<Local>,
+    /// Each name bound to an error that nothing has read yet.
+    kept_errors: Vec<(Local, Span)>,
+    /// The first scope of each open loop, its loop name, if it has one, and the
+    /// length of `held` at its body. A loop name stays out of `Frame::leaving`,
+    /// since `for` lets go of it.
+    loop_scopes: Vec<(usize, Option<Local>, usize)>,
     /// What tests have proved about locals, latest last. See `forget`.
     narrowed: Vec<(Local, Ty)>,
     /// What this lambda or nested task captured so far, with each value as the
@@ -389,6 +398,54 @@ fn view(value: Expr, ty: Ty) -> Expr {
     }
     let span = value.span;
     Expr { kind: ExprKind::View(value.into()), ty, span }
+}
+
+/// Runs `back` before a `break` or `continue` of a `for change`, and `leave`
+/// before any `return` in its body, whose value runs first. `try` puts a
+/// `return` inside an expression, so this walks those too.
+struct PutBack<'b> {
+    locals: &'b mut Vec<Ty>,
+    mutable: &'b mut Vec<bool>,
+    back: &'b [Stmt],
+    leave: &'b [Stmt],
+    own_loop: bool,
+}
+
+impl Visit for PutBack<'_> {
+    fn expr(&mut self, value: &mut Expr) {
+        self.expr_parts(value);
+    }
+
+    fn stmts(&mut self, stmts: &mut [Stmt]) {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Break | Stmt::Continue if self.own_loop => {
+                    let mut block = self.back.to_vec();
+                    block.push(stmt.clone());
+                    *stmt = Stmt::Block(block);
+                }
+                Stmt::Return(value) => {
+                    self.expr(value);
+                    let (ty, span) = (value.ty, value.span);
+                    self.locals.push(ty);
+                    self.mutable.push(false);
+                    let held = self.locals.len() - 1;
+                    let read = Expr { kind: ExprKind::Local(held), ty, span };
+                    let value = std::mem::replace(value, read.clone());
+                    let mut block = vec![Stmt::Set(held, value)];
+                    block.extend(self.leave.iter().cloned());
+                    block.push(Stmt::Return(read));
+                    *stmt = Stmt::Block(block);
+                }
+                Stmt::While { .. } | Stmt::For { .. } => {
+                    let own_loop = std::mem::replace(&mut self.own_loop, false);
+                    self.stmt_parts(stmt);
+                    self.own_loop = own_loop;
+                }
+                _ => self.stmt_parts(stmt),
+            }
+        }
+    }
 }
 
 /// True if reading `value` twice costs nothing and changes nothing.
@@ -1584,9 +1641,9 @@ impl<'a> Checker<'a> {
         }
         self.frame.scopes.push(scope);
         lowered.extend(self.stmts(body));
-        let body = lowered;
+        let mut body = lowered;
         self.frame.scopes.pop();
-        self.check_returns(&def.sig.name, returns, &body);
+        self.check_returns(&def.sig.name, returns, &mut body);
         self.frame.mutable.clear();
         let type_params = self.type_params.len();
         self.type_params.clear();
@@ -1607,8 +1664,16 @@ impl<'a> Checker<'a> {
     }
 
     /// Reports E0309 unless a body with a return type returns on every path.
-    fn check_returns(&mut self, name: &ast::Name, returns: Ty, body: &[Stmt]) {
-        if returns != Ty::None && returns != Ty::Error && !ends(body, false) {
+    /// A task that gives only `none` or an error returns `none` at its end.
+    fn check_returns(&mut self, name: &ast::Name, returns: Ty, body: &mut Vec<Stmt>) {
+        self.check_errors_read();
+        let failing = returns.members().contains(&Ty::None)
+            && self.error_members(returns).len() + 1 == returns.members().len();
+        if failing && returns != Ty::None && !ends(body, false) {
+            let none = Expr { kind: ExprKind::None, ty: Ty::None, span: name.span };
+            let none = self.widen(none, returns);
+            body.push(Stmt::Return(none));
+        } else if returns != Ty::None && returns != Ty::Error && !ends(body, false) {
             let message = format!("`{}` must return `{}` on every path", name.text, returns.name());
             self.fail("E0309", message, name.span);
         }
@@ -1618,6 +1683,7 @@ impl<'a> Checker<'a> {
         self.frame.returns = None;
         self.frame.scopes.push(HashMap::new());
         let body = self.stmts(&file.stmts);
+        self.check_errors_read();
         let span = Span { start: 0, end: 0 };
         let locals = std::mem::take(&mut self.frame.locals);
         let (captures, change, take) = (Vec::new(), Vec::new(), Vec::new());
@@ -1645,6 +1711,18 @@ impl<'a> Checker<'a> {
         local
     }
 
+    /// `bind` for `let` and `var`, where an error must then be read.
+    fn bind_value(&mut self, name: &'a ast::Name, ty: Ty, mutable: bool) -> Local {
+        let local = self.bind(name, ty, mutable);
+        // Tasks read a top-level literal from its source, not through this local.
+        let top = self.frame.returns.is_none() && self.frame.scopes.len() == 1;
+        let literal = top && matches!(self.top.get(name.text.as_str()), Some(Top::Literal(..)));
+        if !literal && !self.error_members(ty).is_empty() {
+            self.frame.kept_errors.push((local, name.span));
+        }
+        local
+    }
+
     fn lookup(&self, name: &str) -> Option<Local> {
         self.frame.scopes.iter().rev().find_map(|scope| scope.get(name).copied())
     }
@@ -1667,13 +1745,31 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// An error bound to a name must be read somewhere in its task.
+    fn check_errors_read(&mut self) {
+        for (local, span) in std::mem::take(&mut self.frame.kept_errors) {
+            self.unused_error(self.frame.locals[local], span);
+        }
+    }
+
+    fn mark_read(&mut self, local: Local) {
+        self.frame.kept_errors.retain(|&(kept, _)| kept != local);
+    }
+
+    fn unused_error(&mut self, ty: Ty, span: Span) {
+        let message = format!("this `{}` is an error that nothing uses", ty.name());
+        let note = "use `try`, `else`, or `match`";
+        self.report(Diagnostic::new("E0328", message, span).note(note));
+    }
+
     /// What a `break` or `continue` leaves: each name from the scopes of the
     /// open loop's body, newest first. `Stmt::Clear` of a plain number is
     /// dropped later.
     fn leaving(&self) -> Vec<Stmt> {
-        let &(depth, keep) = self.frame.loop_scopes.last().expect("the checker found a loop");
+        let &(depth, keep, held) = self.frame.loop_scopes.last().expect("the checker found a loop");
         let names = self.frame.scopes[depth..].iter().flat_map(|scope| scope.values().copied());
         let mut names: Vec<Local> = names.filter(|&local| Some(local) != keep).collect();
+        names.extend_from_slice(&self.frame.held[held..]);
         names.sort_unstable_by_key(|&local| std::cmp::Reverse(local));
         names.into_iter().map(Stmt::Clear).collect()
     }
@@ -1694,9 +1790,16 @@ impl<'a> Checker<'a> {
     fn stmt(&mut self, stmt: &'a ast::Stmt) -> Option<Stmt> {
         self.check_busy_reads(stmt);
         let start = self.frame.changed.len();
+        let held = self.frame.held.len();
         let lowered = self.statement(stmt);
         self.check_changed(stmt, start);
-        lowered
+        let clears = self.frame.held.split_off(held);
+        match lowered {
+            Some(lowered) if !clears.is_empty() => Some(Stmt::Block(
+                std::iter::once(lowered).chain(clears.into_iter().map(Stmt::Clear)).collect(),
+            )),
+            lowered => lowered,
+        }
     }
 
     /// Nothing may touch what a `for change` has taken out.
@@ -1771,13 +1874,13 @@ impl<'a> Checker<'a> {
                 if let Some((held, result)) = self.statement_value(value, want) {
                     let ty = want.unwrap_or(self.frame.locals[result]);
                     let read = self.held_value(result, ty, "this annotation", value.span);
-                    let set = Stmt::Set(self.bind(name, ty, *mutable), read);
+                    let set = Stmt::Set(self.bind_value(name, ty, *mutable), read);
                     return Some(self.with_held(vec![held, set], result));
                 }
                 let value = self.expected(value, want);
                 let ty = want.unwrap_or(value.ty);
                 self.expect(&value, ty, "this annotation");
-                Stmt::Set(self.bind(name, ty, *mutable), value)
+                Stmt::Set(self.bind_value(name, ty, *mutable), value)
             }
             StmtKind::Assign { target, op, value } => return self.assign(target, *op, value, span),
             StmtKind::If { branches, otherwise } => self.if_stmt(branches, otherwise.as_deref()),
@@ -1787,7 +1890,8 @@ impl<'a> Checker<'a> {
                 let test = self.condition(condition, "`while`");
                 let facts = self.facts(condition, true);
                 self.frame.narrowed.extend(facts);
-                self.frame.loop_scopes.push((self.frame.scopes.len(), None));
+                let held = self.frame.held.len();
+                self.frame.loop_scopes.push((self.frame.scopes.len(), None, held));
                 let body = self.block(body);
                 self.frame.loop_scopes.pop();
                 self.frame.narrowed.truncate(start);
@@ -1942,8 +2046,8 @@ impl<'a> Checker<'a> {
             }
         }
         lowered.extend(self.stmts(body));
-        let body = lowered;
-        self.check_returns(&sig.name, returns, &body);
+        let mut body = lowered;
+        self.check_returns(&sig.name, returns, &mut body);
         let value = self.end_closure(&params, returns, body, span);
         Some(Stmt::Set(self.bind(&sig.name, ty, false), value))
     }
@@ -1986,6 +2090,7 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> Expr {
         self.start_closure(Ty::Error, returns.unwrap_or(Ty::Error));
+        self.frame.open_result = returns.is_none();
         for (param, &ty) in params.iter().zip(types) {
             self.bind(param, ty, false);
         }
@@ -2025,7 +2130,10 @@ impl<'a> Checker<'a> {
                 let note = format!("copy it first, with `let copy = {name}`");
                 Some(self.report(Diagnostic::new("E0325", message, span).note(note)))
             }
-            Some(local) => Some(view(self.read(local, span), self.current(local))),
+            Some(local) => {
+                self.mark_read(local);
+                Some(view(self.read(local, span), self.current(local)))
+            }
             None => self.captured(name, span),
         };
         self.frames.push(std::mem::replace(&mut self.frame, inside));
@@ -2196,10 +2304,152 @@ impl<'a> Checker<'a> {
                 {
                     return self.changing_call(base, name, args, span);
                 }
-                _ => Stmt::Expr(self.expr(value)),
+                _ => self.discarded(value),
             },
-            _ => Stmt::Expr(self.expr(value)),
+            _ => self.discarded(value),
         })
+    }
+
+    /// A value that a statement drops, which must not be an error.
+    fn discarded(&mut self, value: &'a ast::Expr) -> Stmt {
+        let value = self.expr(value);
+        if !self.error_members(value.ty).is_empty() {
+            self.unused_error(value.ty, value.span);
+        }
+        Stmt::Expr(value)
+    }
+
+    /// The members of a type that are error types.
+    fn error_members(&mut self, ty: Ty) -> Vec<Ty> {
+        let members = ty.members().iter().copied();
+        members.filter(|&m| m != Ty::Error && m != Ty::None && self.satisfies(m, "Error")).collect()
+    }
+
+    /// Starts `try` or `else`: keeps `value` in a hidden local, and splits its
+    /// type into what counts as failure and what is left. `none` is a failure
+    /// only in a union with no error type. Reports E0327 if nothing can fail
+    /// or nothing is left.
+    fn hold_failure(&mut self, value: Expr, word: &str) -> Option<(Local, Stmt, Ty, Ty)> {
+        let ty = value.ty;
+        if ty == Ty::Error {
+            return None;
+        }
+        let errors = self.error_members(ty);
+        let failed = if errors.is_empty() { Ty::None } else { self.union(errors) };
+        let Some((failed, rest)) = self.split(ty, failed) else {
+            let message = format!("`{word}` has nothing to act on in `{}`", ty.name());
+            let note = "it needs a union of an error type or `none` and another type";
+            self.report(Diagnostic::new("E0327", message, value.span).note(note));
+            return None;
+        };
+        let holder = self.new_local(ty, false);
+        self.frame.held.push(holder);
+        Some((holder, Stmt::Set(holder, value), failed, rest))
+    }
+
+    fn holder_has(&self, holder: Local, want: Ty, span: Span) -> Expr {
+        let kind = ExprKind::Holds(self.read(holder, span).into(), want.members().to_vec());
+        Expr { kind, ty: Ty::Bool, span }
+    }
+
+    /// `try x`. See "Early exits" in docs/compiler.md.
+    fn try_value(&mut self, value: &'a ast::Expr, span: Span) -> Expr {
+        let value = self.expr(value);
+        let Some((holder, set, failed, rest)) = self.hold_failure(value, "try") else {
+            return poisoned(span);
+        };
+        let test = self.holder_has(holder, failed, span);
+        let leave = match self.frame.returns {
+            Some(_) => self.return_failure(holder, failed, span),
+            None => self.exit_failure(holder, failed, span),
+        };
+        let leave = Stmt::If { branches: vec![(test, leave)], otherwise: Vec::new() };
+        let kind = ExprKind::Seq(vec![set, leave], view(self.read(holder, span), rest).into());
+        Expr { kind, ty: rest, span }
+    }
+
+    fn return_failure(&mut self, holder: Local, failed: Ty, span: Span) -> Vec<Stmt> {
+        let want = self.frame.returns.expect("in a task");
+        if self.frame.open_result {
+            let message = "a lambda with `try` needs a result type from its context";
+            self.fail("E0324", message.into(), span);
+            return Vec::new();
+        }
+        let error = self.widen(view(self.read(holder, span), failed), want);
+        if error.ty == want || want == Ty::Error {
+            return vec![Stmt::Return(error)];
+        }
+        // A union stays out of an `any`, but each of its members can go in.
+        let members = failed.members();
+        let fits = |checker: &mut Self, member| {
+            let error = checker.widen(view(checker.read(holder, span), member), want);
+            (error.ty == want).then_some(Stmt::Return(error))
+        };
+        let (&last, others) = members.split_last().expect("a type has a member");
+        let mut branches = Vec::with_capacity(others.len());
+        let mut left = fits(self, last);
+        for &member in others {
+            let test = self.holder_has(holder, member, span);
+            match fits(self, member) {
+                Some(leave) => branches.push((test, vec![leave])),
+                None => left = None,
+            }
+        }
+        let Some(left) = left else {
+            let message = format!("this `try` can return `{}`", failed.name());
+            let note = format!("the task returns `{}`, which must accept it", want.name());
+            self.report(Diagnostic::new("E0303", message, span).note(note));
+            return Vec::new();
+        };
+        vec![Stmt::If { branches, otherwise: vec![left] }]
+    }
+
+    /// At top level, `try` prints the error and ends the program.
+    fn exit_failure(&mut self, holder: Local, failed: Ty, span: Span) -> Vec<Stmt> {
+        let members = failed.members();
+        let (&last, others) = members.split_last().expect("a type has a member");
+        let mut branches = Vec::with_capacity(others.len());
+        for &member in others {
+            let test = self.holder_has(holder, member, span);
+            branches.push((test, vec![self.exit_with(holder, member, span)]));
+        }
+        let otherwise = vec![self.exit_with(holder, last, span)];
+        vec![Stmt::If { branches, otherwise }]
+    }
+
+    fn exit_with(&mut self, holder: Local, member: Ty, span: Span) -> Stmt {
+        if member == Ty::None {
+            return Stmt::Exit(Expr { kind: ExprKind::Text("none".into()), ty: Ty::Text, span });
+        }
+        let error = view(self.read(holder, span), member);
+        Stmt::Exit(self.method_call(error, None, "error_message", &[], span))
+    }
+
+    /// `x else y`. The value takes the type that the context asks for, if a
+    /// value of `x` fits it, so that `y` can be wider.
+    fn fallback(
+        &mut self,
+        value: &'a ast::Expr,
+        other: &'a ast::Expr,
+        want: Option<Ty>,
+        span: Span,
+    ) -> Expr {
+        let value = self.expr(value);
+        let Some((holder, set, failed, rest)) = self.hold_failure(value, "else") else {
+            self.expected(other, want);
+            return poisoned(span);
+        };
+        let kept = view(self.read(holder, span), rest);
+        let kept = match want.map(|want| self.widen(kept.clone(), want)) {
+            Some(wide) if Some(wide.ty) == want => wide,
+            _ => kept,
+        };
+        let ty = kept.ty;
+        let other = self.expected(other, Some(ty));
+        self.expect(&other, ty, "`else`, to match the value,");
+        let test = self.holder_has(holder, failed, span);
+        let choice = Expr { kind: ExprKind::If(test.into(), other.into(), kept.into()), ty, span };
+        Expr { kind: ExprKind::Seq(vec![set], choice.into()), ty, span }
     }
 
     /// Lowers a `match` to an `if` chain over a hidden local, which keeps the
@@ -3137,7 +3387,8 @@ impl<'a> Checker<'a> {
         self.forget_assigned(body);
         self.frame.scopes.push(HashMap::new());
         let local = self.bind(name, ty, mutable);
-        self.frame.loop_scopes.push((self.frame.scopes.len() - 1, Some(local)));
+        let held = self.frame.held.len();
+        self.frame.loop_scopes.push((self.frame.scopes.len() - 1, Some(local), held));
         let mut body = self.stmts(body);
         self.frame.loop_scopes.pop();
         self.close_scope(&mut body, Some(local));
@@ -3249,7 +3500,8 @@ impl<'a> Checker<'a> {
         };
         let mut leave = back.clone();
         leave.extend(place.finish.iter().cloned());
-        self.put_back(&mut inner, &back, &leave, true);
+        let (locals, mutable) = (&mut self.frame.locals, &mut self.frame.mutable);
+        PutBack { locals, mutable, back: &back, leave: &leave, own_loop: true }.stmts(&mut inner);
         start.append(&mut inner);
         start.extend(back);
 
@@ -3259,41 +3511,6 @@ impl<'a> Checker<'a> {
         stmts.push(Stmt::While { condition: inside, body: start });
         stmts.append(&mut place.finish);
         Stmt::Block(stmts)
-    }
-
-    /// Runs `back` before a `break` or `continue` of this loop, and `leave`
-    /// before any `return`, whose value runs first.
-    fn put_back(&mut self, stmts: &mut [Stmt], back: &[Stmt], leave: &[Stmt], own_loop: bool) {
-        for stmt in stmts {
-            match stmt {
-                Stmt::Break | Stmt::Continue if own_loop => {
-                    let mut block = back.to_vec();
-                    block.push(stmt.clone());
-                    *stmt = Stmt::Block(block);
-                }
-                Stmt::Return(value) => {
-                    let (ty, span) = (value.ty, value.span);
-                    let held = self.new_local(ty, false);
-                    let read = Expr { kind: ExprKind::Local(held), ty, span };
-                    let value = std::mem::replace(value, read.clone());
-                    let mut block = vec![Stmt::Set(held, value)];
-                    block.extend(leave.iter().cloned());
-                    block.push(Stmt::Return(read));
-                    *stmt = Stmt::Block(block);
-                }
-                Stmt::Block(body) => self.put_back(body, back, leave, own_loop),
-                Stmt::If { branches, otherwise } => {
-                    for (_, then) in branches {
-                        self.put_back(then, back, leave, own_loop);
-                    }
-                    self.put_back(otherwise, back, leave, own_loop);
-                }
-                Stmt::While { body, .. } | Stmt::For { body, .. } => {
-                    self.put_back(body, back, leave, false);
-                }
-                _ => {}
-            }
-        }
     }
 
     /// Lowers to a `while` over a hidden position. A hidden local keeps the
@@ -3357,6 +3574,7 @@ impl<'a> Checker<'a> {
 
     fn name(&mut self, name: &str, span: Span) -> Expr {
         if let Some(local) = self.lookup(name) {
+            self.mark_read(local);
             return view(self.read(local, span), self.current(local));
         }
         if let Some(value) = self.captured(name, span) {
@@ -3470,6 +3688,7 @@ impl<'a> Checker<'a> {
             Ast::Int(lexeme) => self.int(lexeme, number, span),
             Ast::Float(lexeme) => self.float(lexeme, number, span),
             Ast::Unary(op @ UnaryOp::Neg, value) => self.unary(*op, value, number, span),
+            Ast::Binary(BinaryOp::Fallback, left, right) => self.fallback(left, right, want, span),
             Ast::Binary(op, left, right) if is_math(*op) => {
                 self.binary(*op, left, right, number, span)
             }
@@ -3615,6 +3834,9 @@ impl<'a> Checker<'a> {
             Ast::None => (ExprKind::None, Ty::None),
             Ast::Name(name) => return self.name(name, span),
             Ast::Unary(op, value) => return self.unary(*op, value, None, span),
+            Ast::Binary(BinaryOp::Fallback, left, right) => {
+                return self.fallback(left, right, None, span);
+            }
             Ast::Binary(op, left, right) => return self.binary(*op, left, right, None, span),
             Ast::If { .. } | Ast::List(_) | Ast::Map(_) => return self.expected(expr, None),
             Ast::Call { callee, args } => return self.call(callee, args, None, span),
@@ -3919,7 +4141,7 @@ impl<'a> Checker<'a> {
                 let value = self.condition(value, "`not`");
                 Expr { kind: ExprKind::Not(value.into()), ty: Ty::Bool, span }
             }
-            UnaryOp::Try => self.unsupported("`try`", span),
+            UnaryOp::Try => self.try_value(value, span),
             UnaryOp::Spawn => self.unsupported("`spawn`", span),
             UnaryOp::Shared | UnaryOp::Weak => self.unsupported("`shared` and `weak`", span),
         }
@@ -3935,7 +4157,7 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> Expr {
         match op {
-            BinaryOp::Fallback => return self.unsupported("`else` on a value", span),
+            BinaryOp::Fallback => unreachable!("`lower` and `expr` take this first"),
             BinaryOp::In | BinaryOp::NotIn => return self.contains(op, left, right, span),
             BinaryOp::Range | BinaryOp::RangeInclusive => {
                 return self.unsupported("a range outside `for`", span);
@@ -4396,6 +4618,7 @@ impl<'a> Checker<'a> {
             _ => None,
         };
         if let Some(local) = name.and_then(|name| self.lookup(name)) {
+            self.mark_read(local);
             // A union narrowed to a smaller union also goes whole.
             if self.frame.locals[local] == pattern || matches!(self.current(local), Ty::Union(_)) {
                 self.forget(local);

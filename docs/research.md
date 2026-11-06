@@ -373,6 +373,18 @@ Decisions 84 to 88. Swift book and RFC 2025: **Read**, the sections cited. Java:
 
 Sources: [Swift reference, In-Out Parameters](https://github.com/swiftlang/swift-book/blob/main/TSPL.docc/ReferenceManual/Declarations.md), [RFC 2025](https://rust-lang.github.io/rfcs/2025-nested-method-calls.html), [ConcurrentModificationException](https://docs.oracle.com/javase/8/docs/api/java/util/ConcurrentModificationException.html).
 
+## Error handling
+
+Read for decisions 103 and 105. The evidence is weak on both.
+
+- **Rust `must_use`.** The reference ties the lint to an expression statement: "If the expression of an expression statement is a call expression or method call expression whose function operand is a function to which the attribute is applied, the use triggers the `unused_must_use` lint." It calls `let _ = f();` the idiomatic discard. So by its wording a never-read `let` falls to `unused_variables`, and is not a `must_use` case. The page does not state this outright, so this is an inference.
+- **Zig.** The fetched language reference says that a `void` expression is the only kind whose value can be ignored. A summary of the page gave `try` as returning the error from the current function. The Errors section was only partly read, so treat this as a pointer, not as a confirmed rule for error unions.
+- **Rust `main`.** The `Termination` page says only that failure returns `libc::EXIT_FAILURE`. It gives no stream or format, so it gives no evidence for decision 105. Printing to stderr with exit code 1 comes from the spec and ordinary command-line practice, and is not tested.
+
+No user study or agent trial has tested these. The full agent benchmark at M5 can show whether E0328 helps or gets in the way.
+
+Sources: [Rust diagnostics attributes](https://doc.rust-lang.org/reference/attributes/diagnostics.html), [Rust Termination](https://doc.rust-lang.org/std/process/trait.Termination.html), [Zig language reference](https://ziglang.org/documentation/master/).
+
 ## Open research
 
 | Topic | Needed by |

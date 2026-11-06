@@ -1,0 +1,13 @@
+type Oops
+    code: int
+
+task error_message(self: Oops) -> text
+    return "oops {self.code}"
+
+task fails() -> int or Oops
+    return 1
+
+let a = fails() else "text"
+let b = fails() else none
+print a
+print b

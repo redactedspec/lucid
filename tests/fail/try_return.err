@@ -1,0 +1,7 @@
+try_return.lcd:17:12: error E0303: this `try` can return `Oops`
+  note: the task returns `int`, which must accept it
+try_return.lcd:20:12: error E0303: this `try` can return `Oops`
+  note: the task returns `int or Other`, which must accept it
+try_return.lcd:23:11: error E0303: this `try` can return `Oops`
+  note: the task returns `none`, which must accept it
+try_return.lcd:29:24: error E0324: a lambda with `try` needs a result type from its context

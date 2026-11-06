@@ -1,0 +1,29 @@
+type Oops
+    code: int
+
+task error_message(self: Oops) -> text
+    return "oops {self.code}"
+
+type Other
+    code: int
+
+task error_message(self: Other) -> text
+    return "other {self.code}"
+
+task fails() -> int or Oops
+    return 1
+
+task none_type() -> int
+    return try fails()
+
+task other() -> int or Other
+    return try fails()
+
+task plain()
+    print try fails()
+
+task wide[T, R](x: T, f: task(T) -> R) -> R
+    return f(x)
+
+task caller()
+    print wide(1, x => try fails())

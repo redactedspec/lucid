@@ -1,0 +1,42 @@
+6
+-1
+-1
+8
+none
+saved here
+next
+[1]
+ran
+[7]
+[]
+none
+9
+bad line 3
+0
+bad line 1
+5
+Pair(name: "1", size: 2)
+["1", "2", "2", "3"]
+["failed"]
+{"ab!": 1, "2": 2}
+{"failed": 0}
+ab2
+failed
+12
+failed
+["0", "2"]
+["failed"]
+false
+false
+true
+["a!", "b", "c"]
+[["p"], ["q"]]
+["s"]
+["s2"]
+3
+2
+-1
+2
+2
+failed
+cannot read p

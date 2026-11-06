@@ -1,0 +1,22 @@
+type Oops
+    code: int
+
+task error_message(self: Oops) -> text
+    return "oops {self.code}"
+
+task pure() -> int
+    return 1
+
+task only() -> Oops
+    return Oops(code: 1)
+
+task both() -> Oops or none
+    return none
+
+task main_value(x: Oops or none) -> int?
+    let a = try pure()
+    let b = try only()
+    let c = pure() else 2
+    let d = only() else 2
+    let e = none else 2
+    return 0

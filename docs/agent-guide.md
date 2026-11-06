@@ -2,7 +2,7 @@
 
 Everything needed to write Lucid programs that run today. Lucid has no training data: do not assume a feature from Python, TypeScript, or Rust unless it is shown here.
 
-Every `lucid` block below runs. Run a file with `lucid run file.lcd`. Check one with `lucid check file.lcd`, or `lucid check --json file.lcd` for data. Exit codes: 0 success, 1 compile error, 101 trap.
+Every `lucid` block below runs. Run a file with `lucid run file.lcd`. Check one with `lucid check file.lcd`, or `lucid check --json file.lcd` for data. Exit codes: 0 success, 1 compile error or a failed top-level `try`, 101 trap.
 
 ## Layout
 
@@ -367,6 +367,48 @@ match maybe
 - A union literal needs an expected type: `let x: list[int?] = [1, none]` works, and `[1, none]` alone is an error. A `list[int]` is not a `list[int?]`.
 - Return `none` with `return none`. A bare `return` is for a task with no return type.
 
+## Errors
+
+There are no exceptions. A task that can fail returns a union with an error type, which is any type with `task error_message(self: T) -> text`.
+
+```lucid
+choice ParseError
+    Empty
+    Bad(line: int)
+
+task error_message(self: ParseError) -> text
+    return match self
+        Empty -> "empty input"
+        Bad(line) -> "bad line {line}"
+
+task parse(source: text) -> int or ParseError
+    if source is empty
+        return Empty
+    return source.len()
+
+task twice(source: text) -> int or ParseError
+    let size = try parse(source)    # returns the error to the caller
+    return size * 2
+
+task report(source: text) -> none or ParseError
+    print try twice(source)         # no `return` needed at the end
+
+print twice("") else 0              # fallback value
+try report("abc")
+report("") else none                # ignores the error, on purpose
+
+match twice("")
+    n: int -> print n
+    e: ParseError -> print e.error_message()
+```
+
+- `try` and `else` act on error types. If the union has no error type, they act on `none`, so `try` works on any `T?`, and `none` from a `none or E` task is success.
+- `try` covers the whole postfix chain: write `(try f()).len()`.
+- The return type of the task must accept what `try` returns. At top level, `try` prints the message to stderr and exits with code 1.
+- Every error must be used. A statement that drops one, or a name that holds one and is never read, is E0328.
+- `else` needs the same type on both sides, or an annotation: `let n: int? = parse(s) else none`.
+- `any Error` holds any error type: `task f() -> int or any Error`.
+
 ## Generics
 
 ```lucid
@@ -517,4 +559,6 @@ Each error has a stable code and usually says what to do.
 | E0324 | A lambda has no context for its parameter types |
 | E0325 | A lambda or nested task captures a `var`: copy it to a `let` |
 | E0326 | A value is used while something changes it: split the statement |
+| E0327 | `try` or `else` on a value that cannot fail |
+| E0328 | An error is not used: add `try`, `else`, or `match` |
 | E0901 | The feature parses, but does not run yet |

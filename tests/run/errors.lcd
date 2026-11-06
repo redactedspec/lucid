@@ -1,0 +1,229 @@
+# `try`, `else`, and the unused-error check.
+choice ParseError
+    Empty
+    Bad(line: int)
+
+task error_message(self: ParseError) -> text
+    return match self
+        Empty -> "empty input"
+        Bad(line) -> "bad line {line}"
+
+type IoError
+    path: text
+
+task error_message(self: IoError) -> text
+    return "cannot read {self.path}"
+
+task parse(source: text) -> int or ParseError
+    if source is empty
+        return Empty
+    if source == "bad"
+        return Bad(line: 3)
+    return source.len()
+
+task read(path: text) -> text or IoError
+    if path == "missing"
+        return IoError(path: path)
+    return path
+
+task load(path: text) -> int or ParseError or IoError
+    let source = try read(path)
+    let size = try parse(source)
+    return size * 2
+
+task save(path: text) -> none or IoError
+    let source = try read(path)
+    print "saved {source}"
+
+task first_even(items: list[int]) -> int?
+    for item in items
+        if item % 2 == 0
+            return item
+    return none
+
+task doubled(items: list[int]) -> int?
+    return (try first_even(items)) * 2
+
+print load("abc") else -1
+print load("missing") else -1
+print load("bad") else -1
+print doubled([1, 3, 4])
+print doubled([1, 3])
+
+# `none` is success when a union has an error type.
+try save("here")
+save("missing") else none
+print "next"
+
+# The fallback gets its type from the value, and runs only on failure.
+task noisy() -> list[int]
+    print "ran"
+    return [7]
+
+task numbers(fail: bool) -> list[int] or IoError
+    if fail
+        return IoError(path: "x")
+    return [1]
+
+print numbers(false) else noisy()
+print numbers(true) else noisy()
+print numbers(true) else []
+
+# An annotation can make the fallback wider, and `else` chains to the right.
+let wide: int? = parse("") else none
+print wide
+print parse("") else parse("") else 9
+
+# A name holds the error until something reads it.
+let result = load("bad")
+match result
+    n: int -> print n
+    e: ParseError -> print e.error_message()
+    e: IoError -> print e.error_message()
+
+# Generic bodies see an error type through a bound, and `none` without one.
+task or_zero[E: Error](value: int or E) -> int
+    return value else 0
+
+task message[E: Error](error: E) -> text
+    return error.error_message()
+
+task present[T](value: T?) -> T?
+    let found = try value
+    return found
+
+print or_zero(parse(""))
+print message(Bad(line: 1))
+print present(5)
+
+# `try` inside a larger expression leaves nothing behind.
+type Pair
+    name: text
+    size: int
+
+task text_of(n: int) -> text
+    return "{n}"
+
+task pair(path: text) -> Pair or ParseError
+    return Pair(name: text_of(1), size: try parse(path))
+
+task build(path: text) -> list[text] or ParseError
+    return [text_of(1), text_of(2), text_of(try parse(path)), text_of(3)]
+
+task table(path: text) -> map[text, int] or ParseError
+    let name = "{path}!"
+    return {name: 1, text_of(2): try parse(path)}
+
+task joined(path: text) -> text or ParseError
+    var out = "{path}"
+    out = "{out}{try parse(path)}"
+    return out
+
+task taker(take a: text, take b: text) -> text
+    return "{a}{b}"
+
+task taken(path: text) -> text or ParseError
+    let start = text_of(1)
+    return taker(start, text_of(try parse(path)))
+
+task pushed(path: text) -> list[text] or ParseError
+    var items = [text_of(0)]
+    items.push(text_of(try parse(path)))
+    var names = {text_of(0): text_of(1)}
+    names[text_of(2)] = text_of(try parse(path))
+    return items
+
+print pair("ab") else Pair(name: "none", size: 0)
+
+print build("ab") else ["failed"]
+print build("") else ["failed"]
+print table("ab") else {"failed": 0}
+print table("") else {"failed": 0}
+print joined("ab") else "failed"
+print joined("") else "failed"
+print taken("ab") else "failed"
+print taken("") else "failed"
+print pushed("ab") else ["failed"]
+print pushed("") else ["failed"]
+
+# Short circuits and branches run a `try` only on their path.
+task check(on: bool, path: text) -> bool or ParseError
+    return on and (try parse(path)) > 0
+
+print check(false, "") else false
+print check(true, "") else false
+print check(true, "a") else false
+
+# `try` in a `for change` body puts the element back.
+task bump(change items: list[text], limit: int) -> none or ParseError
+    var n = 0
+    for change item in items
+        n = n + 1
+        if n == limit
+            item = text_of(try parse(""))
+        item = "{item}!"
+
+var words = ["a", "b", "c"]
+bump(change words, 2) else none
+print words
+
+type Box
+    items: list[list[text]]
+
+task bump_deep(change box: Box) -> none or ParseError
+    for change item in box.items[0]
+        item = "{item}{try parse("")}"
+
+var box = Box(items: [["p"], ["q"]])
+bump_deep(change box) else none
+print box.items
+
+# A `change` path argument is read after the `try`, and is intact on failure.
+task add_to(change item: text, more: int)
+    item = "{item}{more}"
+
+task fill(change items: list[text], path: text) -> none or ParseError
+    add_to(change items[0], try parse(path))
+
+var slots = ["s"]
+fill(change slots, "") else none
+print slots
+fill(change slots, "ab") else none
+print slots
+
+# A loop that frees what `try` holds each pass.
+task grow(rounds: int) -> list[int] or ParseError
+    var items: list[int] = []
+    for i in 0..rounds
+        items = try appended(items, i)
+    return items
+
+task appended(take items: list[int], i: int) -> list[int] or ParseError
+    var out = items
+    out.push(i)
+    return out
+
+print (grow(3) else []).len()
+
+# Lambdas return from themselves.
+let safe: task(text) -> int or ParseError = path => (try parse(path)) + 1
+print safe("a") else -1
+print safe("") else -1
+
+# `any Error` holds any error type.
+task boxed(n: int) -> int or any Error
+    if n == 0
+        return Bad(line: n)
+    if n == 1
+        return IoError(path: "p")
+    return n
+
+task boxed_again(n: int) -> text or any Error
+    return "{try boxed(n)}"
+
+print boxed(2) else -1
+print boxed_again(2) else "failed"
+print boxed_again(1) else "failed"
+match boxed(1)
+    n: int -> print n
+    e: any Error -> print e.error_message()

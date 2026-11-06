@@ -88,6 +88,7 @@ struct Runtime {
     print_f32: FuncId,
     print_bool: FuncId,
     trap: FuncId,
+    exit: FuncId,
     retain: FuncId,
     release: FuncId,
     text_new: FuncId,
@@ -166,6 +167,7 @@ fn compile(
     builder.symbol("lucid_print_f32", lucid_rt::lucid_print_f32 as *const u8);
     builder.symbol("lucid_print_bool", lucid_rt::lucid_print_bool as *const u8);
     builder.symbol("lucid_trap", lucid_rt::lucid_trap as *const u8);
+    builder.symbol("lucid_exit", lucid_rt::lucid_exit as *const u8);
     builder.symbol("lucid_retain", lucid_rt::lucid_retain as *const u8);
     builder.symbol("lucid_release", lucid_rt::lucid_release as *const u8);
     builder.symbol("lucid_text_new", lucid_rt::lucid_text_new as *const u8);
@@ -233,6 +235,7 @@ fn compile(
         print_f32: import("lucid_print_f32", &small_float, &[]),
         print_bool: import("lucid_print_bool", &byte, &[]),
         trap: import("lucid_trap", &text, &[]),
+        exit: import("lucid_exit", &value, &[]),
         retain: import("lucid_retain", &value, &[]),
         release: import("lucid_release", &value, &[]),
         text_new: import("lucid_text_new", &text, &value),
@@ -654,6 +657,12 @@ impl Lower<'_, '_> {
             Stmt::Return(value) => {
                 let value = self.expr(value);
                 self.leave(value);
+                return true;
+            }
+            Stmt::Exit(value) => {
+                let value = self.expr(value);
+                self.call(self.runtime.exit, &[value]);
+                self.body.ins().trap(UNREACHABLE);
                 return true;
             }
             Stmt::Break => {

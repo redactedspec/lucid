@@ -1,0 +1,2 @@
+else_type.lcd:10:22: error E0303: `else`, to match the value, needs `int`, found `text`
+else_type.lcd:11:22: error E0303: `else`, to match the value, needs `int`, found `none`

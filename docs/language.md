@@ -209,7 +209,7 @@ A `for` over a range reads its bounds once. The loop name cannot be assigned, an
 
 ## Tasks
 
-A `task` is a function. Parameters always have types. With no `->`, a task returns `none`. Return types are never inferred, so a signature is always complete. A task with a return type must return on every path. `return` is only allowed in a task.
+A `task` is a function. Parameters always have types. With no `->`, a task returns `none`. Return types are never inferred, so a signature is always complete. A task with a return type must return on every path, except that a task that gives only `none` or error types, such as `-> none or FileError`, returns `none` at its end. `return` is only allowed in a task.
 
 Top-level tasks may be used before their line. A parameter cannot be assigned.
 
@@ -460,10 +460,12 @@ match load("app.toml")
     e: FileError -> print e.error_message()
 ```
 
-- `try x` and `x else y` act on the error types in the union of `x`. If the union has no error type, they act on `none`. So `none` from a `none or FileError` task counts as success.
-- `try x` unwraps the value, or returns the error from the current task. The return type must accept it. At top level of an entry file, it prints the error and exits with code 1.
-- `x else y` gives `y` in place of the error.
-- An unused error is a compile error.
+- `try x` and `x else y` act on the error types in the union of `x`. If the union has no error type, they act on `none`. So `none` from a `none or FileError` task counts as success. A value with nothing to act on, or with nothing left after it, is error E0327.
+- `try x` unwraps the value, or returns the error from the current task or lambda. The return type must accept it, and a lambda must get its result type from its context. At top level of an entry file, it prints the error's `error_message()` to stderr and exits with code 1. For `none` it prints `none`.
+- `x else y` gives `y` in place of the error, and runs `y` only then. `y` must have the type of what is left of `x`, or the type of the context if that accepts it: `let n: int? = parse(s) else none`.
+- An unused error is error E0328: a statement that drops a value with an error type in it, or a `let` or `var` name that holds one and is never read. To ignore an error, say so: `save() else none`.
+
+`Error` is a trait that every file has, so its name is taken. Use it as a bound, or as `any Error` for a task that can return any error type.
 
 A **trap** is an unrecoverable bug: out-of-bounds index or slice, a missing map key, overflow, a zero divisor, a failed conversion, stack overflow, a reached `...`, failed `expect`, a `shared` access conflict, running out of memory, or a failed write to stdout. A trap prints its source position and exits with code 101, except that running out of memory and a failed write to stdout have no position. A stack trace is planned for M5. Traps cannot be caught.
 
@@ -519,7 +521,7 @@ for pet in pets
     print pet.describe()
 ```
 
-`any` names one trait, of your own or `Show`. The other built-in traits ask for two values of one type, so `any Order` and the like are errors. A value goes in wherever `any Describe` is expected, if its type has `Describe`. A union counts as one type here: it needs a task of its own, or `any Show`, which every type has. An expected union with an `any` member takes a single value, and never a union. As with unions, this needs an expected type, and there is no conversion between collections or between two `any` types.
+`any` names one trait, of your own, or `Show`, or `Error`. The other built-in traits ask for two values of one type, so `any Order` and the like are errors. A value goes in wherever `any Describe` is expected, if its type has `Describe`. A union counts as one type here: it needs a task of its own, or `any Show`, which every type has. An expected union with an `any` member takes a single value, and never a union. As with unions, this needs an expected type, and there is no conversion between collections or between two `any` types.
 
 An `any Describe` has only the tasks of `Describe`, and it meets a `Describe` bound. It shows as what it holds, and text in it has no quotes unless it is inside another value, which also holds for an `any` in a union. `==` is true if both hold equal values of one type. It has no `Order` or `Hash`. No test gets the value back out: `is` and typed arms do not work on it. Use a union if the code must know the type.
 

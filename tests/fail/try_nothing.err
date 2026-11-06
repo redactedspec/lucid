@@ -1,0 +1,10 @@
+try_nothing.lcd:17:17: error E0327: `try` has nothing to act on in `int`
+  note: it needs a union of an error type or `none` and another type
+try_nothing.lcd:18:17: error E0327: `try` has nothing to act on in `Oops`
+  note: it needs a union of an error type or `none` and another type
+try_nothing.lcd:19:13: error E0327: `else` has nothing to act on in `int`
+  note: it needs a union of an error type or `none` and another type
+try_nothing.lcd:20:13: error E0327: `else` has nothing to act on in `Oops`
+  note: it needs a union of an error type or `none` and another type
+try_nothing.lcd:21:13: error E0327: `else` has nothing to act on in `none`
+  note: it needs a union of an error type or `none` and another type

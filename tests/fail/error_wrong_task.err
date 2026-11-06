@@ -1,0 +1,2 @@
+error_wrong_task.lcd:10:9: error E0327: `else` has nothing to act on in `int or Oops`
+  note: it needs a union of an error type or `none` and another type

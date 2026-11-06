@@ -1,0 +1,23 @@
+type Oops
+    code: int
+
+task error_message(self: Oops) -> text
+    return "oops {self.code}"
+
+type Other
+    code: int
+
+task error_message(self: Other) -> text
+    return "other {self.code}"
+
+task fails(n: int) -> int or Oops or Other
+    if n == 0
+        return Oops(code: 1)
+    if n == 1
+        return Other(code: 2)
+    return n
+
+print try fails(5)
+for n in [3, 2, 1, 0]
+    print try fails(n)
+print "never"

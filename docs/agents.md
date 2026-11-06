@@ -108,9 +108,11 @@ The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and 
 | E0321 | Wrong number of type arguments |
 | E0322 | Type form where a value belongs, or a value where a type belongs |
 | E0323 | Task named after a derived task or operator has the wrong form |
-| E0324 | Lambda has no task type to take from its context |
+| E0324 | Lambda has no task type to take from its context, or has `try` and no result type from it |
 | E0325 | Lambda or nested task captures a name that can change |
 | E0326 | A value is used while something changes it: two `change` arguments overlap, a statement uses what it changes, a `for` body changes what it visits, or a `for change` body uses it |
+| E0327 | `try` or `else` on a value with no error type or `none` to act on, or with nothing left after it |
+| E0328 | An error that nothing uses: a statement drops it, or a name holds it and is never read |
 | E0901 | Parses, but cannot run at this milestone |
 | E0902 | Task frame is too large for the stack check: over 512 KiB, or half the stack for top-level code |
 | E0903 | Too many generic instances: over 20,000, or a type argument of over 256 parts |

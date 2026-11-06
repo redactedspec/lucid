@@ -1,0 +1,30 @@
+type Oops
+    code: int
+
+task error_message(self: Oops) -> text
+    return "oops {self.code}"
+
+task fails() -> int or Oops
+    return 1
+
+task saves() -> none or Oops
+    return none
+
+task only() -> Oops
+    return Oops(code: 1)
+
+task inner()
+    let kept = saves()
+    if true
+        var other = fails()
+    let read = fails()
+    print read
+
+fails()
+saves()
+only()
+saves() else fails()
+let top = saves()
+match fails()
+    n: int -> print n
+    e: Oops -> saves()

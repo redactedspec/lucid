@@ -26,6 +26,12 @@ pub fn run(program: &mut Program, moves: bool) {
         })
         .collect();
     for task in program.tasks.iter_mut().chain([&mut program.main]) {
+        let mut exits = Exits::default();
+        exits.stmts(&mut task.body);
+        if exits.found {
+            let (locals, made) = (&mut task.locals, Vec::new());
+            Settle { locals, takes: &takes, made }.stmts(&mut task.body);
+        }
         if moves {
             borrow_locals(task);
         }
@@ -182,6 +188,112 @@ impl Visit for Sites<'_> {
                 self.add("copy", value);
             }
             self.stmt_parts(stmt);
+        }
+    }
+}
+
+/// Finds a `return` that a `try` left inside an expression.
+#[derive(Default)]
+struct Exits {
+    in_value: bool,
+    found: bool,
+}
+
+impl Exits {
+    fn in_value(value: &mut Expr) -> bool {
+        let mut exits = Exits::default();
+        exits.expr(value);
+        exits.found
+    }
+}
+
+impl Visit for Exits {
+    fn expr(&mut self, value: &mut Expr) {
+        let outer = std::mem::replace(&mut self.in_value, true);
+        self.expr_parts(value);
+        self.in_value = outer;
+    }
+
+    fn stmts(&mut self, stmts: &mut [Stmt]) {
+        for stmt in stmts {
+            self.found |= self.in_value && matches!(stmt, Stmt::Return(_));
+            self.stmt_parts(stmt);
+        }
+    }
+}
+
+/// A value that a record, a list, or a `take` parameter keeps has its count
+/// outside any local until the keeper is done. So if one of those values can
+/// return from the task, it and the ones before it run first, in order, each
+/// into a local of its own, which the task's exit releases. If the statement
+/// ends normally, it clears them.
+struct Settle<'a> {
+    locals: &'a mut Vec<Ty>,
+    takes: &'a [Vec<Local>],
+    /// The counted locals made so far for the open statements.
+    made: Vec<Local>,
+}
+
+impl Settle<'_> {
+    fn settle(&mut self, mut values: Vec<&mut Expr>) -> Vec<Stmt> {
+        let last = values.iter_mut().rposition(|value| Exits::in_value(value));
+        let count = last.map_or(0, |last| last + 1);
+        let mut setup = Vec::with_capacity(count);
+        for value in values.into_iter().take(count) {
+            // A slot number holds no count and runs nothing, and must stay a number.
+            if matches!(value.kind, ExprKind::Int(_)) {
+                continue;
+            }
+            let (ty, span) = (value.ty, value.span);
+            self.locals.push(ty);
+            let local = self.locals.len() - 1;
+            if ty.is_counted() {
+                self.made.push(local);
+            }
+            let read = Expr { kind: ExprKind::Local(local), ty, span };
+            setup.push(Stmt::Set(local, std::mem::replace(value, read)));
+        }
+        setup
+    }
+}
+
+impl Visit for Settle<'_> {
+    fn expr(&mut self, value: &mut Expr) {
+        self.expr_parts(value);
+        let parts: Vec<&mut Expr> = match &mut value.kind {
+            ExprKind::Call(task, _, args) if !self.takes[*task].is_empty() => {
+                args.iter_mut().filter(|arg| !matches!(arg.kind, ExprKind::Change(_))).collect()
+            }
+            ExprKind::ListOf(items) | ExprKind::Join(items) => items.iter_mut().collect(),
+            ExprKind::MapOf(entries, _) => {
+                entries.iter_mut().flat_map(|(key, value)| [key, value]).collect()
+            }
+            ExprKind::New { fields, .. } | ExprKind::Closure { fields, .. } => {
+                fields.iter_mut().map(|(_, value)| value).collect()
+            }
+            _ => return,
+        };
+        let setup = self.settle(parts);
+        if !setup.is_empty() {
+            let (ty, span) = (value.ty, value.span);
+            let done = std::mem::replace(value, Expr { kind: ExprKind::None, ty, span });
+            value.kind = ExprKind::Seq(setup, done.into());
+        }
+    }
+
+    fn stmts(&mut self, stmts: &mut [Stmt]) {
+        for stmt in stmts {
+            let start = self.made.len();
+            self.stmt_parts(stmt);
+            let mut setup = match stmt {
+                Stmt::Update { args, .. } => self.settle(args.iter_mut().collect()),
+                _ => Vec::new(),
+            };
+            if !setup.is_empty() || self.made.len() > start {
+                setup.push(std::mem::replace(stmt, Stmt::Unreachable));
+                setup.extend(self.made.drain(start..).map(Stmt::Clear));
+                *stmt = Stmt::Block(setup);
+            }
         }
     }
 }
@@ -459,6 +571,10 @@ impl Owners<'_> {
             Stmt::Return(value) => {
                 self.live.clear();
                 self.give_one(value);
+            }
+            Stmt::Exit(value) => {
+                self.live.clear();
+                self.borrow_one(value);
             }
             Stmt::Print(value) | Stmt::Expr(value) => self.borrow_one(value),
             Stmt::Update { local, op, args, .. } => {

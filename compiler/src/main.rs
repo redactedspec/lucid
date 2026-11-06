@@ -18,6 +18,11 @@ use std::process::ExitCode;
 
 const USAGE: &str = "usage: lucid run FILE\n       lucid check [--json] [--costs] FILE";
 
+/// What every file sees. The checker treats these like the file's own.
+const PRELUDE: &str = "trait Error
+    task error_message(self) -> text
+";
+
 /// Debug builds use large stack frames, and `MAX_DEPTH` levels of nesting must fit.
 const STACK_BYTES: usize = 256 * 1024 * 1024;
 
@@ -111,7 +116,9 @@ fn load(path: &str) -> (String, Option<ast::File>, Vec<Diagnostic>) {
         }
     };
     let (tokens, mut diags) = lexer::lex(&src);
-    let (file, parse_diags) = parser::parse(tokens);
+    let (mut file, parse_diags) = parser::parse(tokens);
     diag::add_unless_same_line(&src, &mut diags, parse_diags);
+    let (prelude, _) = parser::parse(lexer::lex(PRELUDE).0);
+    file.stmts.splice(0..0, prelude.stmts);
     (src, Some(file), diags)
 }

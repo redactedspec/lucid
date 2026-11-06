@@ -1,0 +1,15 @@
+unused_error.lcd:17:9: error E0328: this `Oops?` is an error that nothing uses
+  note: use `try`, `else`, or `match`
+unused_error.lcd:19:13: error E0328: this `int or Oops` is an error that nothing uses
+  note: use `try`, `else`, or `match`
+unused_error.lcd:23:1: error E0328: this `int or Oops` is an error that nothing uses
+  note: use `try`, `else`, or `match`
+unused_error.lcd:24:1: error E0328: this `Oops?` is an error that nothing uses
+  note: use `try`, `else`, or `match`
+unused_error.lcd:25:1: error E0328: this `Oops` is an error that nothing uses
+  note: use `try`, `else`, or `match`
+unused_error.lcd:26:14: error E0303: `else`, to match the value, needs `none`, found `int or Oops`
+unused_error.lcd:27:5: error E0328: this `Oops?` is an error that nothing uses
+  note: use `try`, `else`, or `match`
+unused_error.lcd:30:16: error E0328: this `Oops?` is an error that nothing uses
+  note: use `try`, `else`, or `match`

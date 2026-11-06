@@ -1,0 +1,104 @@
+# Cases from review of `try`: field writes, `any Error`, and uses of a name.
+type A
+    code: int
+
+task error_message(self: A) -> text
+    return "a {self.code}"
+
+type B
+    code: int
+
+task error_message(self: B) -> text
+    return "b {self.code}"
+
+task fails(n: int) -> int or A
+    if n == 0
+        return A(code: 1)
+    return n
+
+type Rec
+    name: text
+    size: int
+
+# A field write keeps its slot number.
+task write_field(n: int) -> Rec or A
+    var r = Rec(name: "x", size: 1)
+    r.size = try fails(n)
+    r.size += try fails(n)
+    return r
+
+task grow(change self: Rec, n: int) -> none or A
+    self.size = try fails(n)
+
+print write_field(2) else Rec(name: "failed", size: 0)
+print write_field(0) else Rec(name: "failed", size: 0)
+var rec = Rec(name: "y", size: 1)
+rec.grow(5) else none
+print rec.size
+
+# Each member of the failure can go in an `any Error`.
+task two(n: int) -> int or A or B
+    if n == 0
+        return A(code: 0)
+    if n == 1
+        return B(code: 1)
+    return n
+
+task boxed(n: int) -> int or any Error
+    return try two(n)
+
+print boxed(2) else -1
+match boxed(0)
+    n: int -> print n
+    e: any Error -> print e.error_message()
+match boxed(1)
+    n: int -> print n
+    e: any Error -> print e.error_message()
+
+# A `change` argument, a capture, and a task's read of a literal all use a name.
+task fix(change value: int or A)
+    value = 5
+
+var fixed = fails(0)
+fix(change fixed)
+
+task captures() -> task() -> int
+    let held = fails(3)
+    let read: task() -> int = () => held else 0
+    return read
+
+print captures()()
+
+let limit: int or A = 1
+
+task reads_limit() -> int
+    return limit else 0
+
+print reads_limit()
+
+# `break` lets go of what a `try` holds, and later writes do not copy.
+task early(rows: list[int]) -> int or A
+    var count = 0
+    for row in rows
+        if (try fails(row)) > 2
+            break
+        count += 1
+    return count
+
+print early([1, 2, 3, 4]) else -1
+print early([1, 0]) else -1
+
+# Settled parts are cleared in a loop.
+type Row
+    items: list[int]
+    size: int
+
+task rows(n: int) -> int or A
+    var total = 0
+    for i in 0..n
+        var row = Row(items: [i], size: try fails(1))
+        row.items.push(1)
+        total += row.items.len()
+    return total
+
+print rows(3) else -1

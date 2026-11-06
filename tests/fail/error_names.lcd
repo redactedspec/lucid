@@ -1,0 +1,2 @@
+trait Error
+    task other(self) -> int

@@ -1441,6 +1441,22 @@ pub unsafe extern "C" fn lucid_trap(message: *const u8, len: usize) -> ! {
     trap(unsafe { std::slice::from_raw_parts(message, len) })
 }
 
+/// Prints a text to stderr, and ends the program with exit code 1. This is
+/// `try` at top level.
+///
+/// # Safety
+///
+/// `text` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_exit(text: *const Text) -> ! {
+    // SAFETY: the caller guarantees a live text.
+    let bytes = unsafe { bytes(text) };
+    // As in `trap`: the exit code still reports the failure.
+    let mut stderr = std::io::stderr().lock();
+    let _ = stderr.write_all(bytes).and_then(|()| stderr.write_all(b"\n"));
+    std::process::exit(1)
+}
+
 /// Ends the program with the exit code that language.md gives to traps.
 fn trap(message: &[u8]) -> ! {
     // Must not panic, since a caller is an `extern "C"` task. The exit code still reports the trap.
