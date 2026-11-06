@@ -105,6 +105,8 @@ Add new entries at the end of the list. To reverse a decision, add a new entry t
 | 97 | 2026-11-06 | A text finds out whether it is all ASCII on first need, and keeps that in its header. Text slices and `.len()` are then O(1) to locate on ASCII text | Decision 36 made positions character positions, so each slice scanned from the start, and a parser that slices was quadratic: `json` did not finish in 280 s. The flag fits in the header's padding. Swift keeps a similar flag, from memory, not read for this entry. Text with other characters still scans. Measured: `json` 0.37 s. |
 | 98 | 2026-11-06 | A local that only ever holds a path into a read parameter holds no count | Racordon et al. put most of the loss in Swiftlet on "unnecessary reference counter checks", and `research.md` already points this item at them. A read parameter is the one value that needs no proof about moves, since its caller holds it for the call. So this needs one fixed-point walk, and no alias analysis. Measured: `trees` 2.2 s to 1.9 s, `json` 0.37 s to 0.29 s. Paths into a `let` of the same task could join later, once moves know about them. |
 | 99 | 2026-11-06 | A `list[byte]` has slots of one byte. Every other list keeps slots of 8 bytes. Supersedes decision 42 | Measured as decision 42 asked: `.bytes()` was the only way to read text by position, and 8 bytes per byte put `json` at 1.79x of Rust's memory, against a limit of 1.2x. Bytes are the one element type where the waste is 8x and which files and sockets will use at M5. Other small types can follow if a program needs them. |
+| 100 | 2026-11-06 | Reuse analysis is not built | The roadmap builds it only if measurements justify it, and they do not. `trees`, the program it exists for, runs at 0.62x of Rust and 0.92x of its memory. It stays possible, since nothing in MIR rules it out. |
+| 101 | 2026-11-06 | M4 ends on the suite as measured: five of five on memory, four of five on time, and `nbody` at 3.38x. Keep the model, and add no LLVM backend now. The 2x target stays. Storing plain types inline leaves M4, and has no milestone | The roadmap asks for this decision when the suite misses. Evidence is in `research.md`. Vectorizing is worth 1.5x on `nbody`, and Rust itself loses 1.34x to boxing, so neither the model nor layout explains the gap alone. A second backend is a large cost for one tight float loop among five programs, and M5 needs `lucid build` next. As in decision 29, this accepts one exit, not a lower target. The owner can overrule it. |
 
 ## Open questions
 
@@ -113,7 +115,7 @@ Decide each one by the milestone shown.
 | Question | Default if undecided | Decide by |
 | --- | --- | --- |
 | Can a task read a top-level `let` that is not a literal? It needs a defined initialization order. | No: keep decision 27. | M5 |
-| Add an LLVM backend for release builds? | Only if benchmarks demand it. | M4 |
+| Add an LLVM backend for release builds? | No, by decision 101. Look again if real programs show tight numeric loops as a problem. | M8 |
 | Literal types such as `"open" or "closed"` | Leave out of version 1. | M5 |
 | Bit operations, as operators or as tasks such as `x.shift_left(1)`? Hashing and byte parsing need them. | Tasks, by rule 7 in `agents.md`. | M5 |
 | License | Choose before first public release. | M5 |

@@ -55,17 +55,19 @@ Build a thin end-to-end path first. Depth comes later.
 
 **Result:** `examples/hello.lcd` runs, and the golden tests pass with no leaks. The trial passed 10 of 10 tasks on the first attempt, so it had no failures to record. Its limits are in `docs/research.md`.
 
-## M4: Ownership performance
+## M4: Ownership performance (done)
 
 - [x] Last-use moves, and block-level release of locals
 - [x] Static text literals, with no allocation
 - [x] Borrow elision of count operations
-- [ ] Reuse analysis, if measurements justify it
+- [x] Reuse analysis, if measurements justify it: they did not, see decision 100
 - [x] Shifts for division and remainder by a constant power of two
 - [x] `lucid check --costs`
-- [ ] Benchmark suite: n-body, binary trees, JSON parse, hash map, string building
+- [x] Benchmark suite: n-body, binary trees, JSON parse, hash map, string building
 
 **Exit:** benchmark suite meets the speed and memory targets in `vision.md`. If not, decide in `decisions.md`: change the model or add an LLVM backend.
+
+**Result:** all five programs meet the memory target, and four meet the speed target. `nbody` runs at 3.38x. Decision 101 keeps the model, adds no LLVM backend for now, and keeps the target. Figures are in `docs/research.md`.
 
 ## M5: A usable language
 
@@ -119,4 +121,4 @@ Start only after the version 1.0 stability promise. Port one stage at a time. Th
 
 ## Later, not planned
 
-Native backend in Lucid, LLVM release backend, literal types, compile-time evaluation.
+Native backend in Lucid, LLVM release backend, plain types stored inline, literal types, compile-time evaluation.

@@ -28,7 +28,7 @@ Logical copies are almost never real copies.
 | Write to a shared buffer | Copy once (copy-on-write), then in place. |
 | Small `Copy` value | Plain machine copy. |
 
-Planned for M4: types made of plain fields are stored inline on the stack or inside their parent, and only `list`, `map`, `set`, `text`, `any`, `shared`, and recursive data use the heap. As of M3 every `type` and `choice` value is a counted heap record, with copy-on-write like a list (decision 49). A union value is one too, so each `int?` that holds a value costs an allocation (decision 57).
+Every `type` and `choice` value is a counted heap record, with copy-on-write like a list (decision 49), except a variant with no fields, which is static data. A union value is a record too, so each `int?` that holds a value costs an allocation (decision 57). Storing plain types inline has no milestone yet (decision 101).
 
 ### Example
 
@@ -69,7 +69,7 @@ The checks are stricter than the law, for two reasons. A counted value that a st
 `change` and `take` always appear in signatures. Signatures are the contract, and agents rely on them. Inference happens inside bodies:
 
 - Tasks in the same package: the compiler may pass ownership when that removes a count operation.
-- Lambdas: as of M3 every lambda and nested task holds a count on each capture, like a field of a record. Non-escaping lambdas borrowing captures is planned for M4.
+- Lambdas: every lambda and nested task holds a count on each capture, like a field of a record. Non-escaping lambdas borrowing captures is planned, with no milestone yet.
 
 ## Shared references
 
@@ -92,8 +92,8 @@ Values are destroyed deterministically when their last owner ends. Destroying ne
 
 - Counts are non-atomic by default.
 - A value crossing a task boundary is either moved, or marked thread-shared so its counts turn atomic. Lean 4 uses this technique.
-- Reuse analysis recycles a dying allocation of matching size for a new value.
-- Borrow inference removes count pairs around read-only uses.
+- Reuse analysis could recycle a dying allocation of matching size for a new value. It is not built, see decision 100.
+- Borrow elision removes count pairs around read-only uses of a read parameter.
 
 ## Limits
 
@@ -113,12 +113,12 @@ This is the hardest part of the compiler, so it comes with a staged plan:
 1. **M3: naive.** Count every use. Correct and slow. Each new value goes to a hidden local, which holds it until overwritten or until the task returns. A `for` over text or a collection holds one count on it in another hidden local, so nothing in the body can free it. A store then counts again, so a value is rarely unique yet, and copy-on-write copies more than it must. `var x = [1]` holds two counts, so the first write copies once. After that `x` holds its own copy, and writes happen in place. A write through a path such as `grid[i][j] = 1` takes `grid[i]` out of its slot, writes, and puts it back, so it copies nothing unless `grid[i]` is shared. A `for` lets go of its count when the loop ends. A write to a field works like a write to a list element. A `change` argument that is a path takes its value out of its slot for the call, in the same way, and any other value of that call goes to a hidden local first. `for change` takes the list out of its place for the whole loop, and each element out of the list while the body runs, so a shared list copies once, and each write is then in place. A `take` parameter is a local that takes its own count on entry, so a write to it copies once. A `match` holds one count on its subject in a hidden local until it ends. A union holds one count on what it contains. `.pop` reads the element first, so its value outlives the list's count. `.get` keeps its receiver and key in hidden locals only if they are not plain reads, so `x.get(i)` and `g[0].get(i)` add no count to the list. With a computed path such as `g[i + 1].get(0)`, the hidden local holds a count until it is overwritten, so the next write to that element copies it once.
 2. **M4: last-use moves.** Done. A value goes where it is kept without a count operation if nothing reads it again, and each count is explicit in MIR. See below.
 3. **M4: borrow elision.** Done, for locals that read a read parameter. See below.
-4. **M4: reuse analysis.** Only after measurements justify it.
+4. **M4: reuse analysis.** Not built, since measurements did not justify it (decision 100).
 
 Stage 2 runs on MIR after monomorphization. A local moves into a place that keeps it if it is not a parameter, nothing can read it after the statement, and the statement reads it once. The last rule is what keeps a borrow valid: in `f(x.name, take x)` the first argument borrows from `x`, so `x` is retained, not moved. A `take` argument is such a place, so a `take` parameter of a top-level task arrives with a count. A task that runs through a task value, and a written `equal`, which the runtime calls, keep the borrowed form with a retain on entry, since those callers cannot pass a count. Statements that one expression holds move nothing.
 
 Stage 3 runs first. A local needs no count if every value it ever holds is a path into a read parameter, or into another such local, and nothing changes it. So `let left = pair.left`, a `for` over a parameter, and a `match` on one and its bound names add no count operation. The caller holds a read parameter and keeps it fixed for the whole call, so such a path stays valid. Keeping one of these values anywhere still adds a count there. A local of the top level or one that holds a new value keeps its count, for now. When `shared` arrives, a value read out of a cell must hold a count for as long as a call borrows it, since a write through another copy of the cell could otherwise free it.
 
-If benchmarks miss the target in `vision.md` after these stages, revisit the model in `decisions.md`.
+The benchmarks met the targets in `vision.md` on four of five programs, and decision 101 records why the model stays for the fifth.
 
 Correctness never depends on an optimization pass. Removing all of them must give the same output, only slower. The test suite must run in that mode.

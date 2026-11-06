@@ -12,8 +12,8 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 
 | Decision | Verdict | Level | Action |
 | --- | --- | --- | --- |
-| Reference counting with reuse | Supported, but in functional languages only | Read | Benchmark at M4 |
-| Mutable value semantics | Supported as research, little production proof. Lucid's form runs through M3 | Read in part | Measure at M4 |
+| Reference counting with reuse | Supported. Lucid passes without reuse on allocation-heavy `trees` at 0.62x of Rust | Read, own measurement | Reuse not built, decision 100 |
+| Mutable value semantics | Supported as research, and by Lucid's M4 suite on four of five programs. Tight float loops miss | Read in part, own measurement | Keep, decision 101 |
 | Exclusivity checks | Supported, static checks alone are not enough | Snippet | Rule added: no top-level `var` in tasks |
 | Cranelift for speed | Partly supported. 2x target is at risk | Read | Keep LLVM option open |
 | Overflow traps in release | Measured: 1.17x to 1.78x in Lucid, 1.56x to 1.92x in Rust | Read | Keep. Revisit with M4 benchmarks |
@@ -28,7 +28,7 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | Dot calls by receiver type, bounds required for every use | Judgment call from Rust and Python practice | None | Trial met no failure, and repair is untested. Agent benchmark at M5 |
 | Union narrowing by control flow | Follows TypeScript and Kotlin, tightened for memory safety | Read | Trial met no failure, and repair is untested. Agent benchmark at M5 |
 | Text slices, no character type | Judgment call from existing practice | None | Trial met no failure, and repair is untested. Agent benchmark at M5 |
-| Compact ordered map, SipHash with random keys | Supported by Python and Rust practice | Snippet | Benchmark at M4 |
+| Compact ordered map, SipHash with random keys | Supported by Python and Rust practice. `hashmap` is 1.74x of Rust with the same hash | Snippet, own measurement | Keep |
 | A written `equal` removes derived `Hash` | Python and Clippy both guard this rule | Snippet | None |
 | `any` by tag tests over the whole program, not a vtable | Differs from Rust and Swift, and no benchmark yet | Snippet | Measure at M4 |
 | `change` as copy-in copy-out, with static exclusivity | Follows Swift `inout`, and stricter than Rust or Swift inside a statement | Read | Trial met no failure, and repair is untested. Agent benchmark at M5 |
@@ -126,19 +126,40 @@ Level: **Read** for Perceus, in the entry above. Decision 92 takes one idea from
 
 ### M4 benchmarks
 
-Level: **Read** (own measurement), one run of each program on 2026-11-06, before any M4 work. Lucid includes JIT compile time.
+Level: **Read** (own measurement). `sh benchmarks/run.sh`, 2026-11-06, on the development machine: 15 paired rounds. Lucid includes JIT compile time, about 7 ms. Rust is `rustc -O`. Lucid memory has the peak of an empty program taken off, since `lucid run` holds the compiler, so it stands in for what `lucid build` will use. Targets from `vision.md`: 2x time, 1.2x memory.
 
-| Program | Rust ms | Lucid ms | Lucid / Rust |
-| --- | --- | --- | --- |
-| `nbody`, 2 million steps | 171 | 3558 | 20.8 |
-| `trees`, depth 18 | 3097 | 5291 | 1.71 |
-| `hashmap`, 1 million keys | 452 | 688 | 1.52 |
-| `strings`, 300,000 appends | 28 | 45005 | 1607 |
-| `json`, 5 parses of 2.4 MB | 196 | over 280000 | over 1400 |
+| Program | Rust best ms | Lucid best ms | Time, best | Time, median | Memory |
+| --- | --- | --- | --- | --- | --- |
+| `nbody`, 2 million steps | 67 | 228 | 3.38 | 3.64 | 0.36 |
+| `trees`, depth 18 | 2954 | 1828 | 0.62 | 0.66 | 0.92 |
+| `json`, 5 parses of 2.4 MB | 153 | 253 | 1.65 | 1.49 | 1.15 |
+| `hashmap`, 1 million keys | 297 | 517 | 1.74 | 1.65 | 0.90 |
+| `strings`, 5 million appends | 120 | 92 | 0.76 | 0.79 | 0.98 |
 
-Limits: one run each, so these show size and not detail.
+Compared with one run of each before M4: `nbody` 3558 ms, `trees` 5291 ms, `hashmap` 688 ms, `strings` 45 s at 300,000 appends, and `json` over 280 s. The M2 programs moved little, as they hold no counted values: `fib` 2.01, `sum` 1.66, and `collatz` 2.82, down from 4.74, or 1.46 of Rust with overflow checks.
 
-Last-use moves alone left `trees`, `hashmap`, and `nbody` within noise of these figures. They remove count pairs, and the time goes elsewhere. `strings` and `json` are quadratic: each append copies all the text, and each slice scans from the start.
+Limits: five programs that I wrote, on one machine, with spread between runs of about 10% to 20%. `trees` and `strings` beat Rust, and I did not find out why in detail, so do not read them as general wins. Both are programs that M4 worked on. `trees` has no leaf allocation in either language.
+
+What moved the numbers, in order of size:
+
+- **`strings`, `json`:** in-place append and the ASCII flag took these from quadratic to linear. Moves are what make the append safe.
+- **`nbody`:** three steps of about 2x each. Inline counts and writes went from 3.3 s to 0.9 s, moving counts through slots went to 0.47 s, and computing a value once went to 0.23 s.
+- **`trees`:** static variants with no fields halved allocation. Borrow elision and inline counts took off the rest.
+- **Last-use moves alone changed little.** `trees`, `hashmap`, and `nbody` stayed within noise. Moves remove count pairs, and the time was in the runtime calls around them. They matter because they make values unique, which the writes above depend on.
+
+**Cranelift places pure values at their uses.** A value used in both arms of a branch runs in each arm, and again after the join if used there, so a write with a fast arm and a copying arm ran `sqrt` and `/` six times per pair in `nbody`. Read from the machine code of the flat version. A branch that holds no use of the value avoids it. Any later hot path with two arms has the same risk.
+
+**Where `nbody` stands.** Best of 9 runs, in ms:
+
+| Build | Time |
+| --- | --- |
+| Rust | 67 |
+| Rust, values boxed one by one | 90 |
+| Rust, no vectorizing | 99 |
+| Rust, boxed, no vectorizing | 99 |
+| Lucid | 226 |
+
+Vectorizing is worth about 1.5x here, and Cranelift has none. Boxing costs at most 1.34x, even under LLVM. A version of the Lucid program with one flat `list[float]` per field took 309 ms in one run, so moving the records out of the heap would not help by itself. The gap to unvectorized Rust, 2.2x, is then bounds checks, count checks, and code quality. No LLVM build was tried, so what it would give Lucid is unmeasured.
 
 ### First Lucid benchmarks (M2)
 
@@ -356,6 +377,6 @@ Sources: [Swift reference, In-Out Parameters](https://github.com/swiftlang/swift
 
 | Topic | Needed by |
 | --- | --- |
-| Reference counting cost in imperative code | M4 |
+| Reference counting cost in imperative code | Measured at M4, see "M4 benchmarks". Five programs only |
 | Foreign calls with lightweight tasks | M7 |
 | Status of WebAssembly stack switching | M7 |
