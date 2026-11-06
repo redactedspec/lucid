@@ -66,7 +66,8 @@ fn clif(ty: Ty) -> Type {
         | Ty::Set(_)
         | Ty::Data(..)
         | Ty::Union(_)
-        | Ty::Any(_) => types::I64,
+        | Ty::Any(_)
+        | Ty::Task(..) => types::I64,
         Ty::Float => types::F64,
         Ty::F32 => types::F32,
         Ty::Bool | Ty::None => types::I8,
@@ -719,10 +720,9 @@ impl Lower<'_, '_> {
     }
 
     /// Every value runs before the record exists, so that no field sees it.
-    fn new_record(&mut self, tag: usize, counted: usize, fields: &[(usize, Expr)]) -> Value {
+    fn new_record(&mut self, tag: Value, counted: usize, fields: &[(usize, Expr)]) -> Value {
         let values: Vec<(usize, Value)> =
             fields.iter().map(|(slot, value)| (*slot, self.slot(value))).collect();
-        let tag = self.body.ins().iconst(types::I64, tag as i64);
         let len = self.body.ins().iconst(types::I64, fields.len() as i64);
         let held = self.body.ins().iconst(types::I64, counted as i64);
         let record = self.call(self.runtime.record_new, &[tag, len, held]);
@@ -906,7 +906,16 @@ impl Lower<'_, '_> {
                 let key = self.slot(key);
                 self.call(self.runtime.map_position, &[map, key]).expect("it returns an int")
             }
-            ExprKind::New { tag, counted, fields } => self.new_record(*tag, *counted, fields),
+            ExprKind::New { tag, counted, fields } => {
+                let tag = self.body.ins().iconst(types::I64, *tag as i64);
+                self.new_record(tag, *counted, fields)
+            }
+            ExprKind::Closure { task, counted, fields, .. } => {
+                let func = self.func(self.ids[*task]);
+                let code = self.body.ins().func_addr(self.pointer, func);
+                self.new_record(code, *counted, fields)
+            }
+            ExprKind::CallValue(callee, args) => self.call_value(callee, args),
             ExprKind::Field(value, slot) => {
                 let value = self.expr(value);
                 self.load_slot(value, slot_offset(*slot), expr.ty)
@@ -940,8 +949,29 @@ impl Lower<'_, '_> {
             | ExprKind::Wrap(_)
             | ExprKind::View(_)
             | ExprKind::Holds(..)
+            | ExprKind::Capture(_)
             | ExprKind::Method(..) => unreachable!("`mono.rs` replaces these"),
         }
+    }
+
+    /// The record comes first in the call, so that the code finds its captures.
+    fn call_value(&mut self, callee: &Expr, args: &[Expr]) -> Value {
+        let Ty::Task(params, returns) = callee.ty else { unreachable!("it has a task type") };
+        let mut signature = self.module.make_signature();
+        signature.params.push(AbiParam::new(self.pointer));
+        signature.params.extend(params.iter().map(|&ty| AbiParam::new(clif(ty))));
+        signature.returns.push(AbiParam::new(clif(*returns)));
+        let signature = self.body.import_signature(signature);
+        let record = self.expr(callee);
+        let mut values = vec![record];
+        for arg in args {
+            let value = self.expr(arg);
+            values.push(value);
+        }
+        let flags = MemFlagsData::trusted();
+        let code = self.body.ins().load(self.pointer, flags, record, lucid_rt::TAG_OFFSET);
+        let call = self.body.ins().call_indirect(signature, code, &values);
+        self.body.inst_results(call)[0]
     }
 
     /// Traps at `span` if `task` gives null for the range.

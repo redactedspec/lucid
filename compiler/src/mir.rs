@@ -39,6 +39,10 @@ pub enum Ty {
     /// `any Trait`: the same record as a union, so a union or a member becomes
     /// one with no new code. `mono.rs` lists the types that each one holds.
     Any(&'static str),
+    /// `task(A) -> B`: a counted record, whose tag is the address of its code
+    /// and whose slots hold its captures. Its code takes the record first.
+    /// See "Task values" in docs/compiler.md.
+    Task(&'static [Ty], &'static Ty),
     /// A type parameter, by its name and its position in the list of the task
     /// or type that declares it. `mono.rs` replaces every one.
     Param(&'static str, usize),
@@ -81,6 +85,14 @@ impl Ty {
             }
             Ty::Param(name, _) => name.into(),
             Ty::Any(name) => format!("any {name}"),
+            Ty::Task(params, returns) => {
+                let params: Vec<String> = params.iter().map(|ty| ty.name()).collect();
+                let params = params.join(", ");
+                match returns {
+                    Ty::None => format!("task({params})"),
+                    _ => format!("task({params}) -> {}", returns.name()),
+                }
+            }
             Ty::Union(members) => {
                 let mut names: Vec<String> =
                     members.iter().filter(|&&ty| ty != Ty::None).map(|ty| ty.name()).collect();
@@ -100,7 +112,7 @@ impl Ty {
     /// A parameter may turn out to be counted, so the checker keeps a place
     /// for it. `mono.rs` drops what the real type does not need.
     pub fn is_counted(self) -> bool {
-        self == Ty::Text || self.is_compound() || matches!(self, Ty::Param(..))
+        self == Ty::Text || self.is_compound() || matches!(self, Ty::Param(..) | Ty::Task(..))
     }
 
     /// True if `part` appears anywhere in this type.
@@ -110,6 +122,9 @@ impl Ty {
                 Ty::List(item) | Ty::Set(item) => item.mentions(part),
                 Ty::Map(key, value) => key.mentions(part) || value.mentions(part),
                 Ty::Data(_, _, args) | Ty::Union(args) => args.iter().any(|a| a.mentions(part)),
+                Ty::Task(params, returns) => {
+                    returns.mentions(part) || params.iter().any(|a| a.mentions(part))
+                }
                 _ => false,
             }
     }
@@ -121,6 +136,9 @@ impl Ty {
             Ty::List(item) | Ty::Set(item) => item.has_param(),
             Ty::Map(key, value) => key.has_param() || value.has_param(),
             Ty::Data(_, _, args) | Ty::Union(args) => args.iter().any(|ty| ty.has_param()),
+            Ty::Task(params, returns) => {
+                returns.has_param() || params.iter().any(|ty| ty.has_param())
+            }
             _ => false,
         }
     }
@@ -138,6 +156,9 @@ impl Ty {
                 Ty::List(item) | Ty::Set(item) => spend(*item, left),
                 Ty::Map(key, value) => spend(*key, left) && spend(*value, left),
                 Ty::Data(_, _, args) | Ty::Union(args) => args.iter().all(|&a| spend(a, left)),
+                Ty::Task(params, returns) => {
+                    params.iter().all(|&a| spend(a, left)) && spend(*returns, left)
+                }
                 _ => true,
             }
         }
@@ -160,6 +181,11 @@ impl Ty {
             (Ty::Map(a, b), Ty::Map(c, d)) => a.may_overlap(*c) && b.may_overlap(*d),
             (Ty::Data(_, a, own), Ty::Data(_, b, args)) => {
                 a == b && own.iter().zip(args).all(|(x, &y)| x.may_overlap(y))
+            }
+            (Ty::Task(a, b), Ty::Task(c, d)) => {
+                a.len() == c.len()
+                    && b.may_overlap(*d)
+                    && a.iter().zip(c).all(|(x, &y)| x.may_overlap(y))
             }
             _ => self == other,
         }
@@ -278,6 +304,9 @@ impl Types {
                 Ty::Map(inner(self.subst(*key, args)), inner(self.subst(*value, args)))
             }
             Ty::Data(name, id, own) => Ty::Data(name, id, self.subst_all(own, args)),
+            Ty::Task(params, returns) => {
+                Ty::Task(self.subst_all(params, args), inner(self.subst(*returns, args)))
+            }
             Ty::Union(members) => {
                 let members: Vec<Ty> = members.iter().map(|&m| self.subst(m, args)).collect();
                 self.union(members)
@@ -331,6 +360,10 @@ impl Types {
             }
             (Ty::Data(_, a, own), Ty::Data(_, b, args)) if a == b => {
                 own.iter().zip(args).for_each(|(&p, &t)| self.unify(p, t, known));
+            }
+            (Ty::Task(a, b), Ty::Task(c, d)) if a.len() == c.len() => {
+                a.iter().zip(c).for_each(|(&p, &t)| self.unify(p, t, known));
+                self.unify(*b, *d, known);
             }
             (Ty::Union(members), _) => {
                 let rest: Vec<Ty> =
@@ -402,6 +435,9 @@ pub struct Task {
     pub locals: Vec<Ty>,
     pub body: Vec<Stmt>,
     pub span: Span,
+    /// What a lambda or nested task holds, in the record that is its first
+    /// parameter. Any other task has none.
+    pub captures: Vec<Ty>,
 }
 
 #[derive(Clone)]
@@ -498,6 +534,21 @@ pub enum ExprKind {
     /// An index into `Program::tasks`, its type arguments, and one argument
     /// per parameter. After `mono.rs` the type arguments are empty.
     Call(usize, &'static [Ty], Vec<Expr>),
+    /// Calls a task value with one argument per parameter.
+    CallValue(Box<Expr>, Vec<Expr>),
+    /// A new task value: a record whose tag is the address of a task from
+    /// `Program::tasks`, with these type arguments. Values run in this order,
+    /// each going to its slot, and slots below `counted` hold counted values.
+    /// Before `mono.rs`, each position is a capture and `counted` means nothing.
+    Closure {
+        task: usize,
+        args: &'static [Ty],
+        counted: usize,
+        fields: Vec<(usize, Expr)>,
+    },
+    /// What this task captured, by position. `mono.rs` makes this a `Field` of
+    /// its first parameter.
+    Capture(usize),
     /// Float only. Integer negation is `0 - x`, which checks for overflow.
     Neg(Box<Expr>),
     Not(Box<Expr>),
@@ -648,6 +699,7 @@ pub trait Visit {
             | ExprKind::Bool(_)
             | ExprKind::None
             | ExprKind::Local(_)
+            | ExprKind::Capture(_)
             | ExprKind::Text(_) => {}
             ExprKind::Call(_, _, values)
             | ExprKind::Method(_, values)
@@ -655,7 +707,11 @@ pub trait Visit {
             | ExprKind::ListOf(values) => {
                 values.iter_mut().for_each(|value| self.expr(value));
             }
-            ExprKind::New { fields, .. } => {
+            ExprKind::CallValue(callee, values) => {
+                self.expr(callee);
+                values.iter_mut().for_each(|value| self.expr(value));
+            }
+            ExprKind::New { fields, .. } | ExprKind::Closure { fields, .. } => {
                 fields.iter_mut().for_each(|(_, value)| self.expr(value));
             }
             ExprKind::MapOf(entries, _) => {

@@ -1,0 +1,63 @@
+8
+3
+42
+hi!
+11
+2
+2
+3
+0
+1
+4
+7
+3
+6
+3
+3
+6
+4
+[2, 4, 6]
+["n1", "n2"]
+[1, 2]
+[2, 4]
+[3]
+3
+["x"]
+held
+7
+["l"]
+13
+10
+yes
+no
+spoken
+0
+1
+8
+2
+who?
+clicked 1
+Button(label: "ok", on_click: task(int) -> text)
+clicked 2
+new
+2
+0
+6
+[task(int) -> int, task(int) -> int]
+9
+true
+6
+1
+task(int) -> int
+task(int) -> int
+1
+2
+x1
+1 2 w
+a 2 w
+[1.5] 2 w
+4.0
+0.0
+3.0
+2
+gives 1

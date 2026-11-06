@@ -63,7 +63,7 @@ Variables, fields, and list elements in `change` paths are checked statically. O
 `change` and `take` always appear in signatures. Signatures are the contract, and agents rely on them. Inference happens inside bodies:
 
 - Tasks in the same package: the compiler may pass ownership when that removes a count operation.
-- Lambdas: non-escaping lambdas borrow captures. Escaping lambdas capture by move or by shared buffer.
+- Lambdas: as of M3 every lambda and nested task holds a count on each capture, like a field of a record. Non-escaping lambdas borrowing captures is planned for M4.
 
 ## Shared references
 
@@ -73,6 +73,10 @@ Variables, fields, and list elements in `change` paths are checked statically. O
 - **Mutation:** each write takes a short dynamic borrow. Conflicting access traps, like `RefCell` in Rust.
 - **Cycles:** use `weak T` for back-references. Reading a `weak T` gives `(shared T)?`. Strong cycles leak memory, and the debug runtime reports them at exit.
 - **Threads:** `shared` values cannot be sent to another task. Use `lock[T]` or `channel[T]`.
+
+## Task values
+
+A task value is a counted record of what it captured, and holds no reference to any variable. Only a value that cannot change is captured, so a task value is an ordinary immutable value. It cannot reach itself, since a nested task reads its own name as its own record, and it stores no count on that. So task values form no cycles.
 
 ## Destruction
 

@@ -175,7 +175,7 @@ while top is int
 
 `print` shows a list as `[1, 2]`, a map as `{"a": 1}`, and a set as `set([1, 2])`. Text inside a value has quotes and escapes, so what prints reads back as a literal. `==` and `!=` compare two values of one type. Lists compare in order. Maps and sets compare what they hold, whatever its order. `<` and the like work on a list if they work on its elements: the first difference decides, and a shorter list comes first.
 
-Planned: tasks that take a lambda such as `.map`.
+Planned: built-in tasks that take a lambda, such as `.map`. A program can write its own, see "Tasks".
 
 ## Control flow
 
@@ -207,7 +207,7 @@ A `for` over a range reads its bounds once. The loop name cannot be assigned, an
 
 A `task` is a function. Parameters always have types. With no `->`, a task returns `none`. Return types are never inferred, so a signature is always complete. A task with a return type must return on every path. `return` is only allowed in a task.
 
-Tasks may be used before their line. A parameter cannot be assigned.
+Top-level tasks may be used before their line. A parameter cannot be assigned.
 
 ```lucid
 task add(a: int, b: int) -> int
@@ -223,13 +223,51 @@ Arguments are positional. A parameter with a default must be passed by name, and
 connect("example.com", port: 8080)
 ```
 
-Lambdas use `=>` and hold a single expression. For anything longer, define a nested task.
+A task is a value. Its type is written `task(int, int) -> int`, or `task(text)` if it returns `none`. A task value is called like a task, with positional arguments:
 
 ```lucid
-let doubled = primes.map(x => x * 2)
+task apply(f: task(int) -> int, x: int) -> int
+    return f(x)
+
+task triple(x: int) -> int
+    return x * 3
+
+print apply(triple, 2)
+print apply(x => x + 1, 2)
 ```
 
-Task types are written `task(int, int) -> int`.
+Naming a task gives its value. A generic one needs its types, as in `first[int]`. A `self` task has no value form: write a lambda. All its parameters count, so a default does not apply through a task value.
+
+Lambdas use `=>` and hold a single expression. For anything longer, define a nested task. Parameters take their types from the context: an annotation, a parameter, a field, or an element. A lambda with no such context is error E0324. A generic call reads arguments left to right, so `map(items, x => x * 2)` knows `x` from `items`, and the lambda's result can give a type parameter. In a `then` branch a lambda needs parentheses.
+
+```lucid
+task map[T, U](items: list[T], f: task(T) -> U) -> list[U]
+    var out: list[U] = []
+    for item in items
+        out.push(f(item))
+    return out
+
+let doubled = map(primes, x => x * 2)
+let plus: task(int, int) -> int = (a, b) => a + b
+```
+
+A task inside a task is a nested task. It takes no type parameters, `self`, or defaults. It is a value made at its line, so it can only be used after that line, and it can call itself.
+
+```lucid
+task total(n: int) -> int
+    let step = 2
+    task sum(x: int) -> int
+        if x <= 0
+            return 0
+        return x + sum(x - step)
+    return sum(n)
+```
+
+A lambda or nested task reads names around it by capturing their values when it is made, so it can outlive them. Each pass of a loop makes a new capture. A `var` cannot be captured, which is error E0325, since a later change would not be seen and a captured name cannot change: write `let copy = count` first. A captured name keeps the type it was narrowed to, and does not narrow further inside.
+
+A task value has `Show`, and prints as its type. It has no `Equal`, `Order`, or `Hash`, so it cannot be a key, and a value that holds one cannot use `==`. In an `any`, `==` is true only for one value that was copied.
+
+`x.f(a)` also calls a field of `x` that holds a task value, if no task named `f` takes `x`.
 
 `...` is a placeholder statement that traps at run time. `lucid build --release` rejects it.
 
@@ -473,7 +511,7 @@ A trait with type parameters, and a generic task in a trait, are planned.
 | Trait | Lets a `T` | Who has it |
 | --- | --- | --- |
 | `Show` | `print` and interpolation | every type, `any` included |
-| `Equal` | `==`, `!=`, `in` on a list | every type, `any` included |
+| `Equal` | `==`, `!=`, `in` on a list | every type, `any` included, except a task value or a value that holds one |
 | `Order` | `<`, `<=`, `>`, `>=` | numbers, `text`, and lists and `type` or `choice` values made of those |
 | `Hash` | be a key of a map or set | integers, `bool`, `text`, and lists, maps, sets, unions, and `type` or `choice` values made of those. A `none` counts only inside such a value |
 | `Add`, `Sub`, `Mul` | `+`, `-`, `*` | numbers |

@@ -1,0 +1,6 @@
+task go()
+    task again(n: int) -> int
+        return again(n + 1) + 1
+    print again(0)
+
+go()

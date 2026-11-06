@@ -266,6 +266,16 @@ Decisions 79 and 80. Level: **Snippet**: these came through search summaries and
 
 Sources: [Go spec](https://go.dev/ref/spec#Numeric_types), [Go builtin](https://go.googlesource.com/go/+/go1.9/src/builtin/builtin.go), [Rust u8](https://doc.rust-lang.org/std/primitive.u8.html), [Zig integer rules](https://zig.guide/language-basics/integer-rules).
 
+## Captures
+
+Decision 81. The Go post: **Snippet** of the primary source. Python: **Snippet**, through the CodeQL page and a tutorial, not the FAQ itself. Swift was not read.
+
+- **Go.** "Fixing For Loops in Go 1.22" says that closures over a loop variable usually saw its final value, and that per-iteration scope is the fix. The team had to correct many tests that were not testing what they thought, and the post cites a Let's Encrypt incident. `go vet` opts for false negatives here, since it is hard to tell whether a reference outlives its iteration.
+- **Python.** A closure reads its variable when called, not when made, so lambdas made in a loop all see the last value. The usual fix is `lambda i=i: i`, which binds the value at creation. That is Lucid's only form.
+- **Not found.** No study was read on how often agents write closures that change a captured variable, which is what E0325 forbids. The M3 agent trial tests it.
+
+Sources: [Go blog](https://go.dev/blog/loopvar-preview), [CodeQL on loop capture](https://codeql.github.com/codeql-query-help/python/py-loop-variable-capture/).
+
 ## Open research
 
 | Topic | Needed by |

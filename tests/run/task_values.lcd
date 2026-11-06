@@ -1,0 +1,232 @@
+# Lambdas take their types from the context.
+let double: task(int) -> int = x => x * 2
+print double(4)
+let add: task(int, int) -> int = (a, b) => a + b
+print add(1, 2)
+let answer: task() -> int = () => 42
+print answer()
+let shout: task(text) -> text = word => "{word}!"
+print shout("hi")
+
+# A lambda captures a value when it is made.
+let base = 10
+let plus: task(int) -> int = x => x + base
+print plus(1)
+let names = ["a", "b"]
+let count: task() -> int = () => names.len()
+print count()
+var more = names
+more.push("c")
+print count()
+print more.len()
+
+# One capture per loop pass, unlike a shared loop variable.
+var kept: list[task() -> int] = []
+for i in 0..3
+    kept.push(() => i * i)
+for get in kept
+    print get()
+
+# Lambdas nest, and capture through each other.
+let adder: task(int) -> task(int) -> int = a => b => a + b
+print adder(3)(4)
+let outer = 1
+let deep: task(int) -> task(int) -> int = a => b => a + b + outer
+print deep(1)(1)
+
+# A task can be a value.
+task triple(x: int) -> int
+    return x * 3
+
+task apply(f: task(int) -> int, x: int) -> int
+    return f(x)
+
+print apply(triple, 2)
+print apply(x => x + 1, 2)
+let same = triple
+print same(1)
+
+task make_adder(n: int) -> task(int) -> int
+    return x => x + n
+
+let add_five = make_adder(5)
+print add_five(1)
+print make_adder(2)(2)
+
+# Generics.
+task map[T, U](items: list[T], f: task(T) -> U) -> list[U]
+    var out: list[U] = []
+    for item in items
+        out.push(f(item))
+    return out
+
+task keep[T](self: list[T], wanted: task(T) -> bool) -> list[T]
+    var out: list[T] = []
+    for item in self
+        if wanted(item)
+            out.push(item)
+    return out
+
+print map([1, 2, 3], x => x * 2)
+print map([1, 2], x => "n{x}")
+print map(["a", "bb"], word => word.len())
+print [1, 2, 3, 4].keep(x => x % 2 == 0)
+let limit = 2
+print [1, 2, 3].keep(x => x > limit)
+
+task same_value[T](x: T) -> T
+    return x
+
+let id = same_value[int]
+print id(3)
+print map(["x"], same_value[text])
+
+task wrap[T](x: T) -> task() -> T
+    return () => x
+
+print wrap("held")()
+print wrap(7)()
+print wrap(["l"])()
+
+# Nested tasks.
+task outer_task(n: int) -> int
+    let step = 2
+    task inner(x: int) -> int
+        return x + step + n
+    return inner(1)
+
+print outer_task(10)
+
+task countdown(n: int) -> int
+    task sum(x: int) -> int
+        if x == 0
+            return 0
+        return x + sum(x - 1)
+    return sum(n)
+
+print countdown(4)
+
+task nested_in_block(flag: bool) -> text
+    if flag
+        task yes() -> text
+            return "yes"
+        return yes()
+    return "no"
+
+print nested_in_block(true)
+print nested_in_block(false)
+
+task say(word: text)
+    print word
+
+let speak: task(text) = say
+speak("spoken")
+
+for i in 0..2
+    task show_it()
+        print i
+    show_it()
+
+task returns_nested() -> task(int) -> int
+    let two = 2
+    task times(x: int) -> int
+        return x * two
+    return times
+
+print returns_nested()(4)
+
+task lifted_self(n: int) -> task() -> int
+    task again() -> int
+        if n > 100
+            return n
+        let call: task() -> int = () => n + 1
+        return call()
+    return again
+
+print lifted_self(1)()
+
+task self_lambda(self: text) -> task() -> text
+    return () => "{self}?"
+
+print "who".self_lambda()()
+
+# Values that hold tasks.
+type Button
+    label: text
+    on_click: task(int) -> text
+
+let b = Button(label: "ok", on_click: n => "clicked {n}")
+print b.on_click(1)
+print b
+var copy = b
+copy.label = "new"
+print copy.on_click(2)
+print copy.label
+
+let table: map[text, task(int) -> int] = {"up": x => x + 1, "down": x => x - 1}
+print table["up"](1)
+print table["down"](1)
+let fs: list[task(int) -> int] = [x => x, triple]
+print fs[1](2)
+print fs
+
+let maybe: (task() -> int)? = () => 9
+if maybe is not none
+    print maybe()
+let nothing: (task() -> int)? = none
+print nothing is none
+
+let narrowed: int? = 5
+if narrowed is int
+    let reads: task() -> int = () => narrowed + 1
+    print reads()
+
+let picked: task(int) -> int = if base > 1 then (x => x) else (y => y + 1)
+print picked(1)
+print double
+print "{double}"
+
+let mix: task(int) -> int? = x => x
+print mix(1)
+let small: task(i8) -> i8 = x => x + 1
+print small(1)
+let none_back: task(int) = x => say("x{x}")
+none_back(1)
+
+# Counted and plain captures trade slots with the type argument.
+task both[T: Show](a: T, n: int, word: text) -> task() -> text
+    return () => "{a} {n} {word}"
+
+print both(1, 2, "w")()
+print both("a", 2, "w")()
+print both([1.5], 2, "w")()
+
+choice Shape
+    Circle(radius: float)
+    Dot
+
+task area_later(shape: Shape) -> task() -> float
+    return match shape
+        Circle(radius) -> () => radius * 2.0
+        Dot -> () => 0.0
+
+print area_later(Circle(radius: 2.0))()
+print area_later(Dot)()
+
+let pi = 3.0
+task reads_literal() -> task() -> float
+    return () => pi
+
+print reads_literal()()
+
+task with_default(a: int, b: int = 5) -> int
+    return a + b
+
+let full: task(int, int) -> int = with_default
+print full(1, 1)
+
+task describe[T: Show](self: task() -> T) -> text
+    return "gives {self()}"
+
+let gives: task() -> int = () => 1
+print gives.describe()

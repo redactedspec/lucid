@@ -34,6 +34,7 @@ pub fn run(program: &mut Program) -> Vec<Diagnostic> {
         diags: Vec::new(),
         args: &[],
         locals: Vec::new(),
+        captures: Vec::new(),
     };
     // Every task without parameters compiles, used or not.
     for (id, task) in source.iter().enumerate() {
@@ -110,6 +111,20 @@ pub struct Mono<'a> {
     args: &'static [Ty],
     /// The locals of that task, with real types.
     locals: Vec<Ty>,
+    /// What that task captured, with real types.
+    captures: Vec<Ty>,
+}
+
+/// The slot of each capture. Counted ones take the first slots, as in a record.
+fn capture_slots(types: &[Ty]) -> Vec<usize> {
+    let mut counted = types.iter().filter(|ty| ty.is_counted()).count();
+    let mut held = 0;
+    let slot = |ty: &Ty| {
+        let next = if ty.is_counted() { &mut held } else { &mut counted };
+        *next += 1;
+        *next - 1
+    };
+    types.iter().map(slot).collect()
 }
 
 impl Mono<'_> {
@@ -229,6 +244,7 @@ impl Mono<'_> {
         task.type_params = 0;
         task.returns = self.types.subst(task.returns, args);
         self.locals = task.locals.iter().map(|&ty| self.types.subst(ty, args)).collect();
+        self.captures = task.captures.iter().map(|&ty| self.types.subst(ty, args)).collect();
         self.stmts(&mut task.body);
         task.locals = std::mem::take(&mut self.locals);
     }
@@ -298,7 +314,9 @@ impl Visit for Mono<'_> {
         for stmt in stmts {
             self.stmt_parts(stmt);
             match stmt {
-                Stmt::Print(value) if value.ty.is_compound() => {
+                Stmt::Print(value)
+                    if value.ty.is_compound() || matches!(value.ty, Ty::Task(..)) =>
+                {
                     let span = value.span;
                     let empty = Expr { kind: ExprKind::None, ty: Ty::None, span };
                     let taken = std::mem::replace(value, empty);
@@ -343,6 +361,19 @@ impl Visit for Mono<'_> {
             ExprKind::Call(id, args, values) => {
                 let args = self.types.subst_all(args, self.args);
                 ExprKind::Call(self.instance(id, args, span), &[], values)
+            }
+            ExprKind::Closure { task, args, fields, .. } => {
+                let args = self.types.subst_all(args, self.args);
+                let types: Vec<Ty> = fields.iter().map(|(_, value)| value.ty).collect();
+                let counted = types.iter().filter(|ty| ty.is_counted()).count();
+                let slots = capture_slots(&types);
+                let fields = fields.into_iter().zip(slots).map(|((_, v), slot)| (slot, v));
+                let task = self.instance(task, args, span);
+                ExprKind::Closure { task, args: &[], counted, fields: fields.collect() }
+            }
+            ExprKind::Capture(index) => {
+                let record = Expr { kind: ExprKind::Local(0), ty: self.locals[0], span };
+                ExprKind::Field(record.into(), capture_slots(&self.captures)[index])
             }
             ExprKind::Wrap(inner) => {
                 *value = self.wrap(*inner, ty, span);

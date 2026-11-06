@@ -31,6 +31,8 @@ impl Visit for Owners<'_> {
                 | ExprKind::TextQuote(_)
                 | ExprKind::Join(_)
                 | ExprKind::Call(..)
+                | ExprKind::CallValue(..)
+                | ExprKind::Closure { .. }
                 | ExprKind::TextSlice(..)
                 | ExprKind::ListSlice(..)
                 | ExprKind::TextCharAt(..)

@@ -1,0 +1,56 @@
+let a = x => x
+let b: int = x => x
+let c: task(int) -> int = (x, y) => x
+let d: task(int) -> text = x => x + 1
+var count = 0
+let e: task() -> int = () => count
+let f: task(int) -> int = x => x
+print f()
+print f(1, 2)
+print f("a")
+print f(x: 1)
+print f == f
+print f < f
+print 1(2)
+print [1][0](2)
+print {f: 1}
+let g: map[task() -> int, int] = {}
+let h = 1
+print h(1)
+task t(n: int) -> int
+    return n
+task gen[T](x: T) -> T
+    return x
+let i = gen
+let j = gen[int, text]
+let k: task(text) -> text = t
+task outer()
+    task inner[T](x: T)
+        return
+    task with_default(x: int = 1)
+        return
+    task missing() -> int
+        print 1
+    let r = 1
+    task uses()
+        r = 2
+    var v = 1
+    task uses_var() -> int
+        return v
+    task later_use() -> int
+        return not_yet()
+    task not_yet() -> int
+        return 1
+    print uses
+print map2([1], x => x)
+task map2[T, U](x: U, f: task(T) -> U) -> T
+    ...
+type Holds
+    run: task() -> int
+    other: int
+let m = Holds(run: () => 1, other: 2)
+print m.other()
+print m == m
+print map3(x => x, 1)
+task map3[T](f: task(T) -> T, x: T) -> T
+    return f(x)

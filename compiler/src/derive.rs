@@ -153,6 +153,12 @@ impl Mono<'_> {
         let ty = value.ty;
         match ty {
             Ty::Text => Expr { kind: ExprKind::TextQuote(boxed(value)), ty, span },
+            // A task value shows its type: its code has no text to show.
+            Ty::Task(..) => {
+                let name = Expr { kind: ExprKind::Text(ty.name()), ty: Ty::Text, span };
+                let kind = ExprKind::Seq(vec![Stmt::Expr(value)], boxed(name));
+                Expr { kind, ty: Ty::Text, span }
+            }
             _ if ty.is_compound() => {
                 self.call_written_or(Derived::Show, "show", vec![value], Ty::Text, span)
             }
@@ -346,7 +352,8 @@ impl Mono<'_> {
                 vec![walk, Stmt::Return(body.flag(false))]
             }
         };
-        Task { params, type_params: 0, returns, locals: body.locals, body: stmts, span }
+        let locals = body.locals;
+        Task { params, type_params: 0, returns, locals, body: stmts, span, captures: Vec::new() }
     }
 
     fn show_body(&mut self, body: &mut Body, ty: Ty) -> Vec<Stmt> {

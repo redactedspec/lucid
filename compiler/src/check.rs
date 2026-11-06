@@ -45,7 +45,10 @@ pub fn check(file: &ast::File) -> (Program, Vec<Diagnostic>) {
     let mut checker = Checker::default();
     checker.declare_types(file);
     checker.declare(file);
-    let tasks = file
+    let written =
+        |stmt: &&ast::Stmt| matches!(&stmt.kind, StmtKind::Task(def) if def.body.is_some());
+    checker.first_lifted = file.stmts.iter().filter(written).count();
+    let mut tasks: Vec<Task> = file
         .stmts
         .iter()
         .filter_map(|stmt| match &stmt.kind {
@@ -56,6 +59,7 @@ pub fn check(file: &ast::File) -> (Program, Vec<Diagnostic>) {
         .map(|(id, (def, body, span))| checker.task(id, def, body, span))
         .collect();
     let main = checker.main(file);
+    tasks.append(&mut checker.lifted);
 
     let datas = checker.datas.iter().map(Data::shape).collect();
     let methods = checker.methods.iter().map(|(&name, ids)| (name.into(), ids.clone())).collect();
@@ -68,6 +72,20 @@ pub fn check(file: &ast::File) -> (Program, Vec<Diagnostic>) {
 
 /// Type parameters in scope, with the type that each one stands for.
 type TypeEnv<'a> = Vec<(&'a str, Ty)>;
+
+/// What a task being checked keeps for itself, while a lambda or nested task
+/// inside it is checked. `Checker` holds the same fields for the innermost one.
+#[derive(Default)]
+struct Frame<'a> {
+    scopes: Vec<HashMap<&'a str, Local>>,
+    locals: Vec<Ty>,
+    mutable: Vec<bool>,
+    returns: Option<Ty>,
+    loops: usize,
+    narrowed: Vec<(Local, Ty)>,
+    captures: Vec<(String, Expr)>,
+    own_name: Option<&'a str>,
+}
 
 /// The traits that each type parameter in scope has, by position.
 type Bounds<'a> = Vec<Vec<&'a str>>;
@@ -192,6 +210,19 @@ struct Checker<'a> {
     table: Types,
     /// What tests have proved about locals, latest last. See `forget`.
     narrowed: Vec<(Local, Ty)>,
+    /// The tasks around the one being checked, outermost first.
+    frames: Vec<Frame<'a>>,
+    /// What this lambda or nested task captured so far, with each value as the
+    /// task around it reads it. A position here is a `Capture`.
+    captures: Vec<(String, Expr)>,
+    /// The name of this nested task, which reads as its own first parameter.
+    own_name: Option<&'a str>,
+    /// Lambdas, nested tasks, and the code behind tasks used as values.
+    /// Their ids start at `first_lifted`, after the tasks of the file.
+    lifted: Vec<Task>,
+    first_lifted: usize,
+    /// The id in `lifted` of the code behind each task used as a value.
+    task_values: HashMap<usize, usize>,
 }
 
 /// The parameters that a declaration brings into scope, by position.
@@ -306,7 +337,7 @@ fn view(value: Expr, ty: Ty) -> Expr {
 /// True if reading `value` twice costs nothing and changes nothing.
 fn repeatable(value: &Expr) -> bool {
     match &value.kind {
-        ExprKind::Local(_) | ExprKind::Int(_) | ExprKind::Bool(_) => true,
+        ExprKind::Local(_) | ExprKind::Capture(_) | ExprKind::Int(_) | ExprKind::Bool(_) => true,
         ExprKind::Member { value: inner, .. } | ExprKind::View(inner) => repeatable(inner),
         ExprKind::ListGet(base, key) | ExprKind::MapGet(base, key) => {
             repeatable(base) && repeatable(key)
@@ -584,6 +615,11 @@ impl<'a> Checker<'a> {
                 _ => self.unsupported("this type", ty.span).ty,
             },
             TypeKind::Any(held) => self.any_type(held, ty.span),
+            TypeKind::Task { params, returns } => {
+                let params: Vec<Ty> = params.iter().map(|param| self.ty(param)).collect();
+                let returns = returns.as_ref().map_or(Ty::None, |returns| self.ty(returns));
+                Ty::Task(params.leak(), inner(returns))
+            }
             _ => self.unsupported("this type", ty.span).ty,
         }
     }
@@ -932,6 +968,9 @@ impl<'a> Checker<'a> {
             Ty::Data(..) => self.variants_of(ty).into_iter().flatten().collect(),
             _ => Vec::new(),
         };
+        if name == "Equal" && matches!(ty, Ty::Task(..)) {
+            return false;
+        }
         let parts = if name == "Hash" {
             // A `none` inside a value hashes as nothing. Alone it is no key.
             parts.into_iter().filter(|&part| part != Ty::None).collect()
@@ -1448,7 +1487,8 @@ impl<'a> Checker<'a> {
         self.type_params.clear();
         self.bounds.clear();
         let locals = std::mem::take(&mut self.locals);
-        Task { params: params.len(), type_params, returns, locals, body, span }
+        let captures = Vec::new();
+        Task { params: params.len(), type_params, returns, locals, body, span, captures }
     }
 
     fn main(&mut self, file: &'a ast::File) -> Task {
@@ -1457,7 +1497,8 @@ impl<'a> Checker<'a> {
         let body = self.stmts(&file.stmts);
         let span = Span { start: 0, end: 0 };
         let locals = std::mem::take(&mut self.locals);
-        Task { params: 0, type_params: 0, returns: Ty::None, locals, body, span }
+        let captures = Vec::new();
+        Task { params: 0, type_params: 0, returns: Ty::None, locals, body, span, captures }
     }
 
     fn new_local(&mut self, ty: Ty, mutable: bool) -> Local {
@@ -1507,9 +1548,9 @@ impl<'a> Checker<'a> {
     fn stmt(&mut self, stmt: &'a ast::Stmt) -> Option<Stmt> {
         let span = stmt.span;
         Some(match &stmt.kind {
-            StmtKind::Task(_) => {
+            StmtKind::Task(def) => {
                 if self.returns.is_some() || self.scopes.len() > 1 {
-                    self.unsupported("a nested task", span);
+                    return self.nested_task(def, span);
                 }
                 return None;
             }
@@ -1596,6 +1637,262 @@ impl<'a> Checker<'a> {
             StmtKind::Expect(_) => return self.later("`expect`", span),
             StmtKind::Unsafe(_) => return self.later("`unsafe`", span),
         })
+    }
+
+    /// Swaps the fields of the task being checked with those of `frame`.
+    fn swap_frame(&mut self, frame: &mut Frame<'a>) {
+        std::mem::swap(&mut self.scopes, &mut frame.scopes);
+        std::mem::swap(&mut self.locals, &mut frame.locals);
+        std::mem::swap(&mut self.mutable, &mut frame.mutable);
+        std::mem::swap(&mut self.returns, &mut frame.returns);
+        std::mem::swap(&mut self.loops, &mut frame.loops);
+        std::mem::swap(&mut self.narrowed, &mut frame.narrowed);
+        std::mem::swap(&mut self.captures, &mut frame.captures);
+        std::mem::swap(&mut self.own_name, &mut frame.own_name);
+    }
+
+    /// Starts a lambda or nested task. Local 0 is its record, of type `ty`,
+    /// which a lambda with an open return type fills in at `end_closure`.
+    fn start_closure(&mut self, ty: Ty, returns: Ty) {
+        let mut frame = Frame::default();
+        self.swap_frame(&mut frame);
+        self.frames.push(frame);
+        self.returns = Some(returns);
+        self.new_local(ty, false);
+        self.scopes.push(HashMap::new());
+    }
+
+    /// Ends what `start_closure` began. Gives the new value, which the task
+    /// around it builds from what the body captured.
+    fn end_closure(&mut self, params: &[Ty], returns: Ty, body: Vec<Stmt>, span: Span) -> Expr {
+        let mut frame = self.frames.pop().expect("`start_closure` pushed a frame");
+        self.swap_frame(&mut frame);
+        let ty = Ty::Task(params.to_vec().leak(), inner(returns));
+        let mut locals = frame.locals;
+        locals[0] = ty;
+        let values: Vec<Expr> = frame.captures.into_iter().map(|(_, value)| value).collect();
+        let captures = values.iter().map(|value| value.ty).collect();
+        let (type_params, args) = self.own_type_args();
+        let params = params.len() + 1;
+        self.lifted.push(Task { params, type_params, returns, locals, body, span, captures });
+        let task = self.first_lifted + self.lifted.len() - 1;
+        let fields = values.into_iter().enumerate().collect();
+        Expr { kind: ExprKind::Closure { task, args, counted: 0, fields }, ty, span }
+    }
+
+    /// How many type parameters are in scope, and each as a type argument. A
+    /// lifted task has those of the task around it.
+    fn own_type_args(&self) -> (usize, &'static [Ty]) {
+        let args: Vec<Ty> = self.type_params.iter().map(|&(_, ty)| ty).collect();
+        (args.len(), args.leak())
+    }
+
+    /// A task inside a task. It is a value made at its line, under a name that
+    /// cannot change, so it needs a name that is already bound. It reads its
+    /// own name as its own record, which keeps it from holding itself.
+    fn nested_task(&mut self, def: &'a ast::TaskDef, span: Span) -> Option<Stmt> {
+        let Some(body) = &def.body else {
+            return self.later("`unsafe extern task`", span);
+        };
+        let sig = &def.sig;
+        if def.public {
+            self.unsupported("`public`", span);
+        }
+        let wrong = "a nested task takes no type parameters, `self`, or defaults";
+        if !sig.type_params.is_empty()
+            || sig.params.iter().any(|p| p.name.text == "self" || p.default.is_some())
+        {
+            self.fail("E0307", wrong.into(), sig.name.span);
+        }
+        let mut params = Vec::with_capacity(sig.params.len());
+        for param in &sig.params {
+            if param.mode != ast::ParamMode::Read {
+                self.unsupported("a `change` or `take` parameter", param.name.span);
+            }
+            params.push(param.ty.as_ref().map_or(Ty::Error, |ty| self.ty(ty)));
+        }
+        let returns = sig.returns.as_ref().map_or(Ty::None, |ty| self.ty(ty));
+        let ty = Ty::Task(params.clone().leak(), inner(returns));
+        self.start_closure(ty, returns);
+        self.own_name = Some(&sig.name.text);
+        for (param, &ty) in sig.params.iter().zip(&params) {
+            self.bind(&param.name, ty, false);
+        }
+        let body = self.stmts(body);
+        if returns != Ty::None && returns != Ty::Error && !ends(&body, false) {
+            let name = &sig.name;
+            let message = format!("`{}` must return `{}` on every path", name.text, returns.name());
+            self.fail("E0309", message, name.span);
+        }
+        let value = self.end_closure(&params, returns, body, span);
+        Some(Stmt::Set(self.bind(&sig.name, ty, false), value))
+    }
+
+    /// `x => x + 1`, with the types of its parameters and of its result from
+    /// the context. A lambda with no such context is E0324.
+    fn lambda(
+        &mut self,
+        params: &'a [ast::Name],
+        body: &'a ast::Expr,
+        want: Option<Ty>,
+        span: Span,
+    ) -> Expr {
+        let want = self.literal_want(want, |ty| matches!(ty, Ty::Task(..)));
+        match want {
+            Some(Ty::Task(types, returns)) if types.len() == params.len() => {
+                self.lambda_with(params, body, types, Some(*returns), span)
+            }
+            Some(Ty::Task(types, _)) => {
+                let (want, found) = (types.len(), params.len());
+                let message = format!("this lambda has {found} parameters, and needs {want}");
+                self.fail("E0307", message, span)
+            }
+            Some(Ty::Error) => poisoned(span),
+            _ => {
+                let diag = Diagnostic::new("E0324", "a lambda needs a task type here", span);
+                self.report(diag.note(
+                    "write its type, as in `let f: task(int) -> int = x => x`, or pass it after \n                     the values that show its type",
+                ))
+            }
+        }
+    }
+
+    fn lambda_with(
+        &mut self,
+        params: &'a [ast::Name],
+        body: &'a ast::Expr,
+        types: &[Ty],
+        returns: Option<Ty>,
+        span: Span,
+    ) -> Expr {
+        self.start_closure(Ty::Error, returns.unwrap_or(Ty::Error));
+        for (param, &ty) in params.iter().zip(types) {
+            self.bind(param, ty, false);
+        }
+        let value = self.expected(body, returns);
+        let result = returns.unwrap_or(value.ty);
+        self.expect(&value, result, "this lambda");
+        self.end_closure(types, result, vec![Stmt::Return(value)], span)
+    }
+
+    /// True if a name of a local means something in the task being checked, or
+    /// in one around it.
+    fn visible(&self, name: &str) -> bool {
+        let in_frame = |frame: &Frame| {
+            frame.own_name == Some(name) || frame.scopes.iter().any(|s| s.contains_key(name))
+        };
+        self.lookup(name).is_some()
+            || self.own_name == Some(name)
+            || self.frames.iter().any(in_frame)
+    }
+
+    /// Reads a name of a task around this one, which this task then captures.
+    /// `None` if no such task has the name.
+    fn captured(&mut self, name: &str, span: Span) -> Option<Expr> {
+        let kind = ExprKind::Local(0);
+        if self.own_name == Some(name) {
+            return Some(Expr { kind, ty: self.locals[0], span });
+        }
+        if let Some(index) = self.captures.iter().position(|(known, _)| known == name) {
+            let ty = self.captures[index].1.ty;
+            return Some(Expr { kind: ExprKind::Capture(index), ty, span });
+        }
+        let mut frame = self.frames.pop()?;
+        self.swap_frame(&mut frame);
+        let found = match self.lookup(name) {
+            Some(local) if self.mutable[local] => {
+                let message = format!("`{name}` is a `var`, so it cannot be captured");
+                let note = format!("copy it first, with `let copy = {name}`");
+                Some(self.report(Diagnostic::new("E0325", message, span).note(note)))
+            }
+            Some(local) => Some(view(self.read(local, span), self.current(local))),
+            None => self.captured(name, span),
+        };
+        self.swap_frame(&mut frame);
+        self.frames.push(frame);
+        let value = found?;
+        if value.ty == Ty::Error {
+            return Some(value);
+        }
+        let ty = value.ty;
+        self.captures.push((name.into(), value));
+        Some(Expr { kind: ExprKind::Capture(self.captures.len() - 1), ty, span })
+    }
+
+    /// A task used as a value. Its code is a small task that takes a record
+    /// first, like a lambda, and calls the real one.
+    fn task_value(&mut self, id: usize, name: &str, explicit: Option<&[Ty]>, span: Span) -> Expr {
+        let params: Vec<&str> =
+            self.signatures[id].type_params.iter().map(|&(name, _)| name).collect();
+        let known: Vec<Option<Ty>> = match explicit {
+            Some(types) => types.iter().copied().map(Some).collect(),
+            None => vec![None; params.len()],
+        };
+        let Some(args) = self.solved(name, &params, &known, self.diags.len(), span) else {
+            return poisoned(span);
+        };
+        let bounds = self.signatures[id].bounds.clone();
+        for (&ty, traits) in args.iter().zip(bounds) {
+            for name in traits {
+                self.require(ty, name, span);
+            }
+        }
+        let signature = &self.signatures[id];
+        let types: Vec<Ty> = signature.params.iter().map(|p| p.ty).collect();
+        let returns = signature.returns;
+        let ty = Ty::Task(types.clone().leak(), inner(returns));
+        let task = match self.task_values.get(&id) {
+            Some(&task) => task,
+            None => {
+                let own: Vec<Ty> = signature.type_params.iter().map(|&(_, ty)| ty).collect();
+                let read = |(local, &ty): (usize, &Ty)| Expr {
+                    kind: ExprKind::Local(local + 1),
+                    ty,
+                    span,
+                };
+                let values = types.iter().enumerate().map(read).collect();
+                let kind = ExprKind::Call(id, own.clone().leak(), values);
+                let call = Expr { kind, ty: returns, span };
+                let mut locals = vec![ty];
+                locals.extend(&types);
+                let params = locals.len();
+                let type_params = own.len();
+                let captures = Vec::new();
+                let body = vec![Stmt::Return(call)];
+                let code = Task { params, type_params, returns, locals, body, span, captures };
+                self.lifted.push(code);
+                let task = self.first_lifted + self.lifted.len() - 1;
+                self.task_values.insert(id, task);
+                task
+            }
+        };
+        let kind = ExprKind::Closure { task, args, counted: 0, fields: Vec::new() };
+        Expr { kind, ty: self.table.subst(ty, args), span }
+    }
+
+    /// Calls a task value. Its type has no names, so arguments are positional.
+    fn call_value(&mut self, value: Expr, args: &'a [ast::Arg], span: Span) -> Expr {
+        let Ty::Task(params, returns) = value.ty else {
+            self.poison_args(args, span);
+            if value.ty == Ty::Error {
+                return poisoned(span);
+            }
+            let message = format!("`{}` is not a task", value.ty.name());
+            return self.fail("E0308", message, value.span);
+        };
+        if args.len() != params.len() || args.iter().any(|a| a.change || a.name.is_some()) {
+            self.poison_args(args, span);
+            let (count, plural) = (params.len(), if params.len() == 1 { "" } else { "s" });
+            let message = format!("this task takes {count} positional argument{plural}");
+            return self.fail("E0307", message, span);
+        }
+        let mut values = Vec::with_capacity(args.len());
+        for (arg, &want) in args.iter().zip(params) {
+            let value = self.expected(&arg.value, Some(want));
+            self.expect(&value, want, "this argument");
+            values.push(value);
+        }
+        Expr { kind: ExprKind::CallValue(value.into(), values), ty: *returns, span }
     }
 
     /// Later branches, and any code after an `if` whose branches all leave,
@@ -2257,6 +2554,19 @@ impl<'a> Checker<'a> {
     /// decision 67. `settled` checks the result, once all types are known.
     fn inferred(&mut self, value: &'a ast::Expr, pattern: Ty, known: &mut [Option<Ty>]) -> Expr {
         let want = self.table.partial(pattern, known);
+        // A lambda can give a `U` that only its result shows, once `T` is known.
+        if let (None, Ast::Lambda { params, body }, Ty::Task(types, returns)) =
+            (want, &value.kind, pattern)
+        {
+            let given: Option<Vec<Ty>> =
+                types.iter().map(|&ty| self.table.partial(ty, known)).collect();
+            if let Some(given) = given.filter(|given| given.len() == params.len()) {
+                let result = self.table.partial(*returns, known);
+                let lowered = self.lambda_with(params, body, &given, result, value.span);
+                self.table.unify(pattern, lowered.ty, known);
+                return lowered;
+            }
+        }
         let lowered = self.expected(value, want);
         if want.is_none() {
             self.table.unify(pattern, lowered.ty, known);
@@ -2392,12 +2702,12 @@ impl<'a> Checker<'a> {
 
     /// The `type` or variant that this name builds here, if any.
     fn constructor(&self, name: &str) -> Option<(usize, usize)> {
-        let free = self.lookup(name).is_none() && !self.top.contains_key(name);
+        let free = !self.visible(name) && !self.top.contains_key(name);
         self.constructors.get(name).copied().filter(|_| free)
     }
 
     fn task_named(&self, name: &str) -> Option<usize> {
-        let free = self.lookup(name).is_none() && !self.top.contains_key(name);
+        let free = !self.visible(name) && !self.top.contains_key(name);
         self.task_ids.get(name).copied().filter(|_| free)
     }
 
@@ -2637,6 +2947,9 @@ impl<'a> Checker<'a> {
         if let Some(local) = self.lookup(name) {
             return view(self.read(local, span), self.current(local));
         }
+        if let Some(value) = self.captured(name, span) {
+            return value;
+        }
         if self.returns.is_some() {
             match self.top.get(name) {
                 Some(&Top::Literal(value, ty)) => {
@@ -2658,8 +2971,8 @@ impl<'a> Checker<'a> {
                 None => {}
             }
         }
-        if self.task_ids.contains_key(name) {
-            return self.unsupported("a task used as a value", span);
+        if let Some(&id) = self.task_ids.get(name) {
+            return self.task_value(id, name, None, span);
         }
         if let Some(&(id, variant)) = self.constructors.get(name) {
             if self.datas[id].variants[variant].fields.is_empty() {
@@ -2763,6 +3076,7 @@ impl<'a> Checker<'a> {
                 Expr { kind, ty, span }
             }
             Ast::Call { callee, args } => self.call(callee, args, want, span),
+            Ast::Lambda { params, body } => self.lambda(params, body, want, span),
             Ast::Name(name) => match self.constructor(name) {
                 Some((id, variant)) if self.datas[id].variants[variant].fields.is_empty() => {
                     self.construct((id, variant), None, want, &[], span)
@@ -2776,7 +3090,7 @@ impl<'a> Checker<'a> {
     /// True if `set` here means the built-in, and no name of the program hides it.
     fn is_set_call(&self, name: &str) -> bool {
         name == "set"
-            && self.lookup(name).is_none()
+            && !self.visible(name)
             && !self.top.contains_key(name)
             && !self.task_ids.contains_key(name)
     }
@@ -2893,7 +3207,7 @@ impl<'a> Checker<'a> {
             Ast::Is { value, negated, target } => {
                 return self.is_test(value, *negated, target, span);
             }
-            Ast::Lambda { .. } => return self.unsupported("a lambda", span),
+            Ast::Lambda { params, body } => return self.lambda(params, body, None, span),
             Ast::Index { base, indices } => return self.index(base, indices, span),
             Ast::Field { base, name } => {
                 let value = self.expr(base);
@@ -2922,6 +3236,15 @@ impl<'a> Checker<'a> {
                 return poisoned(span);
             };
             return self.construct((id, variant), Some(&args), None, &[], span);
+        }
+        if let Ast::Name(name) = &base.kind
+            && let Some(id) = self.task_named(name)
+        {
+            let want = self.signatures[id].type_params.len();
+            let Some(args) = self.explicit(indices, want, name, span) else {
+                return poisoned(span);
+            };
+            return self.task_value(id, name, Some(&args), span);
         }
         let value = self.expr(base);
         let slice = match indices {
@@ -3312,7 +3635,9 @@ impl<'a> Checker<'a> {
             ty if ty.is_float() => !int_only,
             Ty::Bool => equality,
             Ty::Text => equality || order,
-            ty if (ty.is_compound() || matches!(ty, Ty::Param(..))) && (equality || order) => {
+            ty if (ty.is_compound() || matches!(ty, Ty::Param(..) | Ty::Task(..)))
+                && (equality || order) =>
+            {
                 let trait_name = if equality { "Equal" } else { "Order" };
                 if !self.require(ty, trait_name, span) {
                     return poisoned(span);
@@ -3390,7 +3715,8 @@ impl<'a> Checker<'a> {
                         return self.task_call(id, name, Some(&types), None, args, span);
                     }
                 }
-                self.unsupported("this call", span)
+                let value = self.expr(callee);
+                self.call_value(value, args, span)
             }
             Ast::Name(name) => {
                 if let Some(target) = self.constructor(name) {
@@ -3399,19 +3725,25 @@ impl<'a> Checker<'a> {
                 if let Some(id) = self.task_named(name) {
                     return self.task_call(id, name, None, None, args, span);
                 }
-                for arg in args {
-                    self.expected(&arg.value, Some(Ty::Error));
-                }
-                if self.lookup(name).is_some() || self.top.contains_key(name.as_str()) {
+                if self.visible(name) || self.top.contains_key(name.as_str()) {
+                    let value = self.name(name, callee.span);
+                    if matches!(value.ty, Ty::Task(..) | Ty::Error) {
+                        return self.call_value(value, args, span);
+                    }
+                    self.poison_args(args, span);
                     return self.fail("E0308", format!("`{name}` is not a task"), callee.span);
                 }
+                self.poison_args(args, span);
                 let diag =
                     Diagnostic::new("E0301", format!("name `{name}` is not defined"), callee.span);
                 let dotted = self.methods.contains_key(name.as_str());
                 let note = format!("`{name}` has `self`, so call it with a dot: `x.{name}()`");
                 self.report(if dotted { diag.note(note) } else { diag })
             }
-            _ => self.unsupported("this call", span),
+            _ => {
+                let value = self.expr(callee);
+                self.call_value(value, args, span)
+            }
         }
     }
 
@@ -3530,6 +3862,19 @@ impl<'a> Checker<'a> {
         tasks.copied().find(|&id| self.signatures[id].name.text == name)
     }
 
+    /// The position and type of a field of a `type` that holds a task value.
+    fn task_field(&mut self, ty: Ty, name: &str) -> Option<(usize, Ty)> {
+        let Ty::Data(_, id, _) = ty else { return None };
+        if self.datas[id].choice {
+            return None;
+        }
+        let fields = &self.datas[id].variants[0].fields;
+        let index = fields.iter().position(|field| field.name == name)?;
+        let field = fields[index].ty;
+        let field = self.subst_data(field, ty);
+        matches!(field, Ty::Task(..)).then_some((index, field))
+    }
+
     /// `x.f(a)` for a task with a `self` parameter. On a type parameter or an
     /// `any` it looks in their traits, and `mono.rs` finds the real task.
     fn method_call(&mut self, value: Expr, name: &str, args: &'a [ast::Arg], span: Span) -> Expr {
@@ -3539,6 +3884,11 @@ impl<'a> Checker<'a> {
         }
         if let Some((id, known)) = self.find_method(name, ty) {
             return self.task_call(id, name, None, Some((value, known)), args, span);
+        }
+        if let Some((field, ty)) = self.task_field(ty, name) {
+            let span = value.span;
+            let kind = ExprKind::Member { value: value.into(), variant: 0, field };
+            return self.call_value(Expr { kind, ty, span }, args, span);
         }
         let poison = self.poison_args(args, span);
         let free = self.task_named(name).is_some();

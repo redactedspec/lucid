@@ -108,6 +108,8 @@ The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and 
 | E0321 | Wrong number of type arguments |
 | E0322 | Type form where a value belongs, or a value where a type belongs |
 | E0323 | Task named after a derived task or operator has the wrong form |
+| E0324 | Lambda has no task type to take from its context |
+| E0325 | Lambda or nested task captures a `var` |
 | E0901 | Parses, but cannot run at this milestone |
 | E0902 | Task frame is too large for the stack check: over 512 KiB, or half the stack for top-level code |
 | E0903 | Too many generic instances: over 20,000, or a type argument of over 256 parts |
