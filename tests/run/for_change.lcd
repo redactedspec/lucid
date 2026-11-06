@@ -1,0 +1,145 @@
+var numbers = [1, 2, 3]
+let before = numbers
+for change n in numbers
+    n *= 2
+print numbers
+print before
+
+# Assignment, field writes, and writes inside elements.
+type Point
+    x: int
+    tags: list[text]
+
+var points = [Point(x: 1, tags: []), Point(x: 2, tags: ["b"])]
+for change p in points
+    p.x += 1
+    p.tags.push("seen")
+print points
+for change p in points
+    p = Point(x: 0, tags: [])
+print points
+
+var grid = [[1, 2], [3]]
+for change row in grid
+    row.push(0)
+    for change cell in row
+        cell += 1
+print grid
+
+# Each way out of the body puts the element back.
+var seen = [1, 2, 3, 4]
+for change n in seen
+    if n == 2
+        n = 20
+        continue
+    if n == 3
+        n = 30
+        break
+    n = 10
+print seen
+
+var words = ["a", "b", "c"]
+for change word in words
+    if word == "b"
+        word = "{word}!"
+        break
+print words
+
+task find_and_mark(change items: list[text], name: text) -> text
+    for change item in items
+        if item == name
+            let old = item
+            item = "[{name}]"
+            return old
+    return "none"
+
+print find_and_mark(change words, "c")
+print words
+print find_and_mark(change words, "x")
+
+task inner_break(change rows: list[list[int]])
+    for change row in rows
+        var left = 2
+        while true
+            left -= 1
+            if left == 0
+                break
+            continue
+        for change cell in row
+            if cell == 3
+                return
+            cell = 0
+
+var rows = [[1, 2], [3, 4], [5]]
+inner_break(change rows)
+print rows
+
+# A field path, while the body uses another field.
+type Bag
+    items: list[int]
+    total: int
+
+task sum(change self: Bag)
+    for change item in self.items
+        self.total += item
+        item = 0
+
+var bag = Bag(items: [1, 2, 3], total: 0)
+bag.sum()
+print bag
+
+var bags = [bag]
+for change item in bags[0].items
+    item = 1
+print bags
+
+# A shared list copies once, and an empty list runs nothing.
+var both = [[1]]
+let keep = both
+for change row in both
+    row.push(2)
+print both
+print keep
+var nothing: list[int] = []
+for change n in nothing
+    print n
+
+# Passing the loop name on.
+task bump(change n: int)
+    n += 1
+
+for change n in numbers
+    bump(change n)
+print numbers
+
+# A narrowed union, and an element that changes its member.
+var maybes: list[int?] = [1, none]
+for change m in maybes
+    if m is not none
+        m += 1
+    else
+        m = 9
+print maybes
+
+var maybe_list: list[int]? = [1]
+if maybe_list is not none
+    for change n in maybe_list
+        n += 1
+print maybe_list
+
+# A loop in a generic task.
+task map_in_place[T](change items: list[T], f: task(T) -> T)
+    for change item in items
+        item = f(item)
+
+map_in_place(change numbers, n => n + 1)
+print numbers
+var names = ["a"]
+map_in_place(change names, n => "{n}{n}")
+print names
+
+# A plain `for` may read the list, and change other parts of a value.
+var moving = Bag(items: [1, 2], total: 0)
+for item in moving.items
+    moving.total += moving.items.len() + item
+print moving

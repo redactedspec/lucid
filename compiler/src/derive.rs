@@ -353,7 +353,8 @@ impl Mono<'_> {
             }
         };
         let locals = body.locals;
-        Task { params, type_params: 0, returns, locals, body: stmts, span, captures: Vec::new() }
+        let (captures, change) = (Vec::new(), Vec::new());
+        Task { params, type_params: 0, returns, locals, body: stmts, span, captures, change }
     }
 
     fn show_body(&mut self, body: &mut Body, ty: Ty) -> Vec<Stmt> {

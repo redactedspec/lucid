@@ -1,0 +1,10 @@
+task swap_values(change a: int, change b: int)
+    let held = a
+    a = b
+    b = held
+
+var items = [1, 2, 3]
+swap_values(change items[0], change items[2])
+print items
+let i = 1
+swap_values(change items[i], change items[2 - 1])

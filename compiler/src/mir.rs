@@ -409,8 +409,10 @@ pub type Local = usize;
 // Counting: a counted expression yields a borrowed reference, which stays valid
 // for its whole statement because a local or `Temp` owns it. Each counted local
 // owns one count, and starts empty. `Set` retains the new value and releases the
-// old one. A parameter is borrowed from the caller, and is never `Set`. `Return`
-// retains its value, then releases every counted local that is not a parameter.
+// old one. A parameter is borrowed from the caller, and is never `Set`, except a
+// `change` parameter, which holds the caller's count for the length of the call.
+// `Return` retains its value, then releases every counted local that is not a
+// parameter.
 //
 // A list, map, set, or record in a local changes only through `Stmt::Update`, which gives
 // the runtime that local's count, and stores the value that comes back. So a
@@ -420,6 +422,10 @@ pub type Local = usize;
 // A write through a path takes the element out of its slot, which holds null
 // until the write ends. The checker reads every index and value before that,
 // so no expression sees the null. A trap on the way ends the process.
+//
+// A statement that passes a local by `change` may replace its value, so a
+// borrow of that local would not stay valid. The exclusivity checks in the
+// checker reject any such borrow. See "Parameters" in docs/compiler.md.
 
 pub struct Program {
     pub tasks: Vec<Task>,
@@ -443,6 +449,8 @@ pub struct Task {
     /// What a lambda or nested task holds, in the record that is its first
     /// parameter. Any other task has none.
     pub captures: Vec<Ty>,
+    /// The parameters passed by `change`, in order.
+    pub change: Vec<Local>,
 }
 
 #[derive(Clone)]
@@ -483,6 +491,8 @@ pub enum Stmt {
     Print(Expr),
     PrintText(String),
     Placeholder(Span),
+    /// Traps with this message.
+    Trap(&'static str, Span),
     /// A path that no value can take. Reaching it is a compiler bug.
     Unreachable,
     Expr(Expr),
@@ -536,6 +546,9 @@ pub enum ExprKind {
     Bool(bool),
     None,
     Local(Local),
+    /// A local passed to a `change` parameter. Only a `Call` holds this, as an
+    /// argument. The local holds what the task left there when the call ends.
+    Change(Local),
     /// An index into `Program::tasks`, its type arguments, and one argument
     /// per parameter. After `mono.rs` the type arguments are empty.
     Call(usize, &'static [Ty], Vec<Expr>),
@@ -652,7 +665,8 @@ pub enum ExprKind {
     Method(&'static str, Vec<Expr>),
     /// Adds the second value to the `int` hash state in the first.
     Hash(HashOp, Box<Expr>, Box<Expr>),
-    /// Runs these statements, which only `Set` hidden locals, then gives a value.
+    /// Runs these statements, then gives a value. They only touch hidden
+    /// locals, or a place that a `change` argument took out and puts back.
     Seq(Vec<Stmt>, Box<Expr>),
     /// Evaluates a new value, and stores its count in this local, whose old
     /// value is released. Added by `ownership.rs`.
@@ -693,6 +707,7 @@ pub trait Visit {
             | Stmt::Continue
             | Stmt::PrintText(_)
             | Stmt::Placeholder(_)
+            | Stmt::Trap(..)
             | Stmt::Unreachable => {}
         }
     }
@@ -704,6 +719,7 @@ pub trait Visit {
             | ExprKind::Bool(_)
             | ExprKind::None
             | ExprKind::Local(_)
+            | ExprKind::Change(_)
             | ExprKind::Capture(_)
             | ExprKind::Text(_) => {}
             ExprKind::Call(_, _, values)

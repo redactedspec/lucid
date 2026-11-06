@@ -47,7 +47,7 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] `any` values
 - [x] Sized numbers, wrapping math tasks
 - [x] Nested tasks, lambdas, task values
-- [ ] Parameter modes, exclusivity checks, `for change` over lists
+- [x] Parameter modes, exclusivity checks, `for change` over lists
 - [x] Naive reference counting, leak-checking debug runtime
 - [ ] Draft `docs/agent-guide.md`, and run a 10-task agent trial
 

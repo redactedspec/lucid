@@ -8,7 +8,7 @@ let c: text = "x"
 type User
     name: text
 
-task f(change a: int)
+task f(a: int)
     return
 
 let d = 1 + 1

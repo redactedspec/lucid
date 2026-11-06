@@ -4,7 +4,7 @@ task_values.lcd:2:14: error E0324: a lambda needs a task type here
   note: write its type, as in `let f: task(int) -> int = x => x`, or pass it after the values that show its type
 task_values.lcd:3:27: error E0307: this lambda has 2 parameters, and needs 1
 task_values.lcd:4:33: error E0303: this lambda needs `text`, found `int`
-task_values.lcd:6:30: error E0325: `count` is a `var`, so it cannot be captured
+task_values.lcd:6:30: error E0325: `count` can change, so it cannot be captured
   note: copy it first, with `let copy = count`
 task_values.lcd:8:7: error E0307: this task takes 1 positional argument
 task_values.lcd:9:7: error E0307: this task takes 1 positional argument
@@ -21,12 +21,12 @@ task_values.lcd:24:9: error E0319: cannot tell what `T` is here
   note: name the types, as in `gen[int](...)`
 task_values.lcd:25:9: error E0321: `gen` takes 1 type argument, found 2
 task_values.lcd:26:29: error E0303: this annotation needs `task(text) -> text`, found `task(int) -> int`
-task_values.lcd:28:10: error E0307: a nested task takes no type parameters, `self`, or defaults
+task_values.lcd:28:10: error E0307: a nested task takes no type parameters, `self`, defaults, or `change`
 task_values.lcd:28:22: error E0302: type `T` is not defined
-task_values.lcd:30:10: error E0307: a nested task takes no type parameters, `self`, or defaults
+task_values.lcd:30:10: error E0307: a nested task takes no type parameters, `self`, defaults, or `change`
 task_values.lcd:32:10: error E0309: `missing` must return `int` on every path
 task_values.lcd:36:9: error E0305: `r` cannot change
-task_values.lcd:39:16: error E0325: `v` is a `var`, so it cannot be captured
+task_values.lcd:39:16: error E0325: `v` can change, so it cannot be captured
   note: copy it first, with `let copy = v`
 task_values.lcd:41:16: error E0301: name `not_yet` is not defined
 task_values.lcd:45:17: error E0324: a lambda needs a task type here

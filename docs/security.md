@@ -6,7 +6,7 @@ Safe Lucid code cannot produce:
 
 | Failure class | Prevented by |
 | --- | --- |
-| Use after free, double free | Ownership and reference counting |
+| Use after free, double free | Ownership, reference counting, and the exclusivity checks |
 | Buffer overflow | Bounds checks, unless the compiler proves them redundant |
 | Null dereference | No null. `T?` must be narrowed before use |
 | Uninitialized reads | All values initialized |

@@ -1,4 +1,2 @@
-collection_later.lcd:5:17: error E0901: `for change` on a list parses, but cannot run yet
-  note: see docs/roadmap.md for the milestone that adds it
-collection_later.lcd:7:14: error E0901: a range outside `for` parses, but cannot run yet
+collection_later.lcd:4:14: error E0901: a range outside `for` parses, but cannot run yet
   note: see docs/roadmap.md for the milestone that adds it

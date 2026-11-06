@@ -1,7 +1,4 @@
 # Features of collections that wait for later roadmap items.
 let a = [1]
 let b = 1
-var c = [1]
-for change d in c
-    print d
 print {1: 2}[1..2]

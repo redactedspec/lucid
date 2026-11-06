@@ -5,7 +5,7 @@ cannot_change.lcd:3:1: error E0305: `a` cannot change
 cannot_change.lcd:5:5: error E0305: `i` cannot change
   note: only a name declared with `var` can change
 cannot_change.lcd:8:5: error E0305: `p` cannot change
-  note: only a name declared with `var` can change
+  note: a parameter is read-only: declare it `change` to change the caller's value, or `take` to own a copy
 cannot_change.lcd:9:5: error E0305: `limit` cannot change
 cannot_change.lcd:16:1: error E0305: `g` cannot change
 cannot_change.lcd:16:5: error E0301: name `totl` is not defined

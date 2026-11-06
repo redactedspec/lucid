@@ -1,0 +1,85 @@
+task bump(change n: int)
+    n += 1
+
+task read(n: int) -> int
+    return n
+
+task f(a: list[int])
+    a.push(1)
+
+let fixed = 1
+var open = 1
+var wide: int? = 1
+var items = [1]
+
+bump(open)
+read(change open)
+bump(change fixed)
+bump(change 1)
+bump(change items.len())
+bump(change wide)
+
+task named(n: int, change by: int = 1)
+    return
+
+task plain(n: int = 1, m: int = 2)
+    return
+
+bump(n: open)
+
+task bad_default(change n: int = 1)
+    return
+
+let value = bump
+
+task outer()
+    task inner(change x: int)
+        return
+
+trait Step
+    task step(change self)
+
+type A
+    n: int
+
+task step(self: A)
+    return
+
+task use_it[T: Step](x: T)
+    return
+
+use_it(A(n: 1))
+
+task show(change self: A) -> text
+    return "a"
+
+task pinned(take n: int, change m: int)
+    let f: task() -> int = () => n
+    let g: task() -> int = () => m
+    return
+
+task self_read(self: A)
+    self = A(n: 1)
+
+task call_any(x: any Step)
+    x.step()
+
+task use_any(x: any Step)
+    use_it(x)
+
+task empty_check(change self: A) -> bool
+    return true
+
+task is_empty(change self: A) -> bool
+    return true
+
+var a = A(n: 1)
+print a is empty
+
+task store[T](change a: T, b: T)
+    a = b
+
+var wide_value: int or text or bool = 1
+if wide_value is not bool
+    store(change wide_value, true)
+    let narrow: int or text = wide_value

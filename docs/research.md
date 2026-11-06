@@ -31,6 +31,7 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | Compact ordered map, SipHash with random keys | Supported by Python and Rust practice | Snippet | Benchmark at M4 |
 | A written `equal` removes derived `Hash` | Python and Clippy both guard this rule | Snippet | None |
 | `any` by tag tests over the whole program, not a vtable | Differs from Rust and Swift, and no benchmark yet | Snippet | Measure at M4 |
+| `change` as copy-in copy-out, with static exclusivity | Follows Swift `inout`, and stricter than Rust or Swift inside a statement | Read | Agent trial at M3 |
 
 ## Memory
 
@@ -284,6 +285,17 @@ Decisions 82 and 83. Level: **Snippet**: the spec itself was not read, so check 
 - **Go.** A 2011 spec change allows a slice, map, or function value to be compared only to `nil`, and the type checker's test data expects "func can only be compared to nil". A mailing list thread says that function comparison was removed because it made closures surprising. That thread is a discussion, not the spec.
 
 Sources: [spec change, in a Japanese write-up](https://kijimad.github.io/comemo/10370.html), [go/types test data](https://golang.google.cn/src/internal/types/testdata/spec/comparisons.go), [golang-nuts thread](https://groups.google.com/g/golang-nuts/c/b-WtVh3H_oY).
+
+## Parameter modes
+
+Decisions 84 to 88. Swift book and RFC 2025: **Read**, the sections cited. Java: **Read**. SE-0176 was not reloaded for this: its address has moved, so the Swift rule below comes from the book. No source was read on how often agents hit a rule like E0326.
+
+- **Swift `inout`.** The reference defines the steps: the argument is copied at the call, the body changes the copy, and the copy is assigned back on return. It names this "copy-in copy-out" or "call by value result". It also says that reading the original during the call is "a simultaneous access of the value, which violates memory exclusivity". So Lucid's stack slot is the defined behavior, not an approximation. The reference also makes a closure that captures an in-out parameter nonescaping. Lucid has no nonescaping closures yet, so E0325 forbids the capture.
+- **Rust two-phase borrows.** RFC 2025 opens with `vec.push(vec.len())` as what it must accept, and lets reads happen during a "reservation" before the mutable borrow starts. This is why decision 86 lets a plain value of the same variable go with a `change`. It covers method calls only, as "a conservative step", which supports starting narrow in Lucid too.
+- **Changing a collection while looping.** Java detects this at run time, and its documentation says the check is "best-effort", so it "should be used only to detect bugs". Rust rejects it through borrows. Decision 87 makes it a compile error, with no run-time cost.
+- **Not found.** No measurement compares copy-in copy-out with a pointer to the variable. Lucid's form loads and stores once per call, and M4 benchmarks will show the cost.
+
+Sources: [Swift reference, In-Out Parameters](https://github.com/swiftlang/swift-book/blob/main/TSPL.docc/ReferenceManual/Declarations.md), [RFC 2025](https://rust-lang.github.io/rfcs/2025-nested-method-calls.html), [ConcurrentModificationException](https://docs.oracle.com/javase/8/docs/api/java/util/ConcurrentModificationException.html).
 
 ## Open research
 

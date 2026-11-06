@@ -84,9 +84,10 @@ var once = [0, 0]
 once[next(1)] += 5
 print once[1]
 
-# A loop keeps the list it started with.
+# A loop over a copy can change the list.
 var moving = [1, 2, 3]
-for item in moving
+let copy = moving
+for item in copy
     moving.push(item)
     moving[0] = 100
 print moving.len()

@@ -91,6 +91,37 @@ struct Frame<'a> {
     captures: Vec<(String, Expr)>,
     /// The name of this nested task, which reads as its own first parameter.
     own_name: Option<&'a str>,
+    /// How many locals are parameters.
+    params: usize,
+    /// What the open `for` loops visit.
+    busy: Vec<Busy<'a>>,
+    /// What the statements being lowered pass as `change`.
+    changed: Vec<Changed<'a>>,
+    /// True while a `change` argument finds its place.
+    opening: bool,
+    /// The fields that the `change` arguments of a call have taken out: the
+    /// local of the container, the slot, and the local that holds the field.
+    /// A second path through the same field goes on from that local.
+    opened: Vec<(Local, i64, Local)>,
+}
+
+/// A path that a `for` visits. A plain `for` lets the body read it. `for change`
+/// has taken it out, so the body cannot touch it at all.
+struct Busy<'a> {
+    local: Local,
+    path: Vec<&'a str>,
+    exclusive: bool,
+}
+
+/// A path passed as `change`, and the code that may use it in that statement.
+struct Changed<'a> {
+    root: &'a str,
+    path: Vec<&'a str>,
+    span: Span,
+    /// Other arguments of the call that may overlap: the `change` arguments,
+    /// checked by `check_overlap`, and those that give a plain value, which is
+    /// done before the call starts and leaves no borrow behind.
+    peers: Vec<Span>,
 }
 
 /// The traits that each type parameter in scope has, by position.
@@ -110,6 +141,7 @@ struct Param<'a> {
     name: &'a str,
     ty: Ty,
     default: Option<Expr>,
+    mode: ast::ParamMode,
 }
 
 /// A written type name.
@@ -170,6 +202,14 @@ struct Covered {
     /// The variants of a `choice`, or the type ids of a union.
     variants: HashSet<usize>,
     literals: HashSet<String>,
+}
+
+/// The value before the dot of a call, what its type shows about the task's
+/// type parameters, and for a `change` receiver, where it came from.
+struct Receiver<'a> {
+    value: Expr,
+    known: Vec<Option<Ty>>,
+    changed: Option<(&'a ast::Expr, Place)>,
 }
 
 /// What a task can see of a top-level `let` or `var`.
@@ -285,11 +325,20 @@ fn is_literal(expr: &ast::Expr) -> bool {
     }
 }
 
+/// One step of a place: a field, or the local that holds an index or key.
+#[derive(Clone, Copy, PartialEq)]
+enum Step {
+    Slot(i64),
+    Key(Local),
+}
+
 /// A place to write through, such as `x[i]` in `x[i][j] = 1`. `local` holds the
 /// value, and `setup` fills it. `take` empties its slot in the container, so
 /// that the local holds the only count and the write needs no copy. `finish`
 /// stores it back. Nothing may read the container between `take` and `finish`.
 struct Place {
+    root: Local,
+    path: Vec<Step>,
     local: Local,
     setup: Vec<Stmt>,
     take: Vec<Stmt>,
@@ -297,6 +346,11 @@ struct Place {
 }
 
 impl Place {
+    fn at(local: Local) -> Self {
+        let (path, setup, take, finish) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        Place { root: local, path, local, setup, take, finish }
+    }
+
     /// The whole write. `write` holds the value that the write changes.
     fn stmts(mut self, write: Stmt) -> Stmt {
         self.setup.append(&mut self.take);
@@ -304,6 +358,11 @@ impl Place {
         self.setup.append(&mut self.finish);
         Stmt::Block(self.setup)
     }
+}
+
+/// True if `outer` holds all of `inner`.
+fn contains(outer: Span, inner: Span) -> bool {
+    outer.start <= inner.start && inner.end <= outer.end
 }
 
 /// True if control never reaches the end of `stmts`. With `jumps`, leaving
@@ -499,16 +558,28 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Runs before a loop: its body runs again after its own assignments.
-    ///
-    /// When `change` parameters arrive, passing a local must also `forget` it.
+    /// Runs before a loop: its body runs again after its own assignments, and
+    /// after each name it passes whole as `change`.
     fn forget_assigned(&mut self, stmts: &'a [ast::Stmt]) {
         for stmt in stmts {
+            let mut uses = Vec::new();
+            stmt.values().into_iter().flatten().for_each(|value| value.uses(&mut uses));
+            for found in uses.iter().filter(|found| found.change) {
+                if let Some(local) = self.lookup(found.root) {
+                    self.forget(local);
+                }
+            }
             match &stmt.kind {
-                StmtKind::Assign { target: ast::Expr { kind: Ast::Name(name), .. }, .. } => {
-                    if let Some(local) = self.lookup(name) {
+                StmtKind::Assign { target, value, .. } => {
+                    let name = match &target.kind {
+                        Ast::Name(name) => Some(name.as_str()),
+                        Ast::SelfValue => Some("self"),
+                        _ => None,
+                    };
+                    if let Some(local) = name.and_then(|name| self.lookup(name)) {
                         self.forget(local);
                     }
+                    self.forget_in_arms(value);
                 }
                 StmtKind::If { branches, otherwise } => {
                     for (_, then) in branches {
@@ -519,14 +590,22 @@ impl<'a> Checker<'a> {
                 StmtKind::While { body, .. } | StmtKind::For { body, .. } => {
                     self.forget_assigned(body);
                 }
-                StmtKind::Expr(ast::Expr { kind: Ast::Match { arms, .. }, .. }) => {
-                    for arm in arms {
-                        if let ast::ArmBody::Block(body) = &arm.body {
-                            self.forget_assigned(body);
-                        }
-                    }
-                }
+                StmtKind::Expr(value)
+                | StmtKind::Let { value, .. }
+                | StmtKind::Return(Some(value)) => self.forget_in_arms(value),
                 _ => {}
+            }
+        }
+    }
+
+    /// Does the same for the statements in the arms of a `match`.
+    fn forget_in_arms(&mut self, value: &'a ast::Expr) {
+        let Ast::Match { arms, .. } = &value.kind else { return };
+        for arm in arms {
+            match &arm.body {
+                ast::ArmBody::Block(body) => self.forget_assigned(body),
+                ast::ArmBody::Stmt(stmt) => self.forget_assigned(std::slice::from_ref(&**stmt)),
+                ast::ArmBody::Expr(value) => self.forget_in_arms(value),
             }
         }
     }
@@ -925,7 +1004,8 @@ impl<'a> Checker<'a> {
         if let Ty::Any(held) = ty
             && (held == name || matches!(name, "Show" | "Equal"))
         {
-            return true;
+            let tasks = self.traits.get(name).cloned().unwrap_or_default();
+            return !tasks.into_iter().any(|task| self.changes(task));
         }
         if ty.too_large() || seen.len() == MAX_FINITE_CHECK {
             return false;
@@ -1030,7 +1110,18 @@ impl<'a> Checker<'a> {
             (self.signatures[task].returns, self.signatures[id].returns);
         let have: Vec<Ty> = have.into_iter().map(|p| self.table.subst(p, &args)).collect();
         let have_returns = self.table.subst(have_returns, &args);
-        wanted.len() == have.len() && wanted[1..] == have[1..] && want_returns == have_returns
+        let modes = |task: &Signature| -> Vec<bool> {
+            task.params.iter().map(|p| p.mode == ast::ParamMode::Change).collect()
+        };
+        wanted.len() == have.len()
+            && wanted[1..] == have[1..]
+            && want_returns == have_returns
+            && modes(&self.signatures[task]) == modes(&self.signatures[id])
+    }
+
+    /// True if a task has a `change` parameter.
+    fn changes(&self, task: usize) -> bool {
+        self.signatures[task].params.iter().any(|p| p.mode == ast::ParamMode::Change)
     }
 
     /// The task with a `self` parameter that takes this type, if any, and what
@@ -1323,6 +1414,7 @@ impl<'a> Checker<'a> {
         };
         let count = signature.type_params.len();
         let fits = signature.params.len() == others + 1
+            && !self.changes(id)
             && signature.params[1..].iter().all(|p| p.ty == receiver)
             && signature.returns == returns
             && receiver.is_compound()
@@ -1413,8 +1505,8 @@ impl<'a> Checker<'a> {
         let mut params: Vec<Param<'a>> = Vec::new();
         for param in &sig.params {
             let span = param.name.span;
-            if param.mode != ast::ParamMode::Read {
-                self.unsupported("a `change` or `take` parameter", span);
+            if param.mode == ast::ParamMode::Change && param.default.is_some() {
+                self.fail("E0307", "a `change` parameter takes no default".into(), span);
             }
             let ty = param.ty.as_ref().map_or(Ty::Error, |ty| self.ty(ty));
             if param.name.text == "self" {
@@ -1435,7 +1527,7 @@ impl<'a> Checker<'a> {
                     format!("`{}` needs a default, like the one before it", param.name.text);
                 self.fail("E0307", message, span);
             }
-            params.push(Param { name: &param.name.text, ty, default });
+            params.push(Param { name: &param.name.text, ty, default, mode: param.mode });
         }
         let returns = sig.returns.as_ref().map_or(Ty::None, |ty| self.ty(ty));
         self.type_params.clear();
@@ -1463,14 +1555,28 @@ impl<'a> Checker<'a> {
         self.frame.returns = Some(returns);
         self.type_params.clone_from(&self.signatures[id].type_params);
         self.bounds.clone_from(&self.signatures[id].bounds);
-        let params: Vec<(&'a str, Ty)> =
-            self.signatures[id].params.iter().map(|p| (p.name, p.ty)).collect();
+        let params: Vec<(&'a str, Ty, ast::ParamMode)> =
+            self.signatures[id].params.iter().map(|p| (p.name, p.ty, p.mode)).collect();
         let mut scope = HashMap::new();
-        for &(name, ty) in &params {
-            scope.insert(name, self.new_local(ty, false));
+        let mut change = Vec::new();
+        for &(name, ty, mode) in &params {
+            let changes = mode == ast::ParamMode::Change;
+            let local = self.new_local(ty, changes);
+            scope.insert(name, local);
+            change.extend(changes.then_some(local));
+        }
+        self.frame.params = params.len();
+        let mut lowered = Vec::new();
+        for (param, &(name, _, mode)) in params.iter().enumerate() {
+            if mode == ast::ParamMode::Take {
+                let (own, set) = self.own_param(param, span);
+                scope.insert(name, own);
+                lowered.push(set);
+            }
         }
         self.frame.scopes.push(scope);
-        let body = self.stmts(body);
+        lowered.extend(self.stmts(body));
+        let body = lowered;
         self.frame.scopes.pop();
         self.check_returns(&def.sig.name, returns, &body);
         self.frame.mutable.clear();
@@ -1479,7 +1585,15 @@ impl<'a> Checker<'a> {
         self.bounds.clear();
         let locals = std::mem::take(&mut self.frame.locals);
         let captures = Vec::new();
-        Task { params: params.len(), type_params, returns, locals, body, span, captures }
+        self.frame.params = 0;
+        Task { params: params.len(), type_params, returns, locals, body, span, captures, change }
+    }
+
+    /// A `take` parameter arrives borrowed, like any other. A local takes its
+    /// own count on it, so the task can change it and the caller never sees.
+    fn own_param(&mut self, param: Local, span: Span) -> (Local, Stmt) {
+        let local = self.new_local(self.frame.locals[param], true);
+        (local, Stmt::Set(local, self.read(param, span)))
     }
 
     /// Reports E0309 unless a body with a return type returns on every path.
@@ -1496,8 +1610,8 @@ impl<'a> Checker<'a> {
         let body = self.stmts(&file.stmts);
         let span = Span { start: 0, end: 0 };
         let locals = std::mem::take(&mut self.frame.locals);
-        let captures = Vec::new();
-        Task { params: 0, type_params: 0, returns: Ty::None, locals, body, span, captures }
+        let (captures, change) = (Vec::new(), Vec::new());
+        Task { params: 0, type_params: 0, returns: Ty::None, locals, body, span, captures, change }
     }
 
     fn new_local(&mut self, ty: Ty, mutable: bool) -> Local {
@@ -1545,6 +1659,72 @@ impl<'a> Checker<'a> {
     }
 
     fn stmt(&mut self, stmt: &'a ast::Stmt) -> Option<Stmt> {
+        self.check_busy_reads(stmt);
+        let start = self.frame.changed.len();
+        let lowered = self.statement(stmt);
+        self.check_changed(stmt, start);
+        lowered
+    }
+
+    /// Nothing may touch what a `for change` has taken out.
+    fn check_busy_reads(&mut self, stmt: &'a ast::Stmt) {
+        if !self.frame.busy.iter().any(|busy| busy.exclusive) {
+            return;
+        }
+        let mut uses = Vec::new();
+        stmt.values().into_iter().flatten().for_each(|value| value.uses(&mut uses));
+        for found in uses {
+            let Some(local) = self.lookup(found.root) else { continue };
+            let clash = |busy: &Busy| {
+                busy.exclusive && busy.local == local && ast::overlap(&busy.path, &found.path)
+            };
+            if self.frame.busy.iter().any(clash) {
+                let root = found.root;
+                let message = format!("`{root}` cannot be used while `for change` visits it");
+                let diag = Diagnostic::new("E0326", message, found.span);
+                self.report(diag.note("use the loop name, or move this out of the loop"));
+            }
+        }
+    }
+
+    /// A value that a statement reads may be a borrow that lasts to its end, so
+    /// no other part of it may use what a `change` argument changes.
+    fn check_changed(&mut self, stmt: &'a ast::Stmt, start: usize) {
+        let changed = self.frame.changed.split_off(start);
+        if changed.is_empty() {
+            return;
+        }
+        // A write reads its way down first, so a path beside it is not safe.
+        let mut writes: Vec<Span> = changed.iter().map(|change| change.span).collect();
+        writes.extend(stmt.target().map(|target| target.span));
+        for group in stmt.values() {
+            let mut uses = Vec::new();
+            group.iter().for_each(|value| value.uses(&mut uses));
+            let held = |change: &Changed| {
+                uses.iter().any(|found| {
+                    found.root == change.root
+                        && change.peers.iter().any(|&peer| contains(peer, found.span))
+                })
+            };
+            for change in changed.iter().filter(|change| held(change)) {
+                let clash = uses.iter().find(|found| {
+                    found.root == change.root
+                        && (ast::overlap(&found.path, &change.path) || writes.contains(&found.span))
+                        && !change.peers.iter().any(|&peer| contains(peer, found.span))
+                });
+                let Some(found) = clash else { continue };
+                if self.diags.iter().any(|diag| diag.code == "E0326" && diag.span == found.span) {
+                    continue;
+                }
+                let root = found.root;
+                let message = format!("`{root}` is used here while this statement changes it");
+                let diag = Diagnostic::new("E0326", message, found.span);
+                self.report(diag.note("split it in two, and name the value with `let`"));
+            }
+        }
+    }
+
+    fn statement(&mut self, stmt: &'a ast::Stmt) -> Option<Stmt> {
         let span = stmt.span;
         Some(match &stmt.kind {
             StmtKind::Task(def) => {
@@ -1659,7 +1839,9 @@ impl<'a> Checker<'a> {
         let captures = values.iter().map(|value| value.ty).collect();
         let (type_params, args) = self.own_type_args();
         let params = params.len() + 1;
-        self.lifted.push(Task { params, type_params, returns, locals, body, span, captures });
+        let change = Vec::new();
+        let task = Task { params, type_params, returns, locals, body, span, captures, change };
+        self.lifted.push(task);
         let task = self.first_lifted + self.lifted.len() - 1;
         let fields = values.into_iter().enumerate().collect();
         Expr { kind: ExprKind::Closure { task, args, counted: 0, fields }, ty, span }
@@ -1683,27 +1865,36 @@ impl<'a> Checker<'a> {
         if def.public {
             self.unsupported("`public`", span);
         }
-        let wrong = "a nested task takes no type parameters, `self`, or defaults";
-        if !sig.type_params.is_empty()
-            || sig.params.iter().any(|p| p.name.text == "self" || p.default.is_some())
-        {
+        let wrong = "a nested task takes no type parameters, `self`, defaults, or `change`";
+        let plain = |p: &ast::Param| {
+            p.name.text != "self" && p.default.is_none() && p.mode != ast::ParamMode::Change
+        };
+        if !sig.type_params.is_empty() || !sig.params.iter().all(plain) {
             self.fail("E0307", wrong.into(), sig.name.span);
         }
         let mut params = Vec::with_capacity(sig.params.len());
         for param in &sig.params {
-            if param.mode != ast::ParamMode::Read {
-                self.unsupported("a `change` or `take` parameter", param.name.span);
-            }
             params.push(param.ty.as_ref().map_or(Ty::Error, |ty| self.ty(ty)));
         }
         let returns = sig.returns.as_ref().map_or(Ty::None, |ty| self.ty(ty));
         let ty = Ty::Task(params.clone().leak(), inner(returns));
         self.start_closure(ty, returns);
         self.frame.own_name = Some(&sig.name.text);
+        let mut lowered = Vec::new();
         for (param, &ty) in sig.params.iter().zip(&params) {
             self.bind(&param.name, ty, false);
         }
-        let body = self.stmts(body);
+        self.frame.params = self.frame.locals.len();
+        for (param, written) in sig.params.iter().enumerate() {
+            if written.mode == ast::ParamMode::Take {
+                let (own, set) = self.own_param(param + 1, written.name.span);
+                let scope = self.frame.scopes.last_mut().expect("a scope is open");
+                scope.insert(&written.name.text, own);
+                lowered.push(set);
+            }
+        }
+        lowered.extend(self.stmts(body));
+        let body = lowered;
         self.check_returns(&sig.name, returns, &body);
         let value = self.end_closure(&params, returns, body, span);
         Some(Stmt::Set(self.bind(&sig.name, ty, false), value))
@@ -1782,7 +1973,7 @@ impl<'a> Checker<'a> {
         let inside = std::mem::replace(&mut self.frame, outer);
         let found = match self.lookup(name) {
             Some(local) if self.frame.mutable[local] => {
-                let message = format!("`{name}` is a `var`, so it cannot be captured");
+                let message = format!("`{name}` can change, so it cannot be captured");
                 let note = format!("copy it first, with `let copy = {name}`");
                 Some(self.report(Diagnostic::new("E0325", message, span).note(note)))
             }
@@ -1817,6 +2008,10 @@ impl<'a> Checker<'a> {
                 self.require(ty, name, span);
             }
         }
+        if self.changes(id) {
+            let message = format!("`{name}` has a `change` parameter, so it has no value form");
+            return self.fail("E0307", message, span);
+        }
         let signature = &self.signatures[id];
         let types: Vec<Ty> = signature.params.iter().map(|p| p.ty).collect();
         let returns = signature.returns;
@@ -1837,9 +2032,10 @@ impl<'a> Checker<'a> {
                 locals.extend(&types);
                 let params = locals.len();
                 let type_params = own.len();
-                let captures = Vec::new();
+                let (captures, change) = (Vec::new(), Vec::new());
                 let body = vec![Stmt::Return(call)];
-                let code = Task { params, type_params, returns, locals, body, span, captures };
+                let code =
+                    Task { params, type_params, returns, locals, body, span, captures, change };
                 self.lifted.push(code);
                 let task = self.first_lifted + self.lifted.len() - 1;
                 self.task_values.insert(id, task);
@@ -2277,8 +2473,10 @@ impl<'a> Checker<'a> {
         value: &'a ast::Expr,
         span: Span,
     ) -> Option<Stmt> {
+        self.check_write(target);
         let name = match &target.kind {
-            Ast::Name(name) => name,
+            Ast::Name(name) => name.as_str(),
+            Ast::SelfValue => "self",
             Ast::Index { base, indices } => {
                 return self.assign_index(base, indices, op, value, span);
             }
@@ -2327,9 +2525,26 @@ impl<'a> Checker<'a> {
         }
         if !self.frame.mutable[local] {
             let diag = Diagnostic::new("E0305", format!("`{name}` cannot change"), span);
-            self.report(diag.note("only a name declared with `var` can change"));
+            self.report(diag.note(if local < self.frame.params {
+                "a parameter is read-only: declare it `change` to change the caller's value, or `take` to own a copy"
+            } else {
+                "only a name declared with `var` can change"
+            }));
         }
         Some(local)
+    }
+
+    /// Reports E0326 if a plain `for` visits what this write changes.
+    fn check_write(&mut self, target: &ast::Expr) {
+        let Some((root, path)) = target.path() else { return };
+        let Some(local) = self.lookup(root) else { return };
+        let clash =
+            |busy: &Busy| !busy.exclusive && busy.local == local && ast::overlap(&busy.path, &path);
+        if self.frame.busy.iter().any(clash) {
+            let message = format!("`{root}` cannot change while a `for` visits it");
+            let diag = Diagnostic::new("E0326", message, target.span);
+            self.report(diag.note(format!("loop over a copy: `let copy = {root}`")));
+        }
     }
 
     fn read(&self, local: Local, span: Span) -> Expr {
@@ -2340,10 +2555,13 @@ impl<'a> Checker<'a> {
     /// that is written, so that the order is the order on the page.
     fn place(&mut self, target: &'a ast::Expr) -> Option<Place> {
         match &target.kind {
-            Ast::Name(name) => {
+            Ast::Name(_) | Ast::SelfValue => {
+                let name = match &target.kind {
+                    Ast::Name(name) => name,
+                    _ => "self",
+                };
                 let local = self.variable(name, target.span)?;
-                let place =
-                    Place { local, setup: Vec::new(), take: Vec::new(), finish: Vec::new() };
+                let place = Place::at(local);
                 let (ty, span) = (self.current(local), target.span);
                 if ty == self.frame.locals[local] || matches!(ty, Ty::Union(_)) {
                     return Some(place);
@@ -2356,7 +2574,7 @@ impl<'a> Checker<'a> {
             Ast::Index { base, indices } => {
                 let mut place = self.place(base)?;
                 let (key, item) = self.key(self.frame.locals[place.local], indices, target.span)?;
-                let key = self.hoist(key, &mut place);
+                let key = self.hoist(key, &mut place.setup, &mut place.finish);
                 let read = self.element(place.local, key, item, target.span);
                 let key = self.read(key, target.span);
                 Some(self.step(place, key, read))
@@ -2381,7 +2599,25 @@ impl<'a> Checker<'a> {
     /// Goes one level deeper: `read` is the element at `key` of `place`.
     fn step(&mut self, mut place: Place, key: Expr, read: Expr) -> Place {
         let (span, item) = (read.span, read.ty);
+        let step = match key.kind {
+            ExprKind::Int(slot) => Step::Slot(slot),
+            ExprKind::Local(local) => Step::Key(local),
+            _ => unreachable!("a key is hoisted, and a slot is a number"),
+        };
+        place.path.push(step);
+        let parent = place.local;
+        let opened =
+            |&&(local, slot, _): &&(Local, i64, Local)| local == parent && Step::Slot(slot) == step;
+        if self.frame.opening
+            && let Some(&(_, _, child)) = self.frame.opened.iter().find(opened)
+        {
+            place.local = child;
+            return place;
+        }
         let value = self.new_local(item, true);
+        if let (true, Step::Slot(slot)) = (self.frame.opening, step) {
+            self.frame.opened.push((parent, slot, value));
+        }
         place.setup.push(Stmt::Set(value, read));
         let empty = Expr { kind: ExprKind::None, ty: Ty::None, span };
         place.take.push(self.write(place.local, key.clone(), empty, span));
@@ -2395,12 +2631,12 @@ impl<'a> Checker<'a> {
 
     /// Moves a value to a hidden local, so that it can be read twice or read
     /// before `take`. The local lets go of it when the write ends.
-    fn hoist(&mut self, value: Expr, place: &mut Place) -> Local {
+    fn hoist(&mut self, value: Expr, setup: &mut Vec<Stmt>, finish: &mut Vec<Stmt>) -> Local {
         let local = self.new_local(value.ty, false);
         if value.ty.is_counted() {
-            place.finish.push(Stmt::Clear(local));
+            finish.push(Stmt::Clear(local));
         }
-        place.setup.push(Stmt::Set(local, value));
+        setup.push(Stmt::Set(local, value));
         local
     }
 
@@ -2441,7 +2677,7 @@ impl<'a> Checker<'a> {
             self.expected(value, Some(Ty::Error));
             return None;
         };
-        let key = self.hoist(key, &mut place);
+        let key = self.hoist(key, &mut place.setup, &mut place.finish);
         let value = match compound(op) {
             Some(op) => {
                 let old = self.element(local, key, item, span);
@@ -2715,7 +2951,7 @@ impl<'a> Checker<'a> {
             return value;
         }
         let span = value.span;
-        let value = self.hoist(value, place);
+        let value = self.hoist(value, &mut place.setup, &mut place.finish);
         self.read(value, span)
     }
 
@@ -2739,6 +2975,7 @@ impl<'a> Checker<'a> {
             let (stmt, result) = self.pop(base, args, span);
             return Some(self.with_held(vec![stmt], result));
         }
+        self.check_write(base);
         let mut place = self.place(base)?;
         let local = place.local;
         let ty = self.frame.locals[local];
@@ -2777,6 +3014,7 @@ impl<'a> Checker<'a> {
     /// Gives a statement and the local that holds the value.
     fn pop(&mut self, base: &'a ast::Expr, args: &'a [ast::Arg], span: Span) -> (Stmt, Local) {
         let nothing = Stmt::Block(Vec::new());
+        self.check_write(base);
         let Some(place) = self.place(base) else {
             return (nothing, self.new_local(Ty::Error, false));
         };
@@ -2819,11 +3057,12 @@ impl<'a> Checker<'a> {
         &mut self,
         name: &'a ast::Name,
         ty: Ty,
+        mutable: bool,
         body: &'a [ast::Stmt],
     ) -> (Local, Vec<Stmt>) {
         self.forget_assigned(body);
         self.frame.scopes.push(HashMap::new());
-        let local = self.bind(name, ty, false);
+        let local = self.bind(name, ty, mutable);
         self.frame.loops += 1;
         let body = self.stmts(body);
         self.frame.loops -= 1;
@@ -2841,12 +3080,17 @@ impl<'a> Checker<'a> {
         let Ast::Binary(op @ (BinaryOp::Range | BinaryOp::RangeInclusive), start, end) =
             &iterable.kind
         else {
+            let reported = self.diags.len();
             let value = self.expr(iterable);
             let span = value.span;
             let value = match (change, value.ty) {
                 (_, Ty::Error) => value,
                 (true, Ty::Text) => self.fail("E0303", "text cannot change".into(), span),
-                (true, Ty::List(_)) => self.unsupported("`for change` on a list", span),
+                (true, Ty::List(_)) => {
+                    // It finds its place from the source, with the same errors.
+                    self.diags.truncate(reported);
+                    return self.for_change(iterable, name, body);
+                }
                 (true, Ty::Map(..) | Ty::Set(_)) => {
                     self.fail("E0303", "a key cannot change".into(), span)
                 }
@@ -2855,14 +3099,127 @@ impl<'a> Checker<'a> {
                     self.fail("E0303", format!("`for` cannot loop over `{}`", ty.name()), span)
                 }
             };
-            return self.for_each(value, name, body);
+            // Text cannot change, so a `for` over it has nothing to protect.
+            let busy = iterable.path().filter(|_| value.ty != Ty::Text);
+            let busy = busy.and_then(|(root, path)| Some((self.lookup(root)?, path)));
+            let (Some((local, path)), true) = (busy, !change) else {
+                return self.for_each(value, name, body);
+            };
+            self.frame.busy.push(Busy { local, path, exclusive: false });
+            let stmt = self.for_each(value, name, body);
+            self.frame.busy.pop();
+            return stmt;
         };
         let (start, end) = self.range(start, end);
         if change {
             self.fail("E0303", "a range has nothing to change".into(), iterable.span);
         }
-        let (local, body) = self.loop_body(name, Ty::Int, body);
+        let (local, body) = self.loop_body(name, Ty::Int, false, body);
         Stmt::For { local, start, end, inclusive: *op == BinaryOp::RangeInclusive, body }
+    }
+
+    /// `for change x in items`. The list stays out of its place for the whole
+    /// loop, and each element is out of the list while the body runs, so both
+    /// hold one count and every write is in place. So `x` is a plain local, and
+    /// any way out of the body puts it back first, and any `return` puts the
+    /// list back too.
+    fn for_change(
+        &mut self,
+        iterable: &'a ast::Expr,
+        name: &'a ast::Name,
+        body: &'a [ast::Stmt],
+    ) -> Stmt {
+        let span = iterable.span;
+        self.check_write(iterable);
+        let Some(mut place) = self.place(iterable) else {
+            return Stmt::Block(Vec::new());
+        };
+        let list = place.local;
+        let Ty::List(&item) = self.frame.locals[list] else {
+            self.fail("E0303", "`for change` needs a list".into(), span);
+            return Stmt::Block(Vec::new());
+        };
+        // Every step of the path is out of its place while the body runs, so
+        // only a field beside the first step can be read. A narrowed name has
+        // given up its whole value.
+        let root = place.root;
+        let mut path = iterable.path().map_or(Vec::new(), |(_, path)| path);
+        let narrowed = self.current(root) != self.frame.locals[root];
+        path.truncate(usize::from(!narrowed));
+        self.frame.busy.push(Busy { local: root, path, exclusive: true });
+        let (current, mut inner) = self.loop_body(name, item, true, body);
+        self.frame.busy.pop();
+
+        let position = self.new_local(Ty::Int, true);
+        let at = self.new_local(Ty::Int, true);
+        let expr = |kind, ty| Expr { kind, ty, span };
+        let int = |value| expr(ExprKind::Int(value), Ty::Int);
+        let local = |id, ty| expr(ExprKind::Local(id), ty);
+        let list_ty = self.frame.locals[list];
+        let len = expr(ExprKind::Len(local(list, list_ty).into()), Ty::Int);
+        let inside = self.binary_values(BinaryOp::Lt, local(position, Ty::Int), len, span);
+        let next = self.binary_values(BinaryOp::Add, local(position, Ty::Int), int(1), span);
+        let element = ExprKind::ListGet(local(list, list_ty).into(), local(at, Ty::Int).into());
+        let mut start = vec![
+            Stmt::Set(at, local(position, Ty::Int)),
+            Stmt::Set(position, next),
+            Stmt::Set(current, expr(element, item)),
+        ];
+        if item.is_counted() {
+            let none = expr(ExprKind::None, Ty::None);
+            start.push(self.write(list, local(at, Ty::Int), none, span));
+        }
+        let back = vec![
+            self.write(list, local(at, Ty::Int), local(current, item), span),
+            Stmt::Clear(current),
+        ];
+        let mut leave = back.clone();
+        leave.extend(place.finish.iter().cloned());
+        self.put_back(&mut inner, &back, &leave, true);
+        start.append(&mut inner);
+        start.extend(back);
+
+        let mut stmts = std::mem::take(&mut place.setup);
+        stmts.append(&mut place.take);
+        stmts.push(Stmt::Set(position, int(0)));
+        stmts.push(Stmt::While { condition: inside, body: start });
+        stmts.append(&mut place.finish);
+        Stmt::Block(stmts)
+    }
+
+    /// Runs `back` before a `break` or `continue` of this loop, and `leave`
+    /// before any `return`, whose value runs first.
+    fn put_back(&mut self, stmts: &mut [Stmt], back: &[Stmt], leave: &[Stmt], own_loop: bool) {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Break | Stmt::Continue if own_loop => {
+                    let mut block = back.to_vec();
+                    block.push(stmt.clone());
+                    *stmt = Stmt::Block(block);
+                }
+                Stmt::Return(value) => {
+                    let (ty, span) = (value.ty, value.span);
+                    let held = self.new_local(ty, false);
+                    let read = Expr { kind: ExprKind::Local(held), ty, span };
+                    let value = std::mem::replace(value, read.clone());
+                    let mut block = vec![Stmt::Set(held, value)];
+                    block.extend(leave.iter().cloned());
+                    block.push(Stmt::Return(read));
+                    *stmt = Stmt::Block(block);
+                }
+                Stmt::Block(body) => self.put_back(body, back, leave, own_loop),
+                Stmt::If { branches, otherwise } => {
+                    for (_, then) in branches {
+                        self.put_back(then, back, leave, own_loop);
+                    }
+                    self.put_back(otherwise, back, leave, own_loop);
+                }
+                Stmt::While { body, .. } | Stmt::For { body, .. } => {
+                    self.put_back(body, back, leave, false);
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Lowers to a `while` over a hidden position. A hidden local keeps the
@@ -2877,7 +3234,7 @@ impl<'a> Checker<'a> {
         };
         let owner = self.new_local(ty, false);
         let position = self.new_local(Ty::Int, true);
-        let (current, body) = self.loop_body(name, item, body);
+        let (current, body) = self.loop_body(name, item, false, body);
 
         let expr = |kind, ty| Expr { kind, ty, span };
         let local = |id, ty| Box::new(expr(ExprKind::Local(id), ty));
@@ -3367,7 +3724,7 @@ impl<'a> Checker<'a> {
                 let kind = ExprKind::Binary(BinaryOp::Eq, len, int(ExprKind::Int(0)));
                 Expr { kind, ty: Ty::Bool, span }
             }
-            _ => self.method_call(value, "is_empty", &[], span),
+            _ => self.method_call(value, None, "is_empty", &[], span),
         }
     }
 
@@ -3701,8 +4058,9 @@ impl<'a> Checker<'a> {
     ) -> Expr {
         match &callee.kind {
             Ast::Field { base, name } => {
+                let reported = self.diags.len();
                 let value = self.expr(base);
-                self.dot_call(value, name, args, span)
+                self.dot_call(value, (base, reported), name, args, span)
             }
             Ast::Name(name) if self.is_set_call(name) => self.set_call(args, want, span),
             Ast::Index { base, indices } => {
@@ -3761,12 +4119,16 @@ impl<'a> Checker<'a> {
         id: usize,
         name: &str,
         explicit: Option<&[Ty]>,
-        receiver: Option<(Expr, Vec<Option<Ty>>)>,
+        receiver: Option<Receiver<'a>>,
         args: &'a [ast::Arg],
         span: Span,
     ) -> Expr {
         let reported = self.diags.len();
-        let (receiver, seeded) = receiver.unzip();
+        let opened = self.frame.opened.len();
+        let (receiver, seeded, written) = match receiver {
+            Some(Receiver { value, known, changed }) => (Some(value), Some(known), changed),
+            None => (None, None, None),
+        };
         let mut known: Vec<Option<Ty>> = match explicit {
             Some(types) => types.iter().copied().map(Some).collect(),
             None => seeded.unwrap_or(vec![None; self.signatures[id].type_params.len()]),
@@ -3776,18 +4138,63 @@ impl<'a> Checker<'a> {
         let mut values: Vec<Option<Expr>> = vec![None; count];
         let mut next = usize::from(receiver.is_some());
         values[..next].clone_from_slice(&[receiver][..next]);
+        let mut places: Vec<Option<Place>> = (0..count).map(|_| None).collect();
+        let (mut changed, mut peers) = (Vec::new(), Vec::new());
+        if let Some((base, place)) = written {
+            peers.push(base.span);
+            changed.push(base);
+            places[0] = Some(place);
+        }
         let mut named = false;
         for arg in args {
-            if arg.change {
-                self.unsupported("a `change` argument", arg.value.span);
-            }
             let params = &self.signatures[id].params;
             let want = match &arg.name {
                 None => params.get(next),
                 Some(label) => params.iter().find(|p| p.name == label.text),
             };
             let pattern = want.map_or(Ty::Error, |p| p.ty);
-            let value = self.inferred(&arg.value, pattern, &mut known);
+            let mode = want.map(|p| p.mode);
+            let span = arg.value.span;
+            let wrong_form = match (mode, arg.change) {
+                (None, _) | (Some(ast::ParamMode::Change), true) | (_, false) => None,
+                _ => Some(format!("this parameter of `{name}` is not `change`")),
+            };
+            if let Some(message) = wrong_form {
+                self.fail("E0307", message, span);
+            }
+            if mode == Some(ast::ParamMode::Change) && !arg.change {
+                let message = format!("`{name}` changes this argument, so mark it");
+                let diag = Diagnostic::new("E0307", message, span);
+                self.report(diag.note(if arg.name.is_some() {
+                    "pass it by position, as `change x`"
+                } else {
+                    "write `change` before it"
+                }));
+            }
+            let before = self.frame.changed.len();
+            let mut place = None;
+            let value = if mode == Some(ast::ParamMode::Change) && arg.change {
+                peers.push(span);
+                changed.push(&arg.value);
+                place = self.change_place(&arg.value, pattern);
+                match &place {
+                    Some(place) => {
+                        let ty = self.frame.locals[place.local];
+                        self.table.unify(pattern, ty, &mut known);
+                        Expr { kind: ExprKind::Change(place.local), ty, span }
+                    }
+                    None => poisoned(span),
+                }
+            } else {
+                self.inferred(&arg.value, pattern, &mut known)
+            };
+            if !arg.change
+                && !value.ty.is_counted()
+                && value.ty != Ty::Error
+                && self.frame.changed.len() == before
+            {
+                peers.push(span);
+            }
             let slot = match &arg.name {
                 None if named => Err("a positional argument cannot follow a named one".into()),
                 None if next >= required => {
@@ -3812,12 +4219,19 @@ impl<'a> Checker<'a> {
             match slot {
                 Ok(slot) => {
                     values[slot] = Some(value);
+                    places[slot] = place;
                     next = slot + 1;
                 }
                 Err(message) => {
                     self.fail("E0307", message, arg.value.span);
                 }
             }
+        }
+        self.frame.opened.truncate(opened);
+        for arg in changed {
+            let Some((root, path)) = arg.path() else { continue };
+            let span = arg.span;
+            self.frame.changed.push(Changed { root, path, span, peers: peers.clone() });
         }
         for (slot, value) in values.iter().enumerate() {
             let param = &self.signatures[id].params[slot];
@@ -3837,25 +4251,113 @@ impl<'a> Checker<'a> {
                 self.require(ty, name, span);
             }
         }
+        let (mut setup, mut take, mut finish) = (Vec::new(), Vec::new(), Vec::new());
+        let paths = places.iter().flatten().any(|place| !place.setup.is_empty());
+        let mut changing: Vec<Place> = Vec::new();
         let mut lowered = Vec::with_capacity(count);
         for (slot, value) in values.into_iter().enumerate() {
             let param = &self.signatures[id].params[slot];
             let default = param.default.clone();
             let ty = param.ty;
             let ty = self.table.subst(ty, types);
-            if let Some(value) = value {
-                lowered.push(self.settled(value, ty, "this argument"));
+            if let (Some(value), Some(place)) = (&value, places[slot].take()) {
+                if ty != Ty::Error && value.ty != Ty::Error && ty != value.ty {
+                    let (want, found) = (ty.name(), value.ty.name());
+                    let message = format!("a `change` argument must be `{want}`, found `{found}`");
+                    let diag = Diagnostic::new("E0303", message, value.span);
+                    self.report(
+                        diag.note("the task may store any such value, so types must match"),
+                    );
+                }
+                lowered.push(value.clone());
+                setup.extend(place.setup.iter().cloned());
+                take.extend(place.take.iter().cloned());
+                finish.splice(0..0, place.finish.iter().cloned());
+                changing.push(place);
+            } else if let Some(value) = value {
+                let value = self.settled(value, ty, "this argument");
+                let plain = matches!(value.kind, ExprKind::Local(_) | ExprKind::Int(_));
+                lowered.push(if paths && !plain {
+                    let span = value.span;
+                    let held = self.hoist(value, &mut setup, &mut finish);
+                    self.read(held, span)
+                } else {
+                    value
+                });
             } else if let Some(value) = default {
                 lowered.push(Expr { ty, ..value });
             }
         }
+        self.check_overlap(&changing, &mut setup, span);
         let returns = self.signatures[id].returns;
         let ty = self.table.subst(returns, types);
-        if self.signatures[id].in_trait {
-            let name = self.signatures[id].name.text.clone().leak();
-            return Expr { kind: ExprKind::Method(name, lowered), ty, span };
+        let kind = if self.signatures[id].in_trait {
+            ExprKind::Method(self.signatures[id].name.text.clone().leak(), lowered)
+        } else {
+            ExprKind::Call(id, types, lowered)
+        };
+        let call = Expr { kind, ty, span };
+        if setup.is_empty() && take.is_empty() && finish.is_empty() {
+            return call;
         }
-        Expr { kind: ExprKind::Call(id, types, lowered), ty, span }
+        let (last, value) = if ty == Ty::None {
+            (Stmt::Expr(call), Expr { kind: ExprKind::None, ty, span })
+        } else {
+            let result = self.new_local(ty, false);
+            (Stmt::Set(result, call), self.read(result, span))
+        };
+        setup.append(&mut take);
+        setup.push(last);
+        setup.append(&mut finish);
+        Expr { kind: ExprKind::Seq(setup, value.into()), ty, span }
+    }
+
+    /// Finds the place of a `change` argument. A name whose declared type is
+    /// the one wanted goes whole, and may come back with any member.
+    fn change_place(&mut self, target: &'a ast::Expr, pattern: Ty) -> Option<Place> {
+        let name = match &target.kind {
+            Ast::Name(name) => Some(name.as_str()),
+            Ast::SelfValue => Some("self"),
+            _ => None,
+        };
+        if let Some(local) = name.and_then(|name| self.lookup(name)) {
+            // A union narrowed to a smaller union also goes whole.
+            if self.frame.locals[local] == pattern || matches!(self.current(local), Ty::Union(_)) {
+                self.forget(local);
+            }
+        }
+        self.check_write(target);
+        let opening = std::mem::replace(&mut self.frame.opening, true);
+        let place = self.place(target);
+        self.frame.opening = opening;
+        place
+    }
+
+    /// Two `change` arguments must not meet. Fields can be told apart here. Two
+    /// indexes may be equal, so they are tested when the call runs.
+    fn check_overlap(&mut self, places: &[Place], setup: &mut Vec<Stmt>, span: Span) {
+        for (index, first) in places.iter().enumerate() {
+            for second in places[index + 1..].iter().filter(|p| p.root == first.root) {
+                let differs = first.path.iter().zip(&second.path).find(|(a, b)| a != b);
+                let (Step::Key(a), Step::Key(b)) = (match differs {
+                    Some((Step::Slot(_), Step::Slot(_))) => continue,
+                    Some((&a, &b)) => (a, b),
+                    None => {
+                        let message = "two `change` arguments of this call overlap";
+                        let note = "each one needs a value of its own";
+                        self.report(Diagnostic::new("E0326", message, span).note(note));
+                        continue;
+                    }
+                }) else {
+                    continue;
+                };
+                let (a, b) = (self.read(a, span), self.read(b, span));
+                let same = self.binary_values(BinaryOp::Eq, a, b, span);
+                let trap = Stmt::Trap("two `change` arguments overlap", span);
+                let otherwise = Vec::new();
+                setup.push(Stmt::If { branches: vec![(same, vec![trap])], otherwise });
+            }
+        }
     }
 
     /// The task of this name in the traits of a type parameter or an `any`.
@@ -3884,13 +4386,46 @@ impl<'a> Checker<'a> {
 
     /// `x.f(a)` for a task with a `self` parameter. On a type parameter or an
     /// `any` it looks in their traits, and `mono.rs` finds the real task.
-    fn method_call(&mut self, value: Expr, name: &str, args: &'a [ast::Arg], span: Span) -> Expr {
+    ///
+    /// `written` is the source of the receiver, with the diagnostics count from
+    /// before it was lowered. `x is empty` has none, as it has no dot.
+    fn method_call(
+        &mut self,
+        value: Expr,
+        written: Option<(&'a ast::Expr, usize)>,
+        name: &str,
+        args: &'a [ast::Arg],
+        span: Span,
+    ) -> Expr {
         let ty = value.ty;
-        if let Some(id) = self.trait_task(ty, name) {
-            return self.task_call(id, name, None, Some((value, Vec::new())), args, span);
-        }
-        if let Some((id, known)) = self.find_method(name, ty) {
-            return self.task_call(id, name, None, Some((value, known)), args, span);
+        let found = self.trait_task(ty, name).map(|id| (id, Vec::new()));
+        if let Some((id, known)) = found.or_else(|| self.find_method(name, ty)) {
+            if matches!(ty, Ty::Any(_)) && self.signatures[id].in_trait && self.changes(id) {
+                self.poison_args(args, span);
+                let message =
+                    format!("`{name}` has a `change` parameter, so an `any` cannot call it");
+                return self.fail("E0307", message, span);
+            }
+            if self.signatures[id].params[0].mode != ast::ParamMode::Change {
+                let receiver = Receiver { value, known, changed: None };
+                return self.task_call(id, name, None, Some(receiver), args, span);
+            }
+            let Some((base, reported)) = written else {
+                let message = format!("`{name}` changes its receiver, so it needs a dot call");
+                return self.fail("E0307", message, span);
+            };
+            // It was read once to find its type, which reports the same errors.
+            self.diags.truncate(reported);
+            let opened = self.frame.opened.len();
+            let Some(place) = self.change_place(base, Ty::Error) else {
+                return self.poison_args(args, span);
+            };
+            let ty = self.frame.locals[place.local];
+            let value = Expr { kind: ExprKind::Change(place.local), ty, span: base.span };
+            let receiver = Receiver { value, known, changed: Some((base, place)) };
+            let result = self.task_call(id, name, None, Some(receiver), args, span);
+            self.frame.opened.truncate(opened);
+            return result;
         }
         if let Some((field, ty)) = self.task_field(ty, name) {
             let span = value.span;
@@ -3917,6 +4452,7 @@ impl<'a> Checker<'a> {
     fn dot_call(
         &mut self,
         value: Expr,
+        written: (&'a ast::Expr, usize),
         name: &'a ast::Name,
         args: &'a [ast::Arg],
         span: Span,
@@ -3927,7 +4463,7 @@ impl<'a> Checker<'a> {
         }
         let text = name.text.as_str();
         if !builtin_method(ty, text) {
-            return self.method_call(value, text, args, span);
+            return self.method_call(value, Some(written), text, args, span);
         }
         if text == "pop" {
             let message = "`pop` changes its list, so it must be a whole statement, or all of \

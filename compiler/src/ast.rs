@@ -168,6 +168,180 @@ pub struct Expr {
     pub span: Span,
 }
 
+/// One read or write of a variable, or of a path into one.
+pub struct Use<'a> {
+    pub root: &'a str,
+    /// The fields after `root`, up to the first index.
+    pub path: Vec<&'a str>,
+    pub span: Span,
+    /// The whole variable is passed as `change`.
+    pub change: bool,
+}
+
+/// True if a change to one path can reach the other.
+pub fn overlap(a: &[&str], b: &[&str]) -> bool {
+    a.iter().zip(b).all(|(x, y)| x == y)
+}
+
+impl Expr {
+    /// The variable that this path starts from, with its fields, up to the
+    /// first index. A slice is a new value, so it is no path.
+    pub fn path(&self) -> Option<(&str, Vec<&str>)> {
+        self.path_and_end().map(|(root, path, _)| (root, path))
+    }
+
+    fn path_and_end(&self) -> Option<(&str, Vec<&str>, bool)> {
+        match &self.kind {
+            ExprKind::Name(name) => Some((name, Vec::new(), false)),
+            ExprKind::SelfValue => Some(("self", Vec::new(), false)),
+            ExprKind::Field { base, name } => {
+                let (root, mut path, ended) = base.path_and_end()?;
+                if !ended {
+                    path.push(&name.text);
+                }
+                Some((root, path, ended))
+            }
+            ExprKind::Index { base, indices } => {
+                let range = |index: &Expr| {
+                    let range = BinaryOp::Range;
+                    matches!(index.kind, ExprKind::Binary(op, ..)
+                        if op == range || op == BinaryOp::RangeInclusive)
+                };
+                if indices.iter().any(range) {
+                    return None;
+                }
+                let (root, path, _) = base.path_and_end()?;
+                Some((root, path, true))
+            }
+            _ => None,
+        }
+    }
+
+    /// Adds every use of a variable in this expression. A lambda adds none,
+    /// since it cannot capture a variable that can change.
+    pub fn uses<'a>(&'a self, out: &mut Vec<Use<'a>>) {
+        self.uses_as(false, out);
+    }
+
+    fn uses_as<'a>(&'a self, change: bool, out: &mut Vec<Use<'a>>) {
+        if let Some((root, path)) = self.path() {
+            let change = change && matches!(self.kind, ExprKind::Name(_) | ExprKind::SelfValue);
+            out.push(Use { root, path, span: self.span, change });
+            self.index_uses(out);
+            return;
+        }
+        match &self.kind {
+            ExprKind::Text(parts) => {
+                for part in parts {
+                    if let TextPart::Expr(value) = part {
+                        value.uses(out);
+                    }
+                }
+            }
+            ExprKind::List(items) => items.iter().for_each(|item| item.uses(out)),
+            ExprKind::Map(entries) => {
+                for (key, value) in entries {
+                    key.uses(out);
+                    value.uses(out);
+                }
+            }
+            ExprKind::Unary(_, value)
+            | ExprKind::Optional(value)
+            | ExprKind::Is { value, .. }
+            | ExprKind::Field { base: value, .. } => value.uses(out),
+            ExprKind::Binary(_, left, right) => {
+                left.uses(out);
+                right.uses(out);
+            }
+            ExprKind::If { condition, then, otherwise } => {
+                condition.uses(out);
+                then.uses(out);
+                otherwise.uses(out);
+            }
+            ExprKind::Call { callee, args } => {
+                match &callee.kind {
+                    // A method may read all of its receiver, so its name is no field.
+                    ExprKind::Field { base, .. } => base.uses(out),
+                    _ => callee.uses(out),
+                }
+                args.iter().for_each(|arg| arg.value.uses_as(arg.change, out));
+            }
+            ExprKind::Index { base, indices } => {
+                base.uses(out);
+                indices.iter().for_each(|index| index.uses(out));
+            }
+            _ => {}
+        }
+    }
+
+    /// The uses inside the indexes of a path.
+    fn index_uses<'a>(&'a self, out: &mut Vec<Use<'a>>) {
+        match &self.kind {
+            ExprKind::Field { base, .. } => base.index_uses(out),
+            ExprKind::Index { base, indices } => {
+                base.index_uses(out);
+                indices.iter().for_each(|index| index.uses(out));
+            }
+            _ => {}
+        }
+    }
+
+    /// This value, split at a `match`, whose parts run one after another.
+    fn parts<'a>(&'a self, out: &mut Vec<&'a Expr>) {
+        let ExprKind::Match { subject, arms } = &self.kind else {
+            out.push(self);
+            return;
+        };
+        subject.parts(out);
+        for arm in arms {
+            if let ArmBody::Expr(value) = &arm.body {
+                value.parts(out);
+            }
+        }
+    }
+}
+
+impl Stmt {
+    /// What this statement writes to, or calls a task on.
+    pub fn target(&self) -> Option<&Expr> {
+        match &self.kind {
+            StmtKind::Assign { target, .. } => Some(target),
+            StmtKind::Expr(Expr { kind: ExprKind::Call { callee, .. }, .. }) => {
+                match &callee.kind {
+                    ExprKind::Field { base, .. } => Some(base),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// The values that this statement itself holds, not those of its blocks.
+    /// Each group runs to its end before the next one starts.
+    pub fn values(&self) -> Vec<Vec<&Expr>> {
+        let mut out = Vec::new();
+        match &self.kind {
+            StmtKind::Let { value, .. }
+            | StmtKind::While { condition: value, .. }
+            | StmtKind::For { iterable: value, .. }
+            | StmtKind::Return(Some(value))
+            | StmtKind::Print(value)
+            | StmtKind::Expect(value)
+            | StmtKind::Expr(value) => value.parts(&mut out),
+            StmtKind::Assign { target, value, .. } => {
+                let mut group = vec![target];
+                value.parts(&mut group);
+                return vec![group];
+            }
+            StmtKind::If { branches, .. } => {
+                branches.iter().for_each(|(condition, _)| condition.parts(&mut out));
+            }
+            _ => {}
+        }
+        out.into_iter().map(|value| vec![value]).collect()
+    }
+}
+
 pub enum ExprKind {
     Name(String),
     SelfValue,

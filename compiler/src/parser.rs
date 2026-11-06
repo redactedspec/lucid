@@ -701,7 +701,10 @@ impl Parser {
         // A parenthesized target has a span that starts after this statement does.
         let assignable = matches!(
             target.kind,
-            ExprKind::Name(_) | ExprKind::Field { .. } | ExprKind::Index { .. }
+            ExprKind::Name(_)
+                | ExprKind::SelfValue
+                | ExprKind::Field { .. }
+                | ExprKind::Index { .. }
         );
         if !assignable || target.span.start != start {
             return self.error("E0202", "can only assign to a name, field, or index", target.span);

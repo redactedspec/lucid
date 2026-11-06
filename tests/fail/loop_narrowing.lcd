@@ -1,0 +1,45 @@
+# A loop forgets a name that any statement in it may end up changing.
+task clear(change value: int?) -> int
+    value = none
+    return 1
+
+task assign_self(change self: int?, go: int)
+    if self is none
+        return
+    var i = 0
+    while i < 2
+        print self + 1
+        self = none
+        i += 1
+
+task in_print_arm(c: int)
+    var x: int? = 1
+    if x is none
+        return
+    while c > 0
+        print x + 1
+        match c
+            1 -> print clear(change x)
+            _ -> return
+
+task in_return_arm(c: int) -> int
+    var x: int? = 1
+    if x is none
+        return 0
+    while c > 0
+        print x + 1
+        match c
+            1 -> return clear(change x)
+            _ -> print c
+    return 0
+
+task in_value_arm(c: int)
+    var x: int? = 1
+    if x is none
+        return
+    while c > 0
+        print x + 1
+        let y = match c
+            1 -> clear(change x)
+            _ -> 0
+        print y

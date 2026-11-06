@@ -1,0 +1,156 @@
+type Tree
+    value: int
+    left: Tree?
+    right: Tree?
+
+task insert(change t: Tree?, v: int)
+    if t is none
+        t = Tree(value: v, left: none, right: none)
+        return
+    if v < t.value
+        insert(change t.left, v)
+    else
+        insert(change t.right, v)
+
+task walk(t: Tree?, change out: list[int])
+    if t is not none
+        walk(t.left, change out)
+        out.push(t.value)
+        walk(t.right, change out)
+
+var root: Tree? = none
+var seed = 7
+for i in 0..200
+    seed = (seed * 31 + 11) % 1009
+    insert(change root, seed)
+var sorted: list[int] = []
+walk(root, change sorted)
+print sorted.len()
+var ok = true
+for i in 1..sorted.len()
+    if sorted[i - 1] > sorted[i]
+        ok = false
+print ok
+
+var m = {"a": [1, 2], "b": [3]}
+for change x in m["a"]
+    x *= 10
+print m
+
+task show_all(change x: any Show)
+    x = 1
+
+var boxed: any Show = "hi"
+show_all(change boxed)
+print boxed
+
+task next(change i: int) -> int
+    i += 1
+    return i
+
+var i = 0
+while next(change i) < 3
+    print "loop"
+print i
+
+task flags(change a: bool, change b: float, change c: f32, change d: byte, change e: i8)
+    a = not a
+    b += 0.5
+    c = 2.5
+    d = 3
+    e = -3
+
+var fa = false
+var fb = 1.0
+var fc: f32 = 1.5
+var fd: byte = 1
+var fe: i8 = 1
+flags(change fa, change fb, change fc, change fd, change fe)
+print "{fa} {fb} {fc} {fd} {fe}"
+
+task named(change x: int, by: int = 1)
+    x += by
+
+var n = 0
+named(change n)
+named(change n, by: 5)
+print n
+
+task outer() -> int
+    task inner(k: int) -> int
+        var local = k
+        named(change local, by: 2)
+        return local
+    return inner(1)
+
+print outer()
+
+type Box
+    items: list[int]
+
+task first_grown(change b: Box) -> int
+    return next_of(change b.items)
+
+task next_of(change items: list[int]) -> int
+    items.push(1)
+    return items.len()
+
+var b = Box(items: [])
+print first_grown(change b)
+print first_grown(change b)
+print "{next_of(change b.items)}"
+let v = if n > 0 then next_of(change b.items) else 0
+print v
+print b
+
+choice Light
+    Red
+    Green
+
+task flip(change self: Light)
+    match self
+        Red ->
+            self = Green
+        Green ->
+            self = Red
+
+var light = Red
+light.flip()
+print light
+var lights = [Red, Green]
+for change one in lights
+    one.flip()
+print lights
+
+task total(take self: list[int]) -> int
+    var sum = 0
+    for change x in self
+        x += 1
+        sum += x
+    return sum
+
+print [1, 2].total()
+
+task deep(change grid: list[list[list[int]]], i: int)
+    grid[i][0][0] += 1
+    for change plane in grid
+        for change row in plane
+            for change cell in row
+                cell += 1
+                if cell > 100
+                    return
+
+var g = [[[1]], [[2, 3]]]
+deep(change g, 1)
+print g
+var copy = g
+deep(change copy, 0)
+print g
+print copy
+
+var strings = ["a"]
+for change s in strings
+    s = "{s}b"
+    let held = s
+    s = "{held}c"
+print strings

@@ -154,7 +154,9 @@ All three have `.len()` and `.is_empty()`. `x in items` and `x not in items` tes
 
 A map or set keeps insertion order. Replacing a value keeps its key's place, and a key that is removed and added again goes last. In a map literal, a repeated key replaces the value before it, and keeps its place.
 
-`for` visits a list's elements, a set's values, or a map's keys. It keeps the value it started with, so changing the variable in the body does not affect the loop. `for change` over a list is planned with parameter modes, and it does not work on a map or set.
+`for` visits a list's elements, a set's values, or a map's keys. The body can read what the loop visits but cannot change it, which is error E0326. To change it, loop over a copy: `let copy = items`, then `for x in copy`. Other fields of the same variable can change.
+
+`for change x in items` visits a list's elements, and `x` is the element itself: assigning to it or changing it changes the list, on every way out of the body. The body cannot use `items` at all, or for a path such as `a.b.items`, anything under `a.b`. Each write is in place. `for change` does not work on a map or set.
 
 `push`, `swap`, `add`, and `remove` change their receiver and give no value, so each one is a statement. The receiver is a `var` or a path into one, such as `grid[0].push(1)`. In `x[i] = f()`, the index runs first, and then the value. Each index in a path runs once.
 
@@ -236,7 +238,7 @@ print apply(triple, 2)
 print apply(x => x + 1, 2)
 ```
 
-Naming a task gives its value. A generic one needs its types, as in `first[int]`. A `self` task has no value form: write a lambda. All its parameters count, so a default does not apply through a task value.
+Naming a task gives its value. A generic one needs its types, as in `first[int]`. A `self` task has no value form: write a lambda. A task with a `change` parameter has no value form at all, since a task type has no way to say `change`. A `take` parameter is plain to a caller, so it needs no mark in a task type. All its parameters count, so a default does not apply through a task value.
 
 Lambdas use `=>` and hold a single expression. For anything longer, define a nested task. Parameters take their types from the context: an annotation, a parameter, a field, or an element. A lambda with no such context is error E0324. A generic call reads arguments left to right, so `map(items, x => x * 2)` knows `x` from `items`, and the lambda's result can give a type parameter. In a `then` branch a lambda needs parentheses.
 
@@ -251,7 +253,7 @@ let doubled = map(primes, x => x * 2)
 let plus: task(int, int) -> int = (a, b) => a + b
 ```
 
-A task inside a task is a nested task. It takes no type parameters, `self`, or defaults. It is a value made at its line, so it can only be used after that line, and it can call itself.
+A task inside a task is a nested task. It takes no type parameters, `self`, defaults, or `change` parameters. It is a value made at its line, so it can only be used after that line, and it can call itself.
 
 ```lucid
 task total(n: int) -> int
@@ -263,7 +265,7 @@ task total(n: int) -> int
     return sum(n)
 ```
 
-A lambda or nested task reads names around it by capturing their values when it is made, so it can outlive them. Each pass of a loop makes a new capture. A `var` cannot be captured, which is error E0325, since a later change would not be seen and a captured name cannot change: write `let copy = count` first. A captured name keeps the type it was narrowed to, and does not narrow further inside: test a `let` copy of it.
+A lambda or nested task reads names around it by capturing their values when it is made, so it can outlive them. Each pass of a loop makes a new capture. A `var`, a `change` or `take` parameter, or a `for change` name cannot be captured, which is error E0325, since a later change would not be seen and a captured name cannot change: write `let copy = count` first. A captured name keeps the type it was narrowed to, and does not narrow further inside: test a `let` copy of it.
 
 A task value has `Show`, and prints as its type. It has no `Equal`, `Order`, or `Hash`, so it cannot be a key, and a value that holds one cannot use `==`. In an `any`, `==` is true only for one value that was copied.
 
@@ -282,6 +284,16 @@ task consume(take items: list[int])        # owns the value, may mutate it
 
 sort(change numbers)     # `change` is required at the call
 ```
+
+A `change` argument is a `var`, or a path into one, such as `x.age` or `grid[i]`. Its type must equal the parameter's type exactly, since the task may store any value of that type. So a name narrowed to `int` can go to `change n: int`, and keeps its narrowing. A name that goes to a parameter of its declared type loses what tests proved. A `change` parameter has no default, so its argument goes by position, and a path runs its indexes once, in the order on the page.
+
+A task can read a `change` parameter, assign it, and pass it on as `change`. The caller sees what it holds when the task ends.
+
+A `take` parameter is the task's own value, and it can change. The caller keeps its own value and writes nothing at the call. See [memory-model.md](memory-model.md) for what this costs.
+
+While a statement changes a variable through a `change` argument, no other part of that statement can use the same value, and two `change` arguments cannot overlap. Both are error E0326. An argument of the same call that gives a plain number or `bool` is allowed, as in `items.grow(items.len())`, since it is done before the call starts. `swap(change x[i], change x[j])` compiles, and traps if `i` and `j` are equal.
+
+A statement passes a variable to one `change` call only, and cannot also write to it. Split it in two, and name the value with `let`.
 
 ## Types
 
@@ -321,13 +333,16 @@ task is_adult(self: User) -> bool
 task birthday(change self: User)
     self.age += 1
 
+task reset(change self: User)
+    self = User(name: self.name)
+
 if ada.is_adult()
     print "welcome"
 ```
 
 `x.f(a)` runs the task `f` whose `self` type is the type of `x`. A `self` type can be an `any`, except for a task of its own trait. So one name can have one task per type, and such a name stays out of the shared namespace of "Choices". `f(x, a)` is an error, since one job has one form. `self` needs a type, which cannot be a bare type parameter, and `self: list[T]` covers every list. Two tasks of one name whose receivers can overlap are an error, counting each type parameter as free, and so is a built-in name on a built-in type, such as `len` on `text`. A dot call does not widen its receiver: an `int` does not reach `self: int?`. `x is empty` calls `x.is_empty()`.
 
-The receiver must be a `var` when `self` is `change`, which arrives with parameter modes. The `change` keyword is not repeated on a dot call.
+The receiver must be a `var`, or a path into one, when `self` is `change`, and it follows the rules for a `change` argument. The `change` keyword is not repeated on a dot call, but it is required on any other argument. `x is empty` cannot call an `is_empty` that changes `self`.
 
 ## Choices
 
@@ -410,7 +425,7 @@ while node is not none
 - **Conditions:** `if`, `else if`, `while`, `and`, `or`, `not`, and `then`.
 - **After an `if`:** when each `if` and `else if` branch ends with `return`, `break`, `continue`, or `...`, the code after it knows that every condition was false. An `else` adds nothing to this, and it need not end.
 - **Assignment:** assigning to a name ends what was known about it, on all later code. It gives no new knowledge, so after `x = 1`, a name of type `int?` needs another test.
-- **Loops:** a loop forgets anything about a name assigned in its body, before it starts.
+- **Loops:** a loop forgets anything about a name assigned in its body, or passed whole as a `change` argument, before it starts.
 - **Writes:** `x.age += 1` and `x.push(1)` on a narrowed `x` change the value it holds, and keep the narrowing.
 
 Only a local name or parameter narrows. A field or a call may not hold the same value when read again, so `if a.b is not none` does not narrow `a.b`. Write `let b = a.b`, then test `b`. The same goes for a top-level `let` read in a task.
@@ -492,7 +507,7 @@ task show_all[T: Describe](items: list[T])
         print item.describe()
 ```
 
-A task of a trait takes `self` first, with no type. A type has the trait if it has a task of that name with the same other parameters and the same return type. A bound names a trait, and `and` joins several: `[T: Show and Equal]`. Generic types take bounds too, as in `type Sorted[T: Order]`. A type that lacks a bound is error E0320 at the call, or in the type that names it.
+A task of a trait takes `self` first, with no type. A type has the trait if it has a task of that name with the same other parameters, the same `change` parameters, and the same return type. An `any` cannot call a task with a `change` parameter, so `any Trait` does not have a trait that holds one. A bound names a trait, and `and` joins several: `[T: Show and Equal]`. Generic types take bounds too, as in `type Sorted[T: Order]`. A type that lacks a bound is error E0320 at the call, or in the type that names it.
 
 Bounds use static dispatch. `any Describe` is a boxed value with dynamic dispatch, which allows mixed lists:
 

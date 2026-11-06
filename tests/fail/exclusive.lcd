@@ -1,0 +1,97 @@
+task bump(change n: int)
+    n += 1
+
+task twice(change a: int, change b: int)
+    a += b
+
+task share(change a: list[int], b: list[int])
+    a.push(b.len())
+
+task add(change a: list[int]) -> int
+    a.push(1)
+    return a.len()
+
+task grow(change self: list[int])
+    self.push(1)
+
+type Pair
+    a: list[int]
+    b: list[int]
+    n: int
+
+var n = 1
+var items = [1]
+var pair = Pair(a: [1], b: [2], n: 0)
+var nest = [pair]
+
+twice(change n, change n)
+twice(change pair.n, change pair.n)
+share(change items, items)
+share(change pair.a, pair.a)
+print add(change items) + items.len()
+print add(change items) + add(change items)
+items = [add(change items)]
+items[0] = add(change items)
+share(change pair.a, [items[0]])
+share(change items, nest[add(change items)].a)
+share(change pair.a, pair.b)
+print add(change pair.a) + pair.b.len()
+
+for item in items
+    items.push(item)
+    items = []
+    items[0] = 1
+    add(change items)
+    items.grow()
+    let last = items.pop()
+
+for name in {"a": 1}
+    print name
+
+var ages = {"a": 1}
+for name in ages
+    ages.remove(name)
+
+for item in pair.a
+    pair.a.push(item)
+    pair = Pair(a: [], b: [], n: 0)
+    pair.b.push(item)
+
+for change item in items
+    print items
+    items.push(item)
+    print items.len()
+
+for change item in pair.a
+    print pair
+    print pair.a
+    print pair.n
+    add(change pair.a)
+    pair.b.push(item)
+
+task inside(self: Pair) -> int
+    return self.n
+
+for change item in pair.a
+    print pair.inside()
+
+type Deep
+    inner: Pair
+    n: int
+
+var deep = Deep(inner: pair, n: 0)
+deep.inner.n = add(change deep.inner.a)
+deep.inner.a.push(add(change deep.inner.b))
+print add(change deep.inner.a) + add(change deep.inner.b)
+
+for change item in deep.inner.a
+    print deep.inner.n
+    print deep.n
+
+for change item in items[missing]
+    print item
+
+var maybe: Pair? = pair
+if maybe is not none
+    for change item in maybe.a
+        print maybe.n

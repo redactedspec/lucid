@@ -118,7 +118,7 @@ expr_stmt   = expression [ assign_op expression ] NEWLINE ;
 assign_op   = "=" | "+=" | "-=" | "*=" | "/=" ;
 ```
 
-The target of an assignment must be a name, field, or index expression. The parser checks this. A `match` used as a value cannot have block arms.
+The target of an assignment must be a name, `self`, field, or index expression. The parser checks this. A `match` used as a value cannot have block arms.
 
 ## Expressions
 

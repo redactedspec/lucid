@@ -25,4 +25,4 @@ union_narrowing.lcd:76:11: error E0303: `+` needs one type on both sides, found 
 union_narrowing.lcd:81:11: error E0303: `+` needs one type on both sides, found `int?` and `int`
   note: test a union with `is`, as in `x is none`
 union_narrowing.lcd:85:9: error E0305: `start` cannot change
-  note: only a name declared with `var` can change
+  note: a parameter is read-only: declare it `change` to change the caller's value, or `take` to own a copy

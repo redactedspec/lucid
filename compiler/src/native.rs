@@ -127,7 +127,11 @@ struct Runtime {
 
 fn signature_of(module: &JITModule, task: &Task) -> Signature {
     let mut signature = module.make_signature();
-    signature.params.extend(task.locals[..task.params].iter().map(|&t| AbiParam::new(clif(t))));
+    for (local, &ty) in task.locals[..task.params].iter().enumerate() {
+        let pointer = module.target_config().pointer_type();
+        let ty = if task.change.contains(&local) { pointer } else { clif(ty) };
+        signature.params.push(AbiParam::new(ty));
+    }
     signature.returns.push(AbiParam::new(clif(task.returns)));
     signature
 }
@@ -277,7 +281,7 @@ fn compile(
         let data_id = module.declare_anonymous_data(false, false).expect(CODEGEN);
         let data = module.declare_data_in_func(data_id, body.func);
         let (vars, loops, funcs, text) = (Vec::new(), Vec::new(), HashMap::new(), Vec::new());
-        let (owned, exit) = (Vec::new(), None);
+        let (owned, changed, exit) = (Vec::new(), Vec::new(), None);
         Lower {
             module,
             body,
@@ -286,6 +290,7 @@ fn compile(
             ids,
             vars,
             owned,
+            changed,
             exit,
             loops,
             funcs,
@@ -323,7 +328,10 @@ struct Lower<'a, 'b> {
     vars: Vec<Variable>,
     /// Counted locals that are not parameters, released on return.
     owned: Vec<Variable>,
-    /// With `owned`, every return goes here, so each release appears once.
+    /// Each `change` parameter, with the address of the caller's stack slot.
+    changed: Vec<(Variable, Value)>,
+    /// With `owned` or `changed`, every return goes here, so each release and
+    /// store appears once.
     exit: Option<Block>,
     /// The `continue` and `break` targets of the open loops.
     loops: Vec<(Block, Block)>,
@@ -343,7 +351,12 @@ impl Lower<'_, '_> {
         self.body.seal_block(entry);
         self.vars = task.locals.iter().map(|&ty| self.body.declare_var(clif(ty))).collect();
         for local in 0..task.params {
-            let value = self.body.block_params(entry)[local];
+            let mut value = self.body.block_params(entry)[local];
+            if task.change.contains(&local) {
+                self.changed.push((self.vars[local], value));
+                let flags = MemFlagsData::trusted();
+                value = self.body.ins().load(clif(task.locals[local]), flags, value, 0);
+            }
             self.body.def_var(self.vars[local], value);
         }
         for local in task.params..task.locals.len() {
@@ -353,7 +366,7 @@ impl Lower<'_, '_> {
                 self.owned.push(self.vars[local]);
             }
         }
-        if !self.owned.is_empty() {
+        if !self.owned.is_empty() || !self.changed.is_empty() {
             let exit = self.body.create_block();
             self.body.append_block_param(exit, clif(task.returns));
             self.exit = Some(exit);
@@ -379,6 +392,11 @@ impl Lower<'_, '_> {
             for local in 0..self.owned.len() {
                 let held = self.body.use_var(self.owned[local]);
                 self.call(self.runtime.release, &[held]);
+            }
+            for index in 0..self.changed.len() {
+                let (var, address) = self.changed[index];
+                let held = self.body.use_var(var);
+                self.body.ins().store(MemFlagsData::trusted(), held, address, 0);
             }
             let value = self.body.block_params(exit)[0];
             self.body.ins().return_(&[value]);
@@ -569,6 +587,10 @@ impl Lower<'_, '_> {
             }
             Stmt::Placeholder(span) => {
                 self.trap("reached a `...` placeholder", *span);
+                return true;
+            }
+            Stmt::Trap(message, span) => {
+                self.trap(message, *span);
                 return true;
             }
             Stmt::Expr(value) => {
@@ -769,10 +791,7 @@ impl Lower<'_, '_> {
             ExprKind::Bool(value) => self.body.ins().iconst(types::I8, i64::from(*value)),
             ExprKind::None => self.none(),
             ExprKind::Local(local) => self.body.use_var(self.vars[*local]),
-            ExprKind::Call(task, _, args) => {
-                let args: Vec<Value> = args.iter().map(|arg| self.expr(arg)).collect();
-                self.call(self.ids[*task], &args).expect("every task returns a value")
-            }
+            ExprKind::Call(task, _, args) => self.call_task(*task, args),
             ExprKind::Neg(value) => {
                 let value = self.expr(value);
                 self.body.ins().fneg(value)
@@ -945,6 +964,7 @@ impl Lower<'_, '_> {
                 self.store(*local, value);
                 value
             }
+            ExprKind::Change(_) => unreachable!("only `call_task` reads these"),
             ExprKind::Member { .. }
             | ExprKind::Wrap(_)
             | ExprKind::View(_)
@@ -952,6 +972,32 @@ impl Lower<'_, '_> {
             | ExprKind::Capture(_)
             | ExprKind::Method(..) => unreachable!("`mono.rs` replaces these"),
         }
+    }
+
+    /// A `change` argument goes through a stack slot. The task loads it when it
+    /// starts and stores it when it ends, so it stays in a register between.
+    fn call_task(&mut self, task: usize, args: &[Expr]) -> Value {
+        let mut values = Vec::with_capacity(args.len());
+        let mut slots = Vec::new();
+        for arg in args {
+            let ExprKind::Change(local) = arg.kind else {
+                let value = self.expr(arg);
+                values.push(value);
+                continue;
+            };
+            let data = StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 3);
+            let slot = self.body.create_sized_stack_slot(data);
+            let value = self.body.use_var(self.vars[local]);
+            self.body.ins().stack_store(self.pointer, value, slot, 0);
+            values.push(self.body.ins().stack_addr(self.pointer, slot, 0));
+            slots.push((local, slot, clif(arg.ty)));
+        }
+        let result = self.call(self.ids[task], &values).expect("every task returns a value");
+        for (local, slot, ty) in slots {
+            let value = self.body.ins().stack_load(self.pointer, ty, slot, 0);
+            self.body.def_var(self.vars[local], value);
+        }
+        result
     }
 
     /// The record comes first in the call, so that the code finds its captures.

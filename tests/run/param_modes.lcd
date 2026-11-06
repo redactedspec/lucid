@@ -1,0 +1,254 @@
+# `change` writes through to the variable of the caller.
+task bump(change n: int)
+    n += 1
+
+var count = 1
+bump(change count)
+bump(change count)
+print count
+
+task add_two(change items: list[int])
+    items.push(1)
+    items.push(2)
+
+var numbers = [0]
+let before = numbers
+add_two(change numbers)
+print numbers
+print before
+
+# A new value replaces the old one, and a change also shows after `return`.
+task reset(change items: list[int], value: int) -> int
+    let old = items.len()
+    items = [value]
+    if old > 2
+        return old
+    items.push(value)
+    return 0
+
+print reset(change numbers, 7)
+print numbers
+print reset(change numbers, 8)
+print numbers
+
+# A `change` parameter passes on, in recursion too.
+task fill(change items: list[int], n: int)
+    if n > 0
+        items.push(n)
+        fill(change items, n - 1)
+
+var filled: list[int] = []
+fill(change filled, 3)
+print filled
+
+# Paths: fields, elements, and map values. Each index runs once.
+type Point
+    x: int
+    y: int
+
+type Line
+    from: Point
+    to: Point
+    tags: list[text]
+
+task shift(change p: Point, by: int)
+    p.x += by
+    p.y += by
+
+task tag(change tags: list[text], value: text)
+    tags.push(value)
+
+var line = Line(from: Point(x: 1, y: 2), to: Point(x: 3, y: 4), tags: [])
+shift(change line.from, 10)
+tag(change line.tags, "moved")
+print line
+
+task next(n: int) -> int
+    print "next {n}"
+    return n
+
+var points = [Point(x: 0, y: 0), Point(x: 5, y: 5)]
+shift(change points[next(1)], next(2))
+print points
+
+var grid = [[1], [2]]
+add_two(change grid[1])
+print grid
+
+var scores = {"a": [1]}
+add_two(change scores["a"])
+print scores
+bump(change points[0].x)
+print points[0]
+
+# Argument order is the order on the page, and the result survives the write.
+task add_and_len(first: int, change items: list[int], last: int) -> int
+    items.push(first + last)
+    return items.len()
+
+print add_and_len(next(1), change grid[next(0)], next(2)) + 1
+print grid
+
+task label(change items: list[int]) -> text
+    items.push(0)
+    return "len {items.len()}"
+
+print label(change grid[0])
+
+# Two `change` arguments, with paths that cannot meet.
+task swap_values[T](change a: T, change b: T)
+    let held = a
+    a = b
+    b = held
+
+var left = "left"
+var right = "right"
+swap_values(change left, change right)
+print "{left} {right}"
+swap_values(change line.from, change line.to)
+print line.from
+var i = 0
+swap_values(change grid[i], change grid[i + 1])
+print grid
+
+type Pair
+    one: Point
+    two: Point
+
+var nest = Pair(one: Point(x: 1, y: 2), two: Point(x: 3, y: 4))
+swap_values(change nest.one.x, change nest.one.y)
+swap_values(change nest.one.y, change nest.two.y)
+print nest
+
+# A union: a whole name may change its member, and a narrowed one keeps it.
+task clear(change value: int?)
+    value = none
+
+task double(change value: int)
+    value *= 2
+
+var maybe: int? = 4
+if maybe is not none
+    double(change maybe)
+    print maybe + 1
+    clear(change maybe)
+print maybe
+
+var loops: int? = 1
+while loops is not none
+    print loops
+    clear(change loops)
+
+task clear_self(change self: int?)
+    clear(change self)
+
+task narrowed_self(change self: int?) -> int?
+    if self is not none
+        clear(change self)
+    self.clear_self()
+    return self
+
+var some: int? = 1
+print some.narrowed_self()
+
+# Methods. The receiver has no marker, and may be a path.
+type Counter
+    n: int
+    log: list[int]
+
+task tick(change self: Counter)
+    self.n += 1
+    self.log.push(self.n)
+
+task zero(change self: Counter)
+    self = Counter(n: 0, log: [])
+
+task grow(change self: list[int], by: int)
+    self.push(by)
+
+var counter = Counter(n: 0, log: [])
+counter.tick()
+counter.tick()
+print counter
+var counters = [counter]
+counters[0].tick()
+print counters
+print counter.n
+counter.zero()
+print counter
+
+task grow_twice(change self: list[int])
+    self.grow(1)
+    self.grow(self.len())
+
+var growing = [1]
+growing.grow(growing.len())
+growing.grow_twice()
+print growing
+
+# A plain value of the same variable may go with it, as may an index.
+task put(change items: list[int], value: int)
+    items.push(value)
+
+put(change growing, growing.len())
+put(change growing, growing[0])
+print growing
+bump(change growing[growing.len() - 1])
+print growing
+
+# Traits and generics.
+trait Tick
+    task step(change self)
+
+task step(change self: Counter)
+    self.n += 10
+
+task run_step[T: Tick](change value: T)
+    value.step()
+
+task run_step_on[T: Tick](change values: list[T])
+    run_step(change values[0])
+
+run_step(change counter)
+print counter.n
+var many = [counter]
+run_step_on(change many)
+print many[0].n
+
+task first_of[T](change items: list[T]) -> T
+    return items[0]
+
+print first_of(change numbers)
+
+# `take` owns its value, and the caller keeps its own.
+task with_extra(take items: list[int], extra: int) -> list[int]
+    items.push(extra)
+    return items
+
+let base = [1, 2]
+print with_extra(base, 3)
+print base
+
+task count_down(take n: int) -> int
+    var steps = 0
+    while n > 0
+        n -= 1
+        steps += 1
+    return steps
+
+print count_down(3)
+
+task last_of(take self: list[int]) -> int?
+    return self.pop()
+
+print [1, 2].last_of()
+
+task nested_take(n: int) -> int
+    task inner(take x: int) -> int
+        x += n
+        return x
+    return inner(1)
+
+print nested_take(2)
+let by_value: task(list[int], int) -> list[int] = with_extra
+print by_value([1], 2)

@@ -41,7 +41,7 @@ let numbers = [1, 2, 3]
 let more = add_all(numbers, 4)   # last use of numbers: moved, in place
 ```
 
-If `numbers` is used after the call, the list is shared at the call and `push` copies once. The program stays correct either way. Only its cost changes, and `lucid check --costs` reports the copy.
+If `numbers` is used after the call, the list is shared at the call and `push` copies once. The program stays correct either way. Only its cost changes, and `lucid check --costs` reports the copy. As of M3 there are no moves, so `take` always shares and the first write copies once. Moves arrive at M4.
 
 ## The exclusivity law
 
@@ -49,14 +49,20 @@ While a value has `change` access, no other access to it may happen. The compile
 
 ```lucid
 swap(change a, change a)      # error: two exclusive uses of a
+f(change a, a)                # error: a is read while it changes
 
 for item in items
     items.push(item)          # error: items changes while being iterated
+
+for change item in items
+    print items.len()         # error: items is out of its place
 ```
 
-These checks arrive with parameter modes. Until then a `for` keeps a count of what it visits, so the second example changes a copy and stays memory safe.
+Variables, fields, and list elements in `change` paths are checked statically, by error E0326. Overlap on list indexes that cannot be proven distinct, such as `swap(change x[i], change x[j])`, is checked at run time and traps. Use `x.swap(i, j)` to avoid the check. The same goes for map keys, and for paths such as `x[i].a` and `x[j].b`, where two equal indexes trap even though the fields differ.
 
-Variables, fields, and list elements in `change` paths are checked statically. Overlap on list indexes that cannot be proven distinct, such as `swap(change x[i], change x[j])`, is checked at run time and traps. Use `x.swap(i, j)` to avoid the check.
+The checks are stricter than the law, for two reasons. A counted value that a statement reads stays borrowed until that statement ends, so a read and a change of one value cannot share a statement, even in an order that would be safe. A plain number or `bool` holds no borrow, so another argument of the same call may read one. And a write reads its way down its path before the value runs, so a statement that writes to a variable cannot also pass another part of it as `change`. Loosening either rule later breaks no program.
+
+`for` keeps a count of what it visits, so a change in its body would be safe and would change a copy. It is an error anyway, because that loop rarely means what it says, and the copy can cost O(n) with no sign on the page.
 
 ## Inference
 
@@ -104,7 +110,7 @@ The published results for Perceus and Lean come from functional languages, with 
 
 This is the hardest part of the compiler, so it comes with a staged plan:
 
-1. **M3: naive.** Count every use. Correct and slow. Each new value goes to a hidden local, which holds it until overwritten or until the task returns. A `for` over text or a collection holds one count on it in another hidden local, so assigning the variable in the body is safe. A store then counts again, so a value is rarely unique yet, and copy-on-write copies more than it must. `var x = [1]` holds two counts, so the first write copies once. After that `x` holds its own copy, and writes happen in place. A write through a path such as `grid[i][j] = 1` takes `grid[i]` out of its slot, writes, and puts it back, so it copies nothing unless `grid[i]` is shared. A `for` lets go of its count when the loop ends. A write to a field works like a write to a list element. A `match` holds one count on its subject in a hidden local until it ends. A union holds one count on what it contains. `.pop` reads the element first, so its value outlives the list's count. `.get` keeps its receiver and key in hidden locals only if they are not plain reads, so `x.get(i)` and `g[0].get(i)` add no count to the list. With a computed path such as `g[i + 1].get(0)`, the hidden local holds a count until it is overwritten, so the next write to that element copies it once.
+1. **M3: naive.** Count every use. Correct and slow. Each new value goes to a hidden local, which holds it until overwritten or until the task returns. A `for` over text or a collection holds one count on it in another hidden local, so nothing in the body can free it. A store then counts again, so a value is rarely unique yet, and copy-on-write copies more than it must. `var x = [1]` holds two counts, so the first write copies once. After that `x` holds its own copy, and writes happen in place. A write through a path such as `grid[i][j] = 1` takes `grid[i]` out of its slot, writes, and puts it back, so it copies nothing unless `grid[i]` is shared. A `for` lets go of its count when the loop ends. A write to a field works like a write to a list element. A `change` argument that is a path takes its value out of its slot for the call, in the same way, and any other value of that call goes to a hidden local first. `for change` takes the list out of its place for the whole loop, and each element out of the list while the body runs, so a shared list copies once, and each write is then in place. A `take` parameter is a local that takes its own count on entry, so a write to it copies once. A `match` holds one count on its subject in a hidden local until it ends. A union holds one count on what it contains. `.pop` reads the element first, so its value outlives the list's count. `.get` keeps its receiver and key in hidden locals only if they are not plain reads, so `x.get(i)` and `g[0].get(i)` add no count to the list. With a computed path such as `g[i + 1].get(0)`, the hidden local holds a count until it is overwritten, so the next write to that element copies it once.
 2. **M4: last-use moves and borrow elision.** Measure against Rust.
 3. **M4: reuse analysis.** Only after measurements justify it.
 

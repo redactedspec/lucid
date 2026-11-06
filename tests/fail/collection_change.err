@@ -3,9 +3,9 @@ collection_change.lcd:2:1: error E0305: `a` cannot change
 collection_change.lcd:3:1: error E0305: `a` cannot change
   note: only a name declared with `var` can change
 collection_change.lcd:6:5: error E0305: `items` cannot change
-  note: only a name declared with `var` can change
+  note: a parameter is read-only: declare it `change` to change the caller's value, or `take` to own a copy
 collection_change.lcd:7:5: error E0305: `items` cannot change
-  note: only a name declared with `var` can change
+  note: a parameter is read-only: declare it `change` to change the caller's value, or `take` to own a copy
 collection_change.lcd:12:1: error E0305: this value cannot change
   note: only a name declared with `var` can change
 collection_change.lcd:13:1: error E0305: this value cannot change

@@ -32,8 +32,9 @@ copy["New"] = 1
 copy.remove("Ada")
 print "{ages.len()} {copy.len()} {"Ada" in ages} {"Ada" in copy}"
 
-# A loop keeps the map it started with.
-for name in ages
+# A loop over a copy can change the map.
+let names = ages
+for name in names
     ages.remove(name)
 print ages.is_empty()
 

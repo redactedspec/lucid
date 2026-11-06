@@ -1,0 +1,68 @@
+exclusive.lcd:27:1: error E0326: two `change` arguments of this call overlap
+  note: each one needs a value of its own
+exclusive.lcd:28:1: error E0326: two `change` arguments of this call overlap
+  note: each one needs a value of its own
+exclusive.lcd:29:21: error E0326: `items` is used here while this statement changes it
+  note: split it in two, and name the value with `let`
+exclusive.lcd:30:22: error E0326: `pair` is used here while this statement changes it
+  note: split it in two, and name the value with `let`
+exclusive.lcd:31:27: error E0326: `items` is used here while this statement changes it
+  note: split it in two, and name the value with `let`
+exclusive.lcd:32:18: error E0326: `items` is used here while this statement changes it
+  note: split it in two, and name the value with `let`
+exclusive.lcd:32:38: error E0326: `items` is used here while this statement changes it
+  note: split it in two, and name the value with `let`
+exclusive.lcd:33:1: error E0326: `items` is used here while this statement changes it
+  note: split it in two, and name the value with `let`
+exclusive.lcd:34:1: error E0326: `items` is used here while this statement changes it
+  note: split it in two, and name the value with `let`
+exclusive.lcd:36:14: error E0326: `items` is used here while this statement changes it
+  note: split it in two, and name the value with `let`
+exclusive.lcd:36:37: error E0326: `items` is used here while this statement changes it
+  note: split it in two, and name the value with `let`
+exclusive.lcd:41:5: error E0326: `items` cannot change while a `for` visits it
+  note: loop over a copy: `let copy = items`
+exclusive.lcd:42:5: error E0326: `items` cannot change while a `for` visits it
+  note: loop over a copy: `let copy = items`
+exclusive.lcd:43:5: error E0326: `items` cannot change while a `for` visits it
+  note: loop over a copy: `let copy = items`
+exclusive.lcd:44:16: error E0326: `items` cannot change while a `for` visits it
+  note: loop over a copy: `let copy = items`
+exclusive.lcd:45:5: error E0326: `items` cannot change while a `for` visits it
+  note: loop over a copy: `let copy = items`
+exclusive.lcd:46:16: error E0326: `items` cannot change while a `for` visits it
+  note: loop over a copy: `let copy = items`
+exclusive.lcd:53:5: error E0326: `ages` cannot change while a `for` visits it
+  note: loop over a copy: `let copy = ages`
+exclusive.lcd:56:5: error E0326: `pair` cannot change while a `for` visits it
+  note: loop over a copy: `let copy = pair`
+exclusive.lcd:57:5: error E0326: `pair` cannot change while a `for` visits it
+  note: loop over a copy: `let copy = pair`
+exclusive.lcd:61:11: error E0326: `items` cannot be used while `for change` visits it
+  note: use the loop name, or move this out of the loop
+exclusive.lcd:62:5: error E0326: `items` cannot be used while `for change` visits it
+  note: use the loop name, or move this out of the loop
+exclusive.lcd:63:11: error E0326: `items` cannot be used while `for change` visits it
+  note: use the loop name, or move this out of the loop
+exclusive.lcd:66:11: error E0326: `pair` cannot be used while `for change` visits it
+  note: use the loop name, or move this out of the loop
+exclusive.lcd:67:11: error E0326: `pair` cannot be used while `for change` visits it
+  note: use the loop name, or move this out of the loop
+exclusive.lcd:69:16: error E0326: `pair` cannot be used while `for change` visits it
+  note: use the loop name, or move this out of the loop
+exclusive.lcd:76:11: error E0326: `pair` cannot be used while `for change` visits it
+  note: use the loop name, or move this out of the loop
+exclusive.lcd:83:1: error E0326: `deep` is used here while this statement changes it
+  note: split it in two, and name the value with `let`
+exclusive.lcd:84:1: error E0326: `deep` is used here while this statement changes it
+  note: split it in two, and name the value with `let`
+exclusive.lcd:85:18: error E0326: `deep` is used here while this statement changes it
+  note: split it in two, and name the value with `let`
+exclusive.lcd:85:45: error E0326: `deep` is used here while this statement changes it
+  note: split it in two, and name the value with `let`
+exclusive.lcd:88:11: error E0326: `deep` cannot be used while `for change` visits it
+  note: use the loop name, or move this out of the loop
+exclusive.lcd:91:20: error E0303: `for` cannot loop over `int`
+exclusive.lcd:91:26: error E0301: name `missing` is not defined
+exclusive.lcd:97:15: error E0326: `maybe` cannot be used while `for change` visits it
+  note: use the loop name, or move this out of the loop
