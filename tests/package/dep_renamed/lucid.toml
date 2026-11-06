@@ -1,0 +1,6 @@
+[package]
+name = "dep_renamed"
+version = "1.0.0"
+
+[dependencies]
+other = { path = "../base" }

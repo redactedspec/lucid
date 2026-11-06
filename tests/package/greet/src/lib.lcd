@@ -1,0 +1,12 @@
+use base
+use ./deep.count
+
+public type Name
+    text: text
+
+public task hello(name: Name) -> text
+    return base.join("Hello, ", name.text)
+
+test "hello"
+    expect hello(Name(text: "x")) == "Hello, x"
+    expect count.letters("x") == 1

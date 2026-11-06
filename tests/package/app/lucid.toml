@@ -1,0 +1,8 @@
+# A program with a diamond of dependencies.
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+greet = { path = "../greet" }
+shout = { path = "../greet/../shout", version = "1.0" }

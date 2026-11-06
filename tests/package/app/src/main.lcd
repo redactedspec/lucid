@@ -1,0 +1,14 @@
+use greet
+use greet.hello as hi
+use greet.deep.count
+use shout
+use ./greet as local
+use ./helper.twice
+
+let name: greet.Name = greet.Name(text: "Ada")
+print greet.hello(name)
+print hi(name)
+print count.letters("Ada")
+print shout.loud("Ada")
+print local.hello()
+print twice(21)

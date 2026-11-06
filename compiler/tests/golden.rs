@@ -5,6 +5,8 @@
 //! `tests/trap/x.lcd` must start, then trap with `x.err`, and exit 101.
 //! `tests/test/x.lcd` must print `x.out` under `lucid test`, and exit 1 if a
 //! test failed.
+//! `tests/package/x/` must print `expected.out` and exit 0, or `expected.err`
+//! and exit 1, under `lucid run x`. A directory with neither is a dependency.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -141,6 +143,104 @@ fn test_names_are_plain_and_new() {
 }
 
 #[test]
+fn packages_build_or_report() {
+    let dir = repo().join("tests").join("package");
+    let mut failures = Vec::new();
+    let mut count = 0;
+    for entry in fs::read_dir(&dir).expect("cannot list directory") {
+        let package = entry.expect("cannot read entry").path();
+        let name = file_name(&package);
+        let good = fs::read(package.join("expected.out"));
+        let bad = fs::read(package.join("expected.err"));
+        for run in [lucid, naive] {
+            let output = run(&dir, &["run", name]);
+            let (code, found, expected) = match (&good, &bad) {
+                (Ok(expected), _) => (0, text(&output.stdout), expected),
+                (_, Ok(expected)) => (1, text(&output.stderr), expected),
+                _ => continue,
+            };
+            count += 1;
+            if output.status.code() != Some(code) || found != text(expected) {
+                failures.push(format!("{name}: {found}{}", text(&output.stderr)));
+            }
+        }
+    }
+    assert!(count > 0, "no packages");
+    assert!(
+        failures.is_empty(),
+        "
+{}",
+        failures.join(
+            "
+"
+        )
+    );
+}
+
+/// A command takes a package, by path or from any directory inside it.
+#[test]
+fn packages_work_from_inside() {
+    let dir = repo().join("tests").join("package").join("app");
+    let expected = fs::read(dir.join("expected.out")).expect("no expected output");
+    for from in [dir.clone(), dir.join("src")] {
+        let output = lucid(&from, &["run"]);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        assert_eq!(text(&output.stdout), text(&expected));
+        assert!(lucid(&from, &["check"]).status.success());
+    }
+    let main = lucid(&dir.join("src"), &["check", "--json", "main.lcd"]);
+    assert_eq!(
+        text(&main.stdout),
+        "[]
+",
+        "{}",
+        text(&main.stderr)
+    );
+    let package = dir.join("..");
+    let library = lucid(&package, &["run", "greet"]);
+    assert_eq!(library.status.code(), Some(1));
+    assert!(text(&library.stderr).contains("error E0339: `greet` is a library"));
+    let statement = lucid(&package, &["check", "lib_statement"]);
+    assert_eq!(statement.status.code(), Some(1));
+    assert!(text(&statement.stderr).contains("E0336"), "{}", text(&statement.stderr));
+    let missing = lucid(&repo(), &["run"]);
+    assert_eq!(missing.status.code(), Some(1));
+    assert!(text(&missing.stderr).contains("E0001"));
+}
+
+/// `lucid test` on a package reaches modules that nothing imports, and a test
+/// in a library sees its dependencies.
+#[test]
+fn package_tests_run_in_every_file() {
+    let dir = repo().join("tests").join("package");
+    let output = lucid(&dir, &["test", "app"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert_eq!(
+        text(&output.stdout),
+        "app/src/helper.lcd
+ok twice
+1 tests, 0 failed
+"
+    );
+    let output = lucid(&dir, &["test", "--json", "greet"]);
+    assert!(text(&output.stdout).contains("\"file\":\"greet/src/lib.lcd\""));
+    assert!(text(&output.stdout).starts_with('['), "{}", text(&output.stdout));
+    let output = lucid(&dir, &["test", "both_entries"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(text(&output.stderr).contains("E0339"));
+}
+
+/// `check --unsafe` must list sites in dependencies: `docs/security.md` says so.
+#[test]
+fn unsafe_sites_include_dependencies() {
+    let dir = repo().join("tests").join("package");
+    let output = lucid(&dir, &["check", "--unsafe", "uses_unsafe"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let found = text(&output.stdout);
+    assert!(found.contains("uses_unsafe/../raw/src/lib.lcd:"), "{found}");
+}
+
+#[test]
 fn examples_parse() {
     let dir = repo().join("examples");
     for example in files(&dir, "lcd") {
@@ -199,7 +299,8 @@ fn costs_are_reported() {
     }
     // A program that cannot compile has no costs to report, which is not zero.
     let scratch = Path::new(env!("CARGO_TARGET_TMPDIR"));
-    fs::write(scratch.join("unbuilt.lcd"), "use foo\nprint 1\n").expect("cannot write test file");
+    fs::write(scratch.join("unbuilt.lcd"), "use std.foo\nprint 1\n")
+        .expect("cannot write test file");
     let output = lucid(scratch, &["check", "--costs", "unbuilt.lcd"]);
     assert_eq!(output.status.code(), Some(1));
     assert!(text(&output.stderr).contains("E0901"), "{}", text(&output.stderr));
@@ -224,7 +325,7 @@ fn unsafe_sites_are_reported() {
     assert_eq!((output.status.code(), text(&output.stdout).as_str()), (Some(0), ""));
     // An unbuilt feature does not hide a site, as it does not fail `check`.
     let scratch = Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let source = "use foo\n# It runs nothing.\nunsafe\n    print 1\n";
+    let source = "use std.foo\n# It runs nothing.\nunsafe\n    print 1\n";
     fs::write(scratch.join("unbuilt_unsafe.lcd"), source).expect("cannot write test file");
     let output = lucid(scratch, &["check", "--unsafe", "unbuilt_unsafe.lcd"]);
     assert_eq!(text(&output.stdout), "unbuilt_unsafe.lcd:3:1: unsafe: block\n");
@@ -306,7 +407,8 @@ fn long_alias_chain_is_rejected() {
 #[test]
 fn bad_usage_exits_2() {
     assert_eq!(lucid(&repo(), &[]).status.code(), Some(2));
-    assert_eq!(lucid(&repo(), &["check", "--json"]).status.code(), Some(2));
+    assert_eq!(lucid(&repo(), &["check", "--nope"]).status.code(), Some(2));
+    assert_eq!(lucid(&repo(), &["nope"]).status.code(), Some(2));
     assert_eq!(lucid(&repo(), &["run", "--json", "x.lcd"]).status.code(), Some(2));
 }
 
@@ -357,6 +459,10 @@ fn every_error_code_is_tested_and_documented() {
     let mut tested = String::from("E0001 E0902 E0329");
     for err in files(&repo().join("tests").join("fail"), "err") {
         tested += &text(&fs::read(err).expect("cannot read .err file"));
+    }
+    for entry in fs::read_dir(repo().join("tests").join("package")).expect("cannot list") {
+        tested += &fs::read_to_string(entry.expect("no entry").path().join("expected.err"))
+            .unwrap_or_default();
     }
     let documented =
         fs::read_to_string(repo().join("docs").join("agents.md")).expect("cannot read docs");

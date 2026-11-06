@@ -1,0 +1,6 @@
+[package]
+name = "shout"
+version = "1.0.0"
+
+[dependencies]
+base = { path = "../base/" }

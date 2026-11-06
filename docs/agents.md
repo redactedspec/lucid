@@ -22,7 +22,7 @@ Every tool has a stable `--json` output.
 | `lucid check --json` | Fast diagnostics, no code generation |
 | `lucid fix` | Apply machine-suggested fixes |
 | `lucid explain E0123` | Cause, example, and fix for an error code |
-| `lucid test --json` | Per-test results with values on failure: `name`, `passed`, `file`, `line`, `column`, and `output`, which holds what the test printed and, on failure, the trap message and trace |
+| `lucid test --json` | Per-test results of a file, or of every file in a package's `src`, with values on failure: `name`, `passed`, `file`, `line`, `column`, and `output`, which holds what the test printed and, on failure, the trap message and trace |
 | `lucid context <module>` | Compact public API of a module or package: signatures and doc comments only |
 | `lucid doc --json` | Full docs as data |
 | `lucid check --unsafe` | `unsafe` blocks and `extern` tasks: `file:line:column: unsafe: kind` on stdout, or `kind`, `file`, `line`, and `column` with `--json`. `kind` is `block` or `extern` |
@@ -122,6 +122,9 @@ The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and 
 | E0334 | The file of a `use` does not exist, or is spelled with other letter case |
 | E0335 | Modules import each other in a cycle |
 | E0336 | An imported module holds something other than declarations and literal `let` values |
+| E0337 | A `use` with no `./` names something that is not a dependency of the file's package |
+| E0338 | `lucid.toml` is not valid: bad syntax, a form outside the supported TOML, an unknown key, or a bad name or version |
+| E0339 | A package has no entry file or two, or a dependency is missing, misnamed, a program, or shares a name with another package, or `lucid run` gets a library |
 | E0901 | Parses, but cannot run at this milestone |
 | E0904 | No library has this foreign task |
 | E0902 | Task frame is too large for the stack check: over 512 KiB, or half the stack for top-level code |

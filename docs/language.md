@@ -571,7 +571,7 @@ use ./models.User
 use ./models.load as read_models
 ```
 
-`use ./a.b` is relative to the file that holds it, and reads `a/b.lcd`. If that file does not exist, it takes the name `b` from `a.lcd`. A `./` path cannot go up a directory. A file that cannot be found is error E0334, and the spelling must match the file's name exactly, on every system. Packages and `std` have no `./`, and report E0901 until they exist.
+`use ./a.b` is relative to the file that holds it, and reads `a/b.lcd`. If that file does not exist, it takes the name `b` from `a.lcd`. A `./` path cannot go up a directory. A file that cannot be found is error E0334, and the spelling must match the file's name exactly, on every system. `std` has no `./`, and reports E0901 until it exists.
 
 A whole module goes by its last name, or by the name after `as`, and its names need that prefix: `models.load()`, `x: models.User`. A taken name has no prefix. The name a `use` takes must be new in the file, and not a built-in type or trait, or else error E0304. A local in a block may hide it, as with any top-level name. A `use` works in its own file only, and a module passes nothing on from its imports.
 
@@ -579,7 +579,34 @@ Names are private to their module unless marked `public`, on a task, `type`, `ch
 
 A task with `self` also needs `public` before another module can call it, or else E0333. A private one still counts when a type must have a trait, and when it replaces a derived task, so a type means one thing in the whole program. A receiver type has one task of each name in the whole program.
 
-Only the entry file runs code. An imported module holds declarations and `let` with a literal value, or else error E0336. So importing a module never has an effect, and order of imports does not matter. Its `test` blocks are dropped: run `lucid test` on that file. Import cycles are error E0335.
+Only the entry file runs code. An imported module holds declarations and `let` with a literal value, or else error E0336. So importing a module never has an effect, and order of imports does not matter. Its `test` blocks are dropped: run `lucid test` on that file or its package. Import cycles are error E0335.
+
+## Packages
+
+A package is a directory with a `lucid.toml` file and a `src` directory:
+
+```toml
+[package]
+name = "blog"
+version = "0.1.0"
+
+[dependencies]
+markdown = { path = "../markdown" }
+```
+
+`name` uses lowercase letters, digits, and `_`, and cannot be a keyword or `std`. `version` is three numbers. A dependency needs a `path`, relative to the file that names it, until a registry exists at M8. Its key must equal the name of the package that it reaches. The manifest also holds permissions, see [security.md](security.md). A manifest that breaks these rules is error E0338.
+
+A package is a program, with `src/main.lcd`, or a library, with `src/lib.lcd`. It cannot be both, only a library can be a dependency, and only a program can run. `src/lib.lcd` follows the rule for imported modules, so it runs no code. A fault in the shape of a package or a dependency is error E0339.
+
+```lucid
+use markdown
+use markdown.render as to_html
+use markdown.parser.block
+```
+
+`use markdown` is the module `src/lib.lcd`. A longer path follows the rule of `use ./`, from `src`: `markdown.parser.block` reads `src/parser/block.lcd`, or else takes `block` from `src/parser.lcd`. A single name such as `markdown.render` reads `src/render.lcd`, or else takes `render` from `src/lib.lcd`. A name that the file's own package does not list is error E0337, even if another package depends on it. `public` works across packages as it does across modules.
+
+Each package is one copy in a program, however many packages depend on it. Two packages with one name in a program are error E0339.
 
 ## Concurrency
 
@@ -642,7 +669,7 @@ Only an `unsafe` block can call an `extern` task or `.pointer()`, or else error 
 
 `pointer[byte]` is a raw address. It has no traits, so it does not print or compare, and it holds no count. `items.pointer()` gives the address of the first element of a `list[byte]` held in a name. The address is valid while that name is in scope and until the list changes or moves. C code that writes through it changes every holder of the list. Text has no pointer: use `.bytes()`, and push a zero byte for a C string.
 
-`unsafe` blocks and `extern` declarations in any module will need the `unsafe` package permission, once packages exist. See [security.md](security.md).
+`unsafe` blocks and `extern` declarations in any module will need the `unsafe` package permission, once permission checks exist. See [security.md](security.md).
 
 ## Keywords
 

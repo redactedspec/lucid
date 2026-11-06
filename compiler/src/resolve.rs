@@ -12,8 +12,10 @@ use crate::ast::{
 use crate::check::{PRELUDE_TRAITS, is_built_in, is_literal};
 use crate::diag::{self, Diagnostic, Source, Span};
 use crate::lexer::{self, TextPart as RawPart, Token, TokenKind};
+use crate::manifest::{self, Dependency};
 use crate::parser;
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 /// What every file sees. The checker treats these like the file's own.
 const PRELUDE: &str = "trait Error
@@ -62,26 +64,110 @@ struct Loader {
     loaded: HashMap<String, usize>,
     /// The files whose imports are being read, for finding cycles.
     open: Vec<String>,
+    /// By real directory, so two spellings of a path are one package. `None`
+    /// if its manifest was bad, which is reported once.
+    package_ids: HashMap<PathBuf, Option<usize>>,
+    packages: Vec<Package>,
 }
 
-/// Reads and parses a program. Returns the text that spans refer to.
-pub fn load(path: &str) -> (Source, Option<ast::File>, Vec<Diagnostic>) {
+/// A directory with a `lucid.toml`.
+struct Package {
+    name: String,
+    /// As shown in messages: empty, or ending in `/`.
+    dir: String,
+    /// With each path in the form of `dir`.
+    dependencies: Vec<Dependency>,
+    /// `src/main.lcd` or `src/lib.lcd`.
+    entry: String,
+    library: bool,
+}
+
+/// `path` with a final `/`, or empty for the current directory.
+fn dir_prefix(path: &str) -> String {
+    match path.trim_end_matches(['/', '\\']) {
+        "." => String::new(),
+        "" => path.to_string(),
+        dir => format!("{dir}/"),
+    }
+}
+
+/// The directory of the nearest `lucid.toml` at or above a file, reached with
+/// `..` so that its path stays short in messages.
+fn package_above(file: &str) -> Option<String> {
+    let dir = &file[..file.rfind(['/', '\\']).map_or(0, |slash| slash + 1)];
+    let real = std::fs::canonicalize(if dir.is_empty() { "." } else { dir }).ok()?;
+    let mut up = dir.to_string();
+    for at in real.ancestors() {
+        if at.join("lucid.toml").is_file() {
+            return Some(up);
+        }
+        up += "../";
+    }
+    None
+}
+
+/// The package that a directory on the command line means: its own, or the one
+/// around it, so a command works from anywhere in a package.
+fn package_root(dir: &str) -> String {
+    let dir = dir_prefix(dir);
+    package_above(&format!("{dir}x")).unwrap_or(dir)
+}
+
+/// Every `.lcd` file under a package's `src`, in a stable order, so that
+/// `lucid test` also reaches modules that nothing imports. Symbolic links to
+/// directories are skipped, since they can loop.
+pub fn package_files(package: &str) -> Vec<String> {
+    fn walk(dir: &str, files: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let mut entries: Vec<_> = entries.flatten().collect();
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let path = format!("{dir}/{}", entry.file_name().display());
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                walk(&path, files);
+            } else if path.ends_with(".lcd") {
+                files.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(&format!("{}src", package_root(package)), &mut files);
+    files
+}
+
+/// Reads and parses a program, from a file or a package directory. Returns the
+/// text that spans refer to. With `run`, a library is an error.
+pub fn load(path: &str, run: bool) -> (Source, Option<ast::File>, Vec<Diagnostic>) {
     let mut loader = Loader::default();
     let start = Span { start: 0, end: 0 };
-    let entry = loader.module(path, Vec::new(), start);
+    let mut entry = path.to_string();
+    let mut library = false;
+    if Path::new(path).is_dir() {
+        let package = loader.package(&package_root(path), start);
+        let Some(package) = package else { return (loader.source, None, loader.diags) };
+        let package = &loader.packages[package];
+        entry.clone_from(&package.entry);
+        library = package.library;
+        if run && library {
+            let message = format!("`{}` is a library, so it cannot run", package.name);
+            loader.diags.push(Diagnostic::new("E0339", message, start));
+            return (loader.source, None, loader.diags);
+        }
+    }
+    let found = loader.module(&entry, Vec::new(), start);
     let Loader { source, mut diags, mut modules, .. } = loader;
-    if entry.is_none() || !diags.is_empty() {
+    if found.is_none() || !diags.is_empty() {
         return (source, None, diags);
     }
     // With imports, the entry file's names need a prefix too, or a module would
     // see them. Alone, it keeps its names, so that its messages stay plain.
     if modules.len() > 1
-        && let Some(stem) = std::path::Path::new(path).file_stem()
+        && let Some(stem) = Path::new(&entry).file_stem()
         && let Some(last) = modules.last_mut()
     {
         last.key = vec![stem.display().to_string()];
     }
-    let file = join(modules, &mut diags);
+    let file = join(modules, library, &mut diags);
     (source, Some(file), diags)
 }
 
@@ -100,11 +186,8 @@ fn shift(tokens: &mut [Token], base: usize) {
 }
 
 impl Loader {
-    /// Loads a file and all it imports. `None` if it cannot be read as text.
-    fn module(&mut self, path: &str, key: Vec<String>, used_at: Span) -> Option<usize> {
-        if let Some(&id) = self.loaded.get(path) {
-            return Some(id);
-        }
+    /// Reads a file into `source`, and returns where it starts and its text.
+    fn read(&mut self, path: &str, used_at: Span) -> Option<(usize, String)> {
         let shown: &'static str = path.to_string().leak();
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
@@ -127,6 +210,100 @@ impl Loader {
             }
         };
         let base = self.source.add(shown, &text);
+        Some((base, text))
+    }
+
+    /// Reads the package in `dir`, once. `None` means that it is reported.
+    fn package(&mut self, dir: &str, used_at: Span) -> Option<usize> {
+        let real = std::fs::canonicalize(if dir.is_empty() { "." } else { dir }).ok();
+        if let Some(known) = real.as_ref().and_then(|real| self.package_ids.get(real)) {
+            return *known;
+        }
+        let id = self.read_package(dir, used_at);
+        if let Some(real) = real {
+            self.package_ids.insert(real, id);
+        }
+        id
+    }
+
+    fn read_package(&mut self, dir: &str, used_at: Span) -> Option<usize> {
+        let (base, text) = self.read(&format!("{dir}lucid.toml"), used_at)?;
+        let (found, diags) = manifest::parse(&text);
+        self.diags.extend(diags.into_iter().map(|mut d| {
+            d.span = Span { start: d.span.start + base, end: d.span.end + base };
+            d
+        }));
+        let found = found?;
+        let at = Span { start: base, end: base };
+        let src = format!("{dir}src/");
+        let (main, lib) = (exact_file(&src, &["main"]), exact_file(&src, &["lib"]));
+        if main == lib {
+            let message = if main {
+                "a package has `src/main.lcd` or `src/lib.lcd`, not both"
+            } else {
+                "a package needs `src/main.lcd` or `src/lib.lcd`"
+            };
+            self.diags.push(Diagnostic::new("E0339", message, at));
+            return None;
+        }
+        if let Some(other) = self.packages.iter().find(|package| package.name == found.name) {
+            let message = format!("two packages are named `{}`", found.name);
+            let note = format!("the other one is in `{}`", other.dir);
+            self.diags.push(Diagnostic::new("E0339", message, at).note(note));
+            return None;
+        }
+        let dependencies = found.dependencies.into_iter().map(|mut dependency| {
+            if !Path::new(&dependency.path).is_absolute() {
+                dependency.path = format!("{dir}{}", dependency.path);
+            }
+            dependency.path = dir_prefix(&dependency.path);
+            dependency
+        });
+        self.packages.push(Package {
+            name: found.name,
+            dir: dir.to_string(),
+            dependencies: dependencies.collect(),
+            entry: format!("{src}{}.lcd", if main { "main" } else { "lib" }),
+            library: lib,
+        });
+        Some(self.packages.len() - 1)
+    }
+
+    /// Reports a fault in a dependency entry, once, however many `use`s reach it.
+    fn fault(&mut self, dependency: &Dependency, message: String) {
+        let span = dependency.span;
+        if !self.diags.iter().any(|d| d.code == "E0339" && d.span == span) {
+            self.diags.push(Diagnostic::new("E0339", message, span));
+        }
+    }
+
+    /// The library that a manifest entry names.
+    fn dependency(&mut self, dependency: &Dependency) -> Option<usize> {
+        let name = &dependency.name;
+        if !Path::new(&format!("{}lucid.toml", dependency.path)).is_file() {
+            self.fault(dependency, format!("no `lucid.toml` in `{}`", dependency.path));
+            return None;
+        }
+        let id = self.package(&dependency.path, dependency.span)?;
+        let package = &self.packages[id];
+        if package.name != *name {
+            let message = format!("the package in `{}` is named `{}`", package.dir, package.name);
+            self.fault(dependency, message);
+            return None;
+        }
+        if !package.library {
+            self.fault(dependency, format!("`{name}` has no `src/lib.lcd`, so nothing can use it"));
+            return None;
+        }
+        Some(id)
+    }
+
+    /// Loads a file and all it imports. `None` if it cannot be read as text.
+    fn module(&mut self, path: &str, key: Vec<String>, used_at: Span) -> Option<usize> {
+        if let Some(&id) = self.loaded.get(path) {
+            return Some(id);
+        }
+        let (base, text) = self.read(path, used_at)?;
         let (mut tokens, mut diags) = lexer::lex(&text);
         shift(&mut tokens, base);
         for d in &mut diags {
@@ -139,8 +316,12 @@ impl Loader {
         self.open.push(path.to_string());
         let mut imports = Vec::new();
         for stmt in &file.stmts {
-            if let StmtKind::Use { relative: true, path: written, alias } = &stmt.kind {
-                let import = self.import(path, &key, written, alias.as_ref(), stmt.span);
+            if let StmtKind::Use { relative, path: written, alias } = &stmt.kind {
+                let import = if *relative {
+                    self.import(path, &key, written, alias.as_ref(), stmt.span)
+                } else {
+                    self.import_package(path, written, alias.as_ref(), stmt.span)
+                };
                 imports.extend(import);
             }
         }
@@ -164,33 +345,114 @@ impl Loader {
         let dir = &from[..from.rfind(['/', '\\']).map_or(0, |slash| slash + 1)];
         let parts: Vec<&str> = written.iter().map(|name| name.text.as_str()).collect();
         let last = written.last().expect("a path has a name");
-        let file = |parts: &[&str]| format!("{dir}{}.lcd", parts.join("/"));
-        let (found, item) = if exact_file(dir, &parts) {
-            (file(&parts), None)
-        } else if parts.len() > 1 && exact_file(dir, &parts[..parts.len() - 1]) {
-            (
-                file(&parts[..parts.len() - 1]),
-                Some(Name { text: last.text.clone(), span: last.span }),
-            )
-        } else {
+        let Some((found, item)) = locate(dir, &parts, last) else {
             let message = format!("cannot find module `./{}`", parts.join("."));
-            let note = format!("looked for `{}`", file(&parts));
+            let note = format!("looked for `{dir}{}.lcd`", parts.join("/"));
             self.diags.push(Diagnostic::new("E0334", message, span).note(note));
             return None;
         };
-        if self.open.contains(&found) {
+        let parent = &key[..key.len().saturating_sub(1)];
+        let module_parts = &parts[..parts.len() - usize::from(item.is_some())];
+        let new_key = parent.iter().cloned().chain(module_parts.iter().map(|&s| s.into()));
+        let binding = alias.map_or(&last.text, |alias| &alias.text).clone();
+        self.bind(&found, new_key.collect(), binding, item, span)
+    }
+
+    /// Finds what `use name.a` means from the file at `from`. `name` must be a
+    /// dependency of the package that holds the file. `use name` is its
+    /// `src/lib.lcd`. A path follows the rule of `use ./`, from `src`, and a
+    /// single name that is no file is a name in `src/lib.lcd`.
+    fn import_package(
+        &mut self,
+        from: &str,
+        written: &[Name],
+        alias: Option<&Name>,
+        span: Span,
+    ) -> Option<Import> {
+        let (first, rest) = written.split_first().expect("a path has a name");
+        // `std` stays in the tree, and reports E0901 until it exists.
+        if first.text == "std" {
+            return None;
+        }
+        let Some(dir) = package_above(from) else {
+            let message = format!("`{}` is not a dependency", first.text);
+            let note = "no `lucid.toml` holds this file. A local module needs `./`";
+            self.diags.push(Diagnostic::new("E0337", message, span).note(note));
+            return None;
+        };
+        let holder = self.package(&dir, span)?;
+        let package = &self.packages[holder];
+        let found = package.dependencies.iter().find(|d| d.name == first.text);
+        let Some(dependency) = found.cloned() else {
+            let message = format!("`{}` is not a dependency", first.text);
+            let note = format!(
+                "add it to `[dependencies]` in `{}lucid.toml`. A local module needs `./`",
+                package.dir
+            );
+            self.diags.push(Diagnostic::new("E0337", message, span).note(note));
+            return None;
+        };
+        let target = self.dependency(&dependency)?;
+        let package = &self.packages[target];
+        let src = format!("{}src/", package.dir);
+        let last = written.last().expect("a path has a name");
+        let mut parts: Vec<&str> = rest.iter().map(|name| name.text.as_str()).collect();
+        let mut located = if parts.is_empty() {
+            parts.push("lib");
+            Some((package.entry.clone(), None))
+        } else {
+            locate(&src, &parts, last)
+        };
+        if located.is_none() && parts.len() == 1 {
+            let name = Name { text: last.text.clone(), span: last.span };
+            located = Some((package.entry.clone(), Some(name)));
+            parts = vec!["lib", parts[0]];
+        }
+        let Some((found, item)) = located else {
+            let message = format!("cannot find module `{}.{}`", first.text, parts.join("."));
+            let note = format!("looked for `{src}{}.lcd`", parts.join("/"));
+            self.diags.push(Diagnostic::new("E0334", message, span).note(note));
+            return None;
+        };
+        // No written name starts with `@`, so a package's modules cannot meet
+        // a local module of the same name.
+        let root = format!("@{}", package.name);
+        let module_parts = &parts[..parts.len() - usize::from(item.is_some())];
+        let key = std::iter::once(root).chain(module_parts.iter().map(|&s| s.into())).collect();
+        let binding = alias.map_or(&last.text, |alias| &alias.text).clone();
+        self.bind(&found, key, binding, item, span)
+    }
+
+    /// Loads an imported file, unless that would close a cycle.
+    fn bind(
+        &mut self,
+        found: &str,
+        key: Vec<String>,
+        binding: String,
+        item: Option<Name>,
+        span: Span,
+    ) -> Option<Import> {
+        if self.open.iter().any(|open| open == found) {
             let message = format!("`{found}` imports itself, through this `use`");
             let note = "move what both files need into a third module";
             self.diags.push(Diagnostic::new("E0335", message, span).note(note));
             return None;
         }
-        let parent = &key[..key.len().saturating_sub(1)];
-        let module_parts = &parts[..parts.len() - usize::from(item.is_some())];
-        let new_key = parent.iter().cloned().chain(module_parts.iter().map(|&s| s.into()));
-        let module = self.module(&found, new_key.collect(), span)?;
-        let binding = alias.map_or(&last.text, |alias| &alias.text).clone();
+        let module = self.module(found, key, span)?;
         Some(Import { binding, span, module, item })
     }
+}
+
+/// Finds the file of a path from `dir`: `a/b.lcd` first, and then the name `b`
+/// in `a.lcd`.
+fn locate(dir: &str, parts: &[&str], last: &Name) -> Option<(String, Option<Name>)> {
+    let file = |parts: &[&str]| format!("{dir}{}.lcd", parts.join("/"));
+    if exact_file(dir, parts) {
+        return Some((file(parts), None));
+    }
+    let module = &parts[..parts.len() - 1];
+    (!module.is_empty() && exact_file(dir, module))
+        .then(|| (file(module), Some(Name { text: last.text.clone(), span: last.span })))
 }
 
 /// True if the file `dir` + `parts` + `.lcd` exists with exactly this spelling.
@@ -257,17 +519,21 @@ fn check_library(stmts: &[Stmt], diags: &mut Vec<Diagnostic>) {
     }
 }
 
-/// Renames every module, then puts their statements in one file.
-fn join(modules: Vec<Module>, diags: &mut Vec<Diagnostic>) -> ast::File {
+/// Renames every module, then puts their statements in one file. An entry file
+/// that is a library follows the rules of an imported module, so `lucid check`
+/// reports what would fail in a program that imports it.
+fn join(modules: Vec<Module>, library_entry: bool, diags: &mut Vec<Diagnostic>) -> ast::File {
     let (prelude, _) = parser::parse(lexer::lex(PRELUDE).0);
     let mut stmts = prelude.stmts;
     let mut exports: Vec<Names> = Vec::with_capacity(modules.len());
     let count = modules.len();
     let keys: Vec<String> = modules.iter().map(|module| module.key.join(".")).collect();
     for (id, mut module) in modules.into_iter().enumerate() {
-        let library = id + 1 < count;
-        if library {
+        let imported = id + 1 < count;
+        if imported || library_entry {
             check_library(&module.stmts, diags);
+        }
+        if imported {
             // `lucid test` runs the entry file's tests.
             module.stmts.retain(|stmt| !matches!(stmt.kind, StmtKind::Test { .. }));
         }
@@ -308,8 +574,11 @@ fn join(modules: Vec<Module>, diags: &mut Vec<Diagnostic>) -> ast::File {
         let mut renamer =
             Renamer { names, aliases, exports: &exports, keys: &keys, scopes: Vec::new(), diags };
         renamer.stmts(&mut module.stmts);
-        // A `use` of a package stays, and reports E0901 until packages exist.
-        module.stmts.retain(|stmt| !matches!(stmt.kind, StmtKind::Use { relative: true, .. }));
+        // A `use` of `std` stays, and reports E0901 until `std` exists.
+        module.stmts.retain(|stmt| match &stmt.kind {
+            StmtKind::Use { relative, path, .. } => !relative && path[0].text == "std",
+            _ => true,
+        });
         stmts.append(&mut module.stmts);
         exports.push(own);
     }

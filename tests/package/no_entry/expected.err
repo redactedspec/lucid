@@ -1,0 +1,1 @@
+no_entry/lucid.toml:1:1: error E0339: a package needs `src/main.lcd` or `src/lib.lcd`

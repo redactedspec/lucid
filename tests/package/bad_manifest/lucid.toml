@@ -1,0 +1,7 @@
+[package]
+name = "bad_manifest"
+version = "1.0.0"
+
+[dependencies]
+x = { path = "a", color = "red" }
+y = "1.2"

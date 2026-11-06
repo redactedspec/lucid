@@ -1,0 +1,2 @@
+task hidden() -> int
+    return 1

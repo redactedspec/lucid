@@ -6,6 +6,7 @@ mod check;
 mod derive;
 mod diag;
 mod lexer;
+mod manifest;
 mod mir;
 mod mono;
 mod native;
@@ -14,11 +15,11 @@ mod parser;
 mod resolve;
 
 use diag::{Diagnostic, Source};
-use resolve::load;
+use resolve::{load, package_files};
 use std::io::Write;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: lucid run FILE\n       lucid check [--json] [--costs | --unsafe] FILE\n       lucid test [--json] FILE";
+const USAGE: &str = "usage: lucid run [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\nPATH is a file or a package directory, by default the current directory.";
 
 /// Set for the child process of `lucid test`, to the place of its first test.
 const TEST_FROM: &str = "LUCID_TEST_FROM";
@@ -40,24 +41,24 @@ fn main() -> ExitCode {
 
 fn cli(args: &[String]) -> ExitCode {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let (run, json, costs, path) = match args.as_slice() {
-        ["test", path] if !path.starts_with('-') => return test(path, false),
-        ["check", "--unsafe", path] if !path.starts_with('-') => return unsafe_sites(path, false),
-        ["check", "--json", "--unsafe", path] if !path.starts_with('-') => {
-            return unsafe_sites(path, true);
-        }
-        ["test", "--json", path] if !path.starts_with('-') => return test(path, true),
-        ["run", path] => (true, false, false, *path),
-        ["check", path] => (false, false, false, *path),
-        ["check", "--json", path] => (false, true, false, *path),
-        ["check", "--costs", path] => (false, false, true, *path),
-        ["check", "--json", "--costs", path] => (false, true, true, *path),
+    let Some((&command, rest)) = args.split_first() else { return usage() };
+    let (rest, path) = match rest.split_last() {
+        Some((path, flags)) if !path.starts_with('-') => (flags, *path),
+        _ => (rest, "."),
+    };
+    let (run, json, costs) = match (command, rest) {
+        ("test", []) => return test(path, false),
+        ("test", ["--json"]) => return test(path, true),
+        ("check", ["--unsafe"]) => return unsafe_sites(path, false),
+        ("check", ["--json", "--unsafe"]) => return unsafe_sites(path, true),
+        ("run", []) => (true, false, false),
+        ("check", []) => (false, false, false),
+        ("check", ["--json"]) => (false, true, false),
+        ("check", ["--costs"]) => (false, false, true),
+        ("check", ["--json", "--costs"]) => (false, true, true),
         _ => return usage(),
     };
-    if path.starts_with('-') {
-        return usage();
-    }
-    let (source, file, mut diags) = load(path);
+    let (source, file, mut diags) = load(path, run);
     if diags.is_empty()
         && let Some(file) = &file
     {
@@ -97,7 +98,7 @@ fn report_errors(source: &Source, diags: &[Diagnostic], json: bool) {
 
 /// `lucid check --unsafe`: each `unsafe` block and `extern` task, in file order.
 fn unsafe_sites(path: &str, json: bool) -> ExitCode {
-    let (source, file, mut diags) = load(path);
+    let (source, file, mut diags) = load(path, false);
     let mut sites = Vec::new();
     if diags.is_empty()
         && let Some(file) = &file
@@ -136,10 +137,56 @@ struct Outcome {
     output: String,
 }
 
-/// `lucid test`. A trap ends a process, so tests run in a child, which goes on
-/// after a failure in a new child. That compiles once more per failure.
+/// The results of one file's tests.
+struct FileTests {
+    source: Source,
+    tests: Vec<mir::TestCase>,
+    outcomes: Vec<Outcome>,
+}
+
+/// `lucid test`, on a file or on every file of a package.
 fn test(path: &str, json: bool) -> ExitCode {
-    let (source, file, mut diags) = load(path);
+    let package = std::path::Path::new(path).is_dir();
+    let mut files = vec![path.to_string()];
+    if package {
+        let (source, _, diags) = load(path, false);
+        if !diags.is_empty() {
+            report_errors(&source, &diags, json);
+            return ExitCode::FAILURE;
+        }
+        files = package_files(path);
+    }
+    let mut results = Vec::new();
+    for file in &files {
+        match test_file(file, json) {
+            Ok(result) => results.push(result),
+            Err(code) => return code,
+        }
+    }
+    let outcomes = || results.iter().flat_map(|result| &result.outcomes);
+    let report = if json {
+        let items: Vec<String> = results.iter().flat_map(render_tests_json).collect();
+        format!("[{}]\n", items.join(","))
+    } else {
+        let mut report = String::new();
+        for (file, result) in files.iter().zip(&results) {
+            if package && !result.tests.is_empty() {
+                report += &format!("{file}\n");
+            }
+            report += &render_tests(result);
+        }
+        let failed = outcomes().filter(|outcome| outcome.failed).count();
+        report + &format!("{} tests, {failed} failed\n", outcomes().count())
+    };
+    emit(std::io::stdout(), &report);
+    if outcomes().any(|outcome| outcome.failed) { ExitCode::FAILURE } else { ExitCode::SUCCESS }
+}
+
+/// Runs one file's tests. A trap ends a process, so tests run in a child, which
+/// goes on after a failure in a new child. That compiles once more per failure.
+/// `Err` holds the exit code, after a report of why. A child ends here too.
+fn test_file(path: &str, json: bool) -> Result<FileTests, ExitCode> {
+    let (source, file, mut diags) = load(path, false);
     let mut tests = Vec::new();
     if diags.is_empty()
         && let Some(file) = &file
@@ -158,38 +205,27 @@ fn test(path: &str, json: bool) -> ExitCode {
                     .unwrap_or_default();
                 if !diags.is_empty() {
                     report_errors(&source, &diags, json);
-                    return ExitCode::FAILURE;
+                    return Err(ExitCode::FAILURE);
                 }
-                return ExitCode::SUCCESS;
+                return Err(ExitCode::SUCCESS);
             }
             tests = std::mem::take(&mut program.tests);
         }
     }
     if !diags.is_empty() {
         report_errors(&source, &diags, json);
-        return ExitCode::FAILURE;
+        return Err(ExitCode::FAILURE);
     }
-    let outcomes = match run_tests(path, tests.len(), json) {
-        Ok(outcomes) => outcomes,
+    match run_tests(path, tests.len(), json) {
+        Ok(outcomes) => Ok(FileTests { source, tests, outcomes }),
         Err(problem) => {
             if json {
                 emit(std::io::stdout(), &problem);
             } else {
                 emit(std::io::stderr(), &problem);
             }
-            return ExitCode::FAILURE;
+            Err(ExitCode::FAILURE)
         }
-    };
-    let report = if json {
-        render_tests_json(&source, &tests, &outcomes)
-    } else {
-        render_tests(&tests, &outcomes)
-    };
-    emit(std::io::stdout(), &report);
-    if outcomes.iter().any(|outcome| outcome.failed) {
-        ExitCode::FAILURE
-    } else {
-        ExitCode::SUCCESS
     }
 }
 
@@ -232,23 +268,21 @@ fn run_tests(path: &str, count: usize, json: bool) -> Result<Vec<Outcome>, Strin
     Ok(outcomes)
 }
 
-fn render_tests(tests: &[mir::TestCase], outcomes: &[Outcome]) -> String {
+fn render_tests(result: &FileTests) -> String {
     let mut report = String::new();
-    for (test, outcome) in tests.iter().zip(outcomes) {
+    for (test, outcome) in result.tests.iter().zip(&result.outcomes) {
         report += &format!("{} {}\n", if outcome.failed { "FAIL" } else { "ok" }, test.name);
         if outcome.failed {
             report.extend(outcome.output.lines().map(|line| format!("    {line}\n")));
         }
     }
-    let failed = outcomes.iter().filter(|outcome| outcome.failed).count();
-    report + &format!("{} tests, {failed} failed\n", tests.len())
+    report
 }
 
-fn render_tests_json(source: &Source, tests: &[mir::TestCase], outcomes: &[Outcome]) -> String {
-    let lines = diag::Lines::new(source);
-    let items: Vec<String> = tests
-        .iter()
-        .zip(outcomes)
+fn render_tests_json(result: &FileTests) -> Vec<String> {
+    let lines = diag::Lines::new(&result.source);
+    let items = result.tests.iter().zip(&result.outcomes);
+    items
         .map(|(test, outcome)| {
             let name = diag::json_string(&test.name);
             let (file, line, column) = lines.place(test.span.start);
@@ -258,8 +292,7 @@ fn render_tests_json(source: &Source, tests: &[mir::TestCase], outcomes: &[Outco
                 "{{\"name\":{name},\"passed\":{passed},\"file\":{file},\"line\":{line},\"column\":{column},\"output\":{output}}}"
             )
         })
-        .collect();
-    format!("[{}]\n", items.join(","))
+        .collect()
 }
 
 fn usage() -> ExitCode {

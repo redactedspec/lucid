@@ -1,0 +1,2 @@
+public task join(a: text, b: text) -> text
+    return "{a}{b}"

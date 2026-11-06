@@ -425,11 +425,22 @@ Sources: [Clippy lint source](https://rust.googlesource.com/rust-clippy/+/refs/h
 Decisions 116 to 120.
 
 - **Go.** A name in another package needs a qualified form and must be exported. An import's name is scoped to the file that holds it. A blank import exists for initialization side effects, which Lucid avoids by having no module code run.
-- **Rust.** The orphan rule limits who may implement a trait, as the Reference states. Lucid has no such limit today: any module may add a task to any type, and a clash is E0304. Packages at M5 may need a rule here.
+- **Rust.** The orphan rule limits who may implement a trait, as the Reference states. Lucid has no such limit today: any module may add a task to any type, and a clash is E0304. Decision 126 keeps that, for now, across packages.
 - **Swift.** Evolution discussion describes inferring a case from the switched type, with a trap: `.none` on an optional means `Optional.none`. Lucid avoids that trap since `none` is a keyword, so no variant has that name.
 - **Weak ground.** Decision 118 is a judgment call, with no study behind it. These were search summaries of the pages, not full reads, and the Swift source is a mailing list and forums, not the language reference.
 
 Sources: [Go spec](https://go.dev/ref/spec), [Rust Reference, implementations](https://doc.rust-lang.org/reference/items/implementations.html), [Swift Evolution thread](https://lists.swift.org/pipermail/swift-evolution/Week-of-Mon-20160208/009940.html), [Swift Forums on `.none`](https://forums.swift.org/t/should-you-ever-have-a-none-case-in-an-enum/58760).
+
+## Packages
+
+Decisions 121 to 127.
+
+- **Cargo.** A `path` dependency is resolved relative to the manifest that names it, and must reach a directory with its own manifest. crates.io rejects a package whose dependencies live outside it, and `path` and `version` can sit together. The default program is `src/main.rs`, and the default library is `src/lib.rs`. A package can hold both, which decision 123 does not copy.
+- **Go.** A `replace` line can point at a local directory holding a `go.mod`, and it applies only in the main module. Lucid's `path` is simpler, and has the wider reach, since a dependency's own paths count too. That is safe while paths are local, and the open question on registry packages covers the rest.
+- **TOML 1.0.** Repeating a key is invalid. An inline table cannot be extended outside its braces, and takes no comma after its last pair. An array can span lines, and can end with a comma. TOML 1.1 relaxes inline tables, so a manifest in the subset of decision 121 stays valid under both.
+- **Weak ground.** These were search summaries of the pages, not full reads. Decision 123's limit to one entry and decision 126's lack of an orphan rule are judgment calls. The file layout has had no trial with agents. The full benchmark at M5 tests it.
+
+Sources: [Cargo, specifying dependencies](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html), [Cargo, package layout](https://doc.rust-lang.org/cargo/guide/project-layout.html), [Go modules reference](https://go.dev/ref/mod), [go.mod reference](https://go.dev/doc/modules/gomod-ref), [TOML 1.0](https://toml.io/en/v1.0.0), [TOML 1.1](https://toml.io/en/v1.1.0).
 
 ## Open research
 

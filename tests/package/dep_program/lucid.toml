@@ -1,0 +1,6 @@
+[package]
+name = "dep_program"
+version = "1.0.0"
+
+[dependencies]
+app = { path = "../app" }

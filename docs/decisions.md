@@ -126,6 +126,13 @@ Add new entries at the end of the list. To reverse a decision, add a new entry t
 | 118 | 2026-11-06 | A private task with `self` cannot be called from another module, but counts for traits and derived tasks. One receiver type has one task of each name in the program | Rust's coherence rules exist so one type has one meaning. Here, a value that prints one way in one module and another way elsewhere would be worse than a private task that shows through a trait. Go does the reverse for unexported methods, so this is a judgment call. See `research.md`. |
 | 119 | 2026-11-06 | A pattern finds a variant from its subject's type, with no prefix or import. A binding in a pattern cannot reuse a type or variant name of any module | Grammar stays as it is, and Swift infers a case from the subject the same way. Without the wide check, a variant name on a union subject would bind and catch everything, the bug that decision 52 rules out. |
 | 120 | 2026-11-06 | An imported module runs no code | Go runs package initializers, and imports for that effect exist there. Lucid has no need, and this keeps decision 27: no initialization order to define. |
+| 121 | 2026-11-06 | `lucid.toml` is read by a small hand-written parser for a subset of TOML 1.0: tables, bare keys, strings, booleans, arrays, inline tables. Other forms are E0338, not a guess | `compiler.md` lists allowed dependencies and a TOML crate is not one. Every subset file is valid TOML, so tools still read it. See "Packages" in `research.md`. |
+| 122 | 2026-11-06 | Until the registry at M8, a dependency needs `path`. `version` is allowed beside it and ignored | Cargo and Go both let a local path stand for a dependency. Each package is one copy, so no version solving exists yet, and `lucid.lock` waits for M8 with the registry. |
+| 123 | 2026-11-06 | A package is a program with `src/main.lcd` or a library with `src/lib.lcd`, never both | Names follow Cargo, so agents already know them. One entry per package gives `lucid run`, `check`, and `test` one meaning. Cargo allows both, and this rule can loosen later with no program breaking. |
+| 124 | 2026-11-06 | `use name` needs `name` in the file's own manifest, whose key must equal the package's name. Renaming uses `as` in the file, and two packages with one name are E0339 | Rust and Go also make each dependency explicit. This leaves one way to rename, which `agents.md` asks for. Two versions of a package in one program waits for the registry. |
+| 125 | 2026-11-06 | A package module's internal name starts with `@`, and all of a package's files can be imported, limited by `public` | Keeps decision 115: no written name can clash. A module passes nothing on from its imports, so a library has no other way to show a part of its files. |
+| 126 | 2026-11-06 | No orphan rule yet. Two packages that add one task to one receiver type stop with E0304 in the program that uses both | It is a compile error, not a change in behavior, so no guarantee is at risk. A rule needs real packages to judge. Decide before the registry. |
+| 127 | 2026-11-06 | A directory on the command line, or none, means the nearest package at or above it. `lucid test` on a package runs every file in `src`, in one report | Agents run commands from any directory, and Cargo finds its manifest the same way. Imported modules drop their tests, so only a walk of `src` reaches them all. |
 
 ## Open questions
 
@@ -138,6 +145,8 @@ Decide each one by the milestone shown.
 | Literal types such as `"open" or "closed"` | Leave out of version 1. | M5 |
 | Bit operations, as operators or as tasks such as `x.shift_left(1)`? Hashing and byte parsing need them. | Tasks, by rule 7 in `agents.md`. | M5 |
 | License | Choose before first public release. | M5 |
+| Orphan rule for tasks with `self` across packages | None: a clash is E0304, by decision 126. | M8 |
+| May a `path` dependency stay in a package that comes from the registry? It can name any local directory. | No: reject it, as crates.io rejects code from outside. | M8 |
 | Browser UI framework shape | Decide from real programs. | M6 |
 | Can traps be contained so one failing server request does not end the process? | Let a process supervisor restart it. | M7 |
 | Lightweight tasks or OS threads? JSPI allows blocking calls in browsers. Foreign calls are the unstudied cost. | Start with OS threads. | M7 |

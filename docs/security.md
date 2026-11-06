@@ -26,7 +26,7 @@ Map and set hashes use SipHash through Rust's `RandomState`, with keys chosen on
 
 ## Unsafe code
 
-`unsafe` blocks are the only place for foreign calls and for taking a raw pointer. Error E0330 enforces this. Each block needs a comment, and error E0332 enforces that one exists, not that it is true. `lucid check --unsafe` lists all `unsafe` sites in a file and the modules that it imports. Listing those in dependencies waits for packages.
+`unsafe` blocks are the only place for foreign calls and for taking a raw pointer. Error E0330 enforces this. Each block needs a comment, and error E0332 enforces that one exists, not that it is true. `lucid check --unsafe` lists all `unsafe` sites in a program and all it imports, dependencies too.
 
 Inside `unsafe`, the guarantees above are the author's job. A C call can do anything, a wrong declared type corrupts values, and a pointer used after its list changes is a use after free. `bool` from C is normalized, and integer results are extended from their declared width, so a correct declaration gives a valid Lucid value.
 
@@ -45,8 +45,8 @@ files = ["./data"]
 env = ["PORT"]
 
 [dependencies]
-markdown = { version = "1.2", allow = [] }
-mailer = { version = "0.4", allow = ["net"] }
+markdown = { path = "../markdown", allow = [] }
+mailer = { path = "../mailer", allow = ["net"] }
 ```
 
 | Permission | Unlocks |
@@ -57,7 +57,9 @@ mailer = { version = "0.4", allow = ["net"] }
 | `process` | `std.process` |
 | `unsafe` | `unsafe` and `extern` |
 
-**Enforcement:** imports are checked at compile time. A dependency that imports `std.net` without an `allow` entry from its parent fails the build. Path and name limits are enforced at run time in `std`.
+**State:** `lucid.toml` is read and its permissions are validated, and E0338 rejects an unknown one. Nothing enforces them yet. That is a later item at M5.
+
+**Enforcement (planned):** imports are checked at compile time. A dependency that imports `std.net` without an `allow` entry from its parent fails the build. Path and name limits are enforced at run time in `std`.
 
 **Transitive rule:** a package must hold every permission that its dependencies hold. Otherwise, a package with no `net` permission could reach the network by calling a dependency that has it.
 
@@ -67,7 +69,7 @@ Permissions are not a sandbox. They limit what dependencies can do by accident o
 
 ## Supply chain
 
-- `lucid.lock` pins every dependency by content hash.
+- `lucid.lock` will pin every dependency by content hash, at M8 with the registry. Today a dependency is a local path, so nothing pins it.
 - Packages have no build scripts and no install hooks. Compiling a dependency never runs its code.
 - A compile-time execution feature, if ever added, must have no access to files or the network.
 

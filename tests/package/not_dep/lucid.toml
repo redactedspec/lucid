@@ -1,0 +1,6 @@
+[package]
+name = "not_dep"
+version = "1.0.0"
+
+[dependencies]
+greet = { path = "../greet" }

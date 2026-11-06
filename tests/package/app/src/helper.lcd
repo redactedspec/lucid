@@ -1,0 +1,5 @@
+public task twice(x: int) -> int
+    return x * 2
+
+test "twice"
+    expect twice(2) == 4

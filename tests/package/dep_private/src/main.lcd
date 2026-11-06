@@ -1,0 +1,2 @@
+use private_lib
+print private_lib.hidden()

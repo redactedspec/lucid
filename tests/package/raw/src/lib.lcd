@@ -1,0 +1,6 @@
+unsafe extern task abs(n: i32) -> i32
+
+public task zero() -> i32
+    # abs takes and returns a plain number, and keeps no pointer.
+    unsafe
+        return abs(0)

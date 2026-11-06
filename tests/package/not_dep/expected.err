@@ -1,0 +1,2 @@
+not_dep/src/main.lcd:2:1: error E0337: `base` is not a dependency
+  note: add it to `[dependencies]` in `not_dep/lucid.toml`. A local module needs `./`

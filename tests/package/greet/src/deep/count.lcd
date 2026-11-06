@@ -1,0 +1,2 @@
+public task letters(s: text) -> int
+    return s.len()

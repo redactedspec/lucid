@@ -1,0 +1,6 @@
+[package]
+name = "uses_unsafe"
+version = "1.0.0"
+
+[dependencies]
+raw = { path = "../raw" }

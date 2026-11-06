@@ -1,0 +1,6 @@
+[package]
+name = "dep_bad"
+version = "1.0.0"
+
+[dependencies]
+bad_manifest = { path = "../bad_manifest" }

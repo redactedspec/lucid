@@ -1,0 +1,6 @@
+[package]
+name = "dep_missing"
+version = "1.0.0"
+
+[dependencies]
+nowhere = { path = "../nowhere" }

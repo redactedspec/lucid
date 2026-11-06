@@ -1,0 +1,1 @@
+dep_renamed/lucid.toml:6:1: error E0339: the package in `dep_renamed/../base/` is named `base`

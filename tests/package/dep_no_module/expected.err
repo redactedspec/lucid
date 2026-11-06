@@ -1,0 +1,2 @@
+dep_no_module/src/main.lcd:1:1: error E0334: cannot find module `greet.no.such`
+  note: looked for `dep_no_module/../greet/src/no/such.lcd`

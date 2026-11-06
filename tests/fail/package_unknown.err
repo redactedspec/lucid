@@ -1,0 +1,2 @@
+package_unknown.lcd:1:1: error E0337: `nothing` is not a dependency
+  note: no `lucid.toml` holds this file. A local module needs `./`

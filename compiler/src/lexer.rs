@@ -5,7 +5,7 @@ use crate::diag::{Diagnostic, Span};
 /// Deepest allowed nesting of text interpolation, blocks, and expressions.
 pub const MAX_DEPTH: usize = 128;
 
-const KEYWORDS: &[&str] = &[
+pub const KEYWORDS: &[&str] = &[
     "and", "any", "as", "break", "change", "choice", "continue", "else", "empty", "expect",
     "extern", "false", "for", "if", "in", "is", "let", "match", "none", "not", "or", "print",
     "public", "return", "self", "shared", "spawn", "take", "task", "test", "then", "trait", "true",

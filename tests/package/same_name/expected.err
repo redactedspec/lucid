@@ -1,0 +1,2 @@
+same_name/../same_name_lib/lucid.toml:1:1: error E0339: two packages are named `base`
+  note: the other one is in `same_name/../greet/../base/`

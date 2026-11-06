@@ -2,7 +2,7 @@
 
 Everything needed to write Lucid programs that run today. Lucid has no training data: do not assume a feature from Python, TypeScript, or Rust unless it is shown here.
 
-Every `lucid` block below runs. Run a file with `lucid run file.lcd`. Check one with `lucid check file.lcd`, or `lucid check --json file.lcd` for data. Exit codes: 0 success, 1 compile error or a failed top-level `try`, 101 trap.
+Every `lucid` block below runs. Run a file with `lucid run file.lcd`, or a package with `lucid run dir`. Check one with `lucid check file.lcd`, or `lucid check --json file.lcd` for data. Exit codes: 0 success, 1 compile error or a failed top-level `try`, 101 trap.
 
 ## Layout
 
@@ -587,6 +587,28 @@ print models.greet(User(name: "Ada"))
 - Build a variant with `models.Red`. A pattern is just `Red`, with no prefix.
 - Only the entry file runs code. An imported module holds declarations and `let` with a literal value.
 - `use std.x` reports E0901: there is no standard library yet.
+
+## Packages
+
+```text
+blog/
+    lucid.toml
+    src/main.lcd      # or src/lib.lcd for a library, never both
+```
+
+```toml
+[package]
+name = "blog"
+version = "0.1.0"
+
+[dependencies]
+markdown = { path = "../markdown" }
+```
+
+- `lucid run`, `lucid check`, and `lucid test` take a file or a package directory. With no path they use the package around the current directory.
+- `lucid test` on a package runs the tests of every file in `src`.
+- `use markdown` is the dependency's `src/lib.lcd`. `use markdown.render` reads `src/render.lcd`, or else takes `render` from `src/lib.lcd`. `use markdown.a.b` follows the rule of `./`, from `src`.
+- `use` needs a dependency in this package's own `lucid.toml`. A dependency of a dependency does not count. A local file needs `./`.
 
 ## What is not available
 

@@ -1,0 +1,1 @@
+dep_program/lucid.toml:6:1: error E0339: `app` has no `src/lib.lcd`, so nothing can use it

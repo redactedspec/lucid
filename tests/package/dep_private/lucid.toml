@@ -1,0 +1,6 @@
+[package]
+name = "dep_private"
+version = "1.0.0"
+
+[dependencies]
+private_lib = { path = "../private_lib" }
