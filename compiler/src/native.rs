@@ -106,8 +106,8 @@ struct Runtime {
     list_new: FuncId,
     list_push: FuncId,
     list_unique: FuncId,
+    list_room: FuncId,
     record_unique: FuncId,
-    list_set: FuncId,
     list_pop: FuncId,
     list_swap: FuncId,
     list_has: FuncId,
@@ -185,7 +185,7 @@ fn compile(
     builder.symbol("lucid_list_push", lucid_rt::lucid_list_push as *const u8);
     builder.symbol("lucid_list_unique", lucid_rt::lucid_list_unique as *const u8);
     builder.symbol("lucid_record_unique", lucid_rt::lucid_record_unique as *const u8);
-    builder.symbol("lucid_list_set", lucid_rt::lucid_list_set as *const u8);
+    builder.symbol("lucid_list_room", lucid_rt::lucid_list_room as *const u8);
     builder.symbol("lucid_list_pop", lucid_rt::lucid_list_pop as *const u8);
     builder.symbol("lucid_list_swap", lucid_rt::lucid_list_swap as *const u8);
     builder.symbol("lucid_list_has", lucid_rt::lucid_list_has as *const u8);
@@ -252,7 +252,7 @@ fn compile(
         list_push: import("lucid_list_push", &two, &value),
         list_unique: import("lucid_list_unique", &value, &value),
         record_unique: import("lucid_record_unique", &value, &value),
-        list_set: import("lucid_list_set", &with_two, &value),
+        list_room: import("lucid_list_room", &value, &value),
         list_pop: import("lucid_list_pop", &value, &value),
         list_swap: import("lucid_list_swap", &with_two, &value),
         list_has: import("lucid_list_has", &two, &[AbiParam::new(types::I8)]),
@@ -751,7 +751,11 @@ impl Lower<'_, '_> {
     /// Lowers a value to the 8-byte form that every runtime slot has.
     fn slot(&mut self, expr: &Expr) -> Value {
         let value = self.expr(expr);
-        match expr.ty {
+        self.as_slot(value, expr.ty)
+    }
+
+    fn as_slot(&mut self, value: Value, ty: Ty) -> Value {
+        match ty {
             Ty::Float => self.body.ins().bitcast(types::I64, MemFlagsData::new(), value),
             Ty::F32 => {
                 let bits = self.body.ins().bitcast(types::I32, MemFlagsData::new(), value);
@@ -775,6 +779,12 @@ impl Lower<'_, '_> {
         }
     }
 
+    /// A value in the form that a slot stores it. A `float` stays as one, as
+    /// in `load_slot`, and `store` writes all 8 of its bytes.
+    fn stored(&mut self, expr: &Expr) -> Value {
+        if expr.ty == Ty::Float { self.expr(expr) } else { self.slot(expr) }
+    }
+
     /// True if `value` has one count. A debug runtime's dead value has another,
     /// so it reaches the runtime's own check.
     fn is_unique(&mut self, value: Value) -> Value {
@@ -783,34 +793,20 @@ impl Lower<'_, '_> {
         self.body.ins().icmp_imm_s(IntCC::Equal, count, 1)
     }
 
-    /// Runs `fast` if `test` holds, and otherwise the runtime `task`, which
-    /// copies. Each gives the value that replaces `local`.
-    fn update_paths(
-        &mut self,
-        local: Local,
-        test: Value,
-        fast: impl FnOnce(&mut Self) -> Value,
-        task: FuncId,
-        args: &[Value],
-        span: Option<Span>,
-    ) {
-        let fast_block = self.body.create_block();
+    /// Calls the runtime `task` unless `test` holds, and keeps what it gives.
+    /// This stays apart from the write that follows on purpose. Cranelift puts
+    /// a pure value where it is used, so a write with one arm that copies and
+    /// one that does not would run the whole value again in each arm.
+    fn make_room(&mut self, local: Local, test: Value, task: FuncId) {
+        let value = self.body.use_var(self.vars[local]);
         let slow = self.body.create_block();
         let done = self.body.create_block();
         let result = self.body.append_block_param(done, types::I64);
         self.body.set_cold_block(slow);
-        self.body.ins().brif(test, fast_block, &[], slow, &[]);
-        self.body.seal_block(fast_block);
+        self.body.ins().brif(test, done, &[value.into()], slow, &[]);
         self.body.seal_block(slow);
-        self.body.switch_to_block(fast_block);
-        let kept = fast(self);
-        self.body.ins().jump(done, &[kept.into()]);
         self.body.switch_to_block(slow);
-        let copy = self.call(task, args).expect("it returns the new value");
-        if let Some(span) = span {
-            let outside = self.body.ins().icmp_imm_s(IntCC::Equal, copy, 0);
-            self.trap_if(outside, OUT_OF_BOUNDS, span);
-        }
+        let copy = self.call(task, &[value]).expect("it returns the new value");
         self.body.ins().jump(done, &[copy.into()]);
         self.body.seal_block(done);
         self.body.switch_to_block(done);
@@ -834,69 +830,61 @@ impl Lower<'_, '_> {
     fn list_set(&mut self, local: Local, args: &[Expr], span: Span) {
         let list = self.body.use_var(self.vars[local]);
         let index = self.slot(&args[0]);
-        let value = self.slot(&args[1]);
+        let value = self.stored(&args[1]);
         let flags = MemFlagsData::trusted();
         let len = self.body.ins().load(types::I64, flags, list, lucid_rt::LEN_OFFSET);
-        let inside = self.body.ins().icmp(IntCC::UnsignedLessThan, index, len);
-        let unique = self.is_unique(list);
-        let test = self.body.ins().band(inside, unique);
+        let outside = self.body.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, index, len);
+        self.trap_if(outside, OUT_OF_BOUNDS, span);
+        let test = self.is_unique(list);
+        self.make_room(local, test, self.runtime.list_unique);
+        let list = self.body.use_var(self.vars[local]);
         let item = self.item_of(local);
-        let fast = |lower: &mut Self| {
-            let address = lower.list_slot(list, index, item);
-            if item.is_counted() {
-                lower.replace(value, address, lucid_rt::SLOTS_OFFSET, true);
-            } else {
-                lower.store_item(value, address, item);
-            }
-            list
-        };
-        let task = self.runtime.list_set;
-        self.update_paths(local, test, fast, task, &[list, index, value], Some(span));
+        let address = self.list_slot(list, index, item);
+        if item.is_counted() {
+            self.replace(value, address, lucid_rt::SLOTS_OFFSET, true);
+        } else {
+            self.store_item(value, address, item);
+        }
     }
 
     fn list_push(&mut self, local: Local, args: &[Expr]) {
         let list = self.body.use_var(self.vars[local]);
-        let value = self.slot(&args[0]);
+        let value = self.stored(&args[0]);
         let flags = MemFlagsData::trusted();
         let len = self.body.ins().load(types::I64, flags, list, lucid_rt::LEN_OFFSET);
         let cap = self.body.ins().load(types::I64, flags, list, lucid_rt::CAP_OFFSET);
         let room = self.body.ins().icmp(IntCC::UnsignedLessThan, len, cap);
         let unique = self.is_unique(list);
         let test = self.body.ins().band(room, unique);
+        self.make_room(local, test, self.runtime.list_room);
+        let list = self.body.use_var(self.vars[local]);
         let item = self.item_of(local);
-        let fast = |lower: &mut Self| {
-            let address = lower.list_slot(list, len, item);
-            lower.store_item(value, address, item);
-            let longer = lower.body.ins().iadd_imm_s(len, 1);
-            lower.body.ins().store(flags, longer, list, lucid_rt::LEN_OFFSET);
-            list
-        };
-        self.update_paths(local, test, fast, self.runtime.list_push, &[list, value], None);
+        let address = self.list_slot(list, len, item);
+        self.store_item(value, address, item);
+        let longer = self.body.ins().iadd_imm_s(len, 1);
+        self.body.ins().store(flags, longer, list, lucid_rt::LEN_OFFSET);
     }
 
-    /// `args[1]` is a plain `none` when a write through a path empties a slot,
-    /// or writes to a `none` field. The type does not show if that slot holds
-    /// a count, so only a slot that does takes the fast path.
+    /// `args[1]` is a plain `none` when a write through a union empties a slot,
+    /// or writes to a `none` field. Its type does not show if that slot holds
+    /// a count, so the runtime looks.
     fn field_set(&mut self, local: Local, args: &[Expr]) {
         let ExprKind::Int(slot) = args[0].kind else { unreachable!("`mono.rs` gives a slot") };
-        let emptied = matches!(args[1].kind, ExprKind::None);
-        let counted = args[1].ty.is_counted() || emptied;
-        let record = self.body.use_var(self.vars[local]);
-        let index = self.body.ins().iconst(types::I64, slot);
-        let value = self.slot(&args[1]);
-        let mut test = self.is_unique(record);
-        if emptied {
-            let flags = MemFlagsData::trusted();
-            let held = self.body.ins().uload32(flags, record, lucid_rt::COUNTED_OFFSET);
-            let holds = self.body.ins().icmp_imm_s(IntCC::SignedGreaterThan, held, slot);
-            test = self.body.ins().band(test, holds);
+        if matches!(args[1].kind, ExprKind::None) {
+            let record = self.body.use_var(self.vars[local]);
+            let index = self.body.ins().iconst(types::I64, slot);
+            let value = self.slot(&args[1]);
+            let task = self.runtime.record_set;
+            let result = self.call(task, &[record, index, value]);
+            self.body.def_var(self.vars[local], result.expect("it returns the new value"));
+            return;
         }
-        let fast = |lower: &mut Self| {
-            lower.replace(value, record, slot_offset(slot as usize), counted);
-            record
-        };
-        let args = [record, index, value];
-        self.update_paths(local, test, fast, self.runtime.record_set, &args, None);
+        let value = self.stored(&args[1]);
+        let record = self.body.use_var(self.vars[local]);
+        let test = self.is_unique(record);
+        self.make_room(local, test, self.runtime.record_unique);
+        let record = self.body.use_var(self.vars[local]);
+        self.replace(value, record, slot_offset(slot as usize), args[1].ty.is_counted());
     }
 
     /// Stores `value` in a slot of the list or record in `local`.
@@ -919,13 +907,13 @@ impl Lower<'_, '_> {
             Ty::List(_) => self.runtime.list_unique,
             _ => self.runtime.record_unique,
         };
-        self.update_paths(local, test, |_| value, task, &[value], None);
+        self.make_room(local, test, task);
         let empty = self.body.ins().iconst(types::I64, 0);
         self.store_slot(local, key, empty);
     }
 
     fn put(&mut self, local: Local, args: &[Expr]) {
-        let value = self.slot(&args[1]);
+        let value = self.stored(&args[1]);
         self.store_slot(local, &args[0], value);
     }
 
@@ -1008,8 +996,13 @@ impl Lower<'_, '_> {
         record
     }
 
+    /// A `float` stays in its own registers: going through an integer register
+    /// costs a move each way, and n-body does little else.
     fn load_slot(&mut self, address: Value, offset: i32, ty: Ty) -> Value {
         let flags = MemFlagsData::trusted();
+        if ty == Ty::Float {
+            return self.body.ins().load(types::F64, flags, address, offset);
+        }
         let slot = self.body.ins().load(types::I64, flags, address, offset);
         self.read_slot(slot, ty)
     }

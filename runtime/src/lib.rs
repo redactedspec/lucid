@@ -772,9 +772,8 @@ pub extern "C" fn lucid_list_new(cap: usize, counted: bool, small: bool) -> *mut
 pub unsafe extern "C" fn lucid_list_push(list: *mut List, value: i64) -> *mut List {
     // SAFETY: the caller guarantees a live list, and `cap` makes room.
     unsafe {
-        let (len, cap) = ((*list).len, (*list).cap);
-        let cap = if len == cap { cap.saturating_mul(2).max(SMALLEST_LIST) } else { cap };
-        let list = unique_list(list, cap);
+        let list = lucid_list_room(list);
+        let len = (*list).len;
         if is_small(list) {
             list.add(1).cast::<u8>().add(len).write(value as u8);
         } else {
@@ -785,38 +784,26 @@ pub unsafe extern "C" fn lucid_list_push(list: *mut List, value: i64) -> *mut Li
     }
 }
 
+/// Returns the list that this caller alone holds, in place of `list`, with
+/// room for one more value.
+///
+/// # Safety
+///
+/// `list` must point to a live list that this caller gives one count of.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_list_room(list: *mut List) -> *mut List {
+    // SAFETY: the caller guarantees this.
+    unsafe {
+        let (len, cap) = ((*list).len, (*list).cap);
+        let cap = if len == cap { cap.saturating_mul(2).max(SMALLEST_LIST) } else { cap };
+        unique_list(list, cap)
+    }
+}
+
 /// True if `0 <= index < len`.
 fn in_bounds(list: *const List, index: i64) -> bool {
     // SAFETY: every caller holds a live list.
     (index as u64) < unsafe { (*list).len } as u64
-}
-
-/// Replaces a value, and returns the list that replaces `list`. Returns null
-/// if `index` is out of bounds, and compiled code then traps.
-///
-/// # Safety
-///
-/// As for `lucid_list_push`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn lucid_list_set(list: *mut List, index: i64, value: i64) -> *mut List {
-    if !in_bounds(list, index) {
-        return std::ptr::null_mut();
-    }
-    // SAFETY: the caller guarantees a live list, and the index is in bounds.
-    unsafe {
-        let counted = is_counted(list);
-        let list = unique_list(list, (*list).cap);
-        if is_small(list) {
-            list.add(1).cast::<u8>().add(index as usize).write(value as u8);
-            return list;
-        }
-        let slot = &mut slots(list)[index as usize];
-        let old = std::mem::replace(slot, value);
-        if counted {
-            release_slot(old);
-        }
-        list
-    }
 }
 
 /// Drops the last value, and returns the list that replaces `list`.
@@ -1532,11 +1519,9 @@ mod tests {
                 list = lucid_list_push(list, text as i64);
             }
             lucid_retain(list.cast());
-            lucid_retain(text.cast());
-            let copy = lucid_list_set(list, 0, slots(list)[1]);
+            let copy = lucid_list_unique(list);
             assert_ne!(copy, list);
             assert_eq!(((*list).len, (*copy).len), (100, 100));
-            assert!(lucid_list_set(copy, 100, 0).is_null());
             assert!(lucid_list_swap(copy, -1, 0).is_null());
             lucid_release(copy.cast());
             lucid_release(list.cast());
