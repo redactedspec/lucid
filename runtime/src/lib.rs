@@ -580,16 +580,13 @@ pub extern "C" fn lucid_list_new(cap: usize, counted: bool) -> *mut List {
 /// # Safety
 ///
 /// `list` must point to a live list that this caller gives one count of.
-/// `value` must fit the list's slots, and is borrowed.
+/// `value` must fit the list's slots, and the list keeps the caller's count.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lucid_list_push(list: *mut List, value: i64) -> *mut List {
     // SAFETY: the caller guarantees a live list, and `cap` makes room.
     unsafe {
         let (len, cap) = ((*list).len, (*list).cap);
         let cap = if len == cap { cap.saturating_mul(2).max(SMALLEST_LIST) } else { cap };
-        if is_counted(list) {
-            retain_slot(value);
-        }
         let list = unique_list(list, cap);
         list.add(1).cast::<i64>().add(len).write(value);
         (*list).len = len + 1;
@@ -615,12 +612,8 @@ pub unsafe extern "C" fn lucid_list_set(list: *mut List, index: i64, value: i64)
         return std::ptr::null_mut();
     }
     // SAFETY: the caller guarantees a live list, and the index is in bounds.
-    // The new value is retained first, since it may be the old one.
     unsafe {
         let counted = is_counted(list);
-        if counted {
-            retain_slot(value);
-        }
         let list = unique_list(list, (*list).cap);
         let slot = &mut slots(list)[index as usize];
         let old = std::mem::replace(slot, value);
@@ -738,20 +731,17 @@ unsafe fn record_slots<'a>(record: *mut Record) -> &'a mut [i64] {
 /// # Safety
 ///
 /// `record` must point to a live record that this caller gives one count of,
-/// and `slot` must be below its `len`. `value` must fit the slot, and is borrowed.
+/// and `slot` must be below its `len`. `value` must fit the slot, and the record
+/// keeps the caller's count.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lucid_record_set(
     mut record: *mut Record,
     slot: usize,
     value: i64,
 ) -> *mut Record {
-    // SAFETY: the caller guarantees this. The new value is retained first,
-    // since it may be the old one.
+    // SAFETY: the caller guarantees this.
     unsafe {
         let (tag, len, counted) = ((*record).tag, (*record).len, (*record).counted);
-        if slot < counted {
-            retain_slot(value);
-        }
         if (*record).head.count > 1 {
             let copy = lucid_record_new(tag, len, counted);
             let old = record_slots(record);
@@ -996,16 +986,13 @@ pub extern "C" fn lucid_map_new(
 /// # Safety
 ///
 /// `map` must point to a live map that this caller gives one count of. `key`
-/// and `value` must fit its slots, and are borrowed.
+/// and `value` must fit its slots, and the map keeps the caller's count of each,
+/// except a key that it already holds, whose count it gives up.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lucid_map_set(map: *mut Map, key: i64, value: i64) -> *mut Map {
     // SAFETY: the caller guarantees all of this, and `unique_map` makes room.
-    // The new value is retained first, since it may be the old one.
     unsafe {
         let (keys, values) = (key_counted(map), value_counted(map));
-        if values {
-            retain_slot(value);
-        }
         let map = unique_map(map);
         let hash = hash_key(map, key);
         match find(map, hash, key) {
@@ -1015,13 +1002,11 @@ pub unsafe extern "C" fn lucid_map_set(map: *mut Map, key: i64, value: i64) -> *
                 if values {
                     release_slot(old);
                 }
-            }
-            None => {
                 if keys {
-                    retain_slot(key);
+                    release_slot(key);
                 }
-                append(map, Entry { hash, key, value });
             }
+            None => append(map, Entry { hash, key, value }),
         }
         map
     }
@@ -1142,8 +1127,12 @@ pub unsafe extern "C" fn lucid_set_from(
 ) -> *mut Map {
     // SAFETY: the caller guarantees a live list, and the new map has one owner.
     unsafe {
-        let mut map = lucid_map_new(is_counted(list), false, hash, equal);
+        let counted = is_counted(list);
+        let mut map = lucid_map_new(counted, false, hash, equal);
         for &slot in slots(list).iter() {
+            if counted {
+                retain_slot(slot);
+            }
             map = lucid_map_set(map, slot, 0);
         }
         map
@@ -1323,9 +1312,11 @@ mod tests {
             let mut list = lucid_list_new(0, true);
             let text = text_from(b"x");
             for _ in 0..100 {
+                lucid_retain(text.cast());
                 list = lucid_list_push(list, text as i64);
             }
             lucid_retain(list.cast());
+            lucid_retain(text.cast());
             let copy = lucid_list_set(list, 0, slots(list)[1]);
             assert_ne!(copy, list);
             assert_eq!(((*list).len, (*copy).len), (100, 100));
@@ -1344,12 +1335,14 @@ mod tests {
         // SAFETY: each pointer is live for as long as this test holds a count.
         unsafe {
             let text = text_from(b"x");
+            lucid_retain(text.cast());
             let list = lucid_list_push(lucid_list_new(0, true), text as i64);
             lucid_retain(list.cast());
             let popped = lucid_list_pop(list);
             assert_ne!(popped, list);
             assert_eq!(((*list).len, (*popped).len, (*text).head.count), (1, 0, 2));
             lucid_release(list.cast());
+            lucid_retain(text.cast());
             let list = lucid_list_push(popped, text as i64);
             let popped = lucid_list_pop(list);
             assert_eq!((popped, (*text).head.count), (list, 1));
@@ -1395,6 +1388,8 @@ mod tests {
         // SAFETY: each pointer is live for as long as this test holds a count.
         unsafe {
             let (a, b) = (text_from(b"key"), text_from(b"key"));
+            lucid_retain(a.cast());
+            lucid_retain(b.cast());
             let map = lucid_map_set(lucid_map_new(true, false, None, None), a as i64, 1);
             let map = lucid_map_set(map, b as i64, 2);
             assert_eq!((*map).len, 1);

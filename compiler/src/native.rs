@@ -505,7 +505,6 @@ impl Lower<'_, '_> {
                 let counted = value.ty.is_counted();
                 let value = self.expr(value);
                 if counted {
-                    self.call(self.runtime.retain, &[value]);
                     self.store(*local, value);
                 } else {
                     self.body.def_var(self.vars[*local], value);
@@ -561,11 +560,7 @@ impl Lower<'_, '_> {
                 self.for_loop(*local, start, end, *inclusive, body);
             }
             Stmt::Return(value) => {
-                let counted = value.ty.is_counted();
                 let value = self.expr(value);
-                if counted {
-                    self.call(self.runtime.retain, &[value]);
-                }
                 self.leave(value);
                 return true;
             }
@@ -750,9 +745,6 @@ impl Lower<'_, '_> {
         let record = self.call(self.runtime.record_new, &[tag, len, held]);
         let record = record.expect("it returns a record");
         for (slot, value) in values {
-            if slot < counted {
-                self.call(self.runtime.retain, &[value]);
-            }
             let flags = MemFlagsData::trusted();
             self.body.ins().store(flags, value, record, slot_offset(slot));
         }
@@ -966,6 +958,17 @@ impl Lower<'_, '_> {
             ExprKind::Temp(local, value) => {
                 let value = self.expr(value);
                 self.store(*local, value);
+                value
+            }
+            ExprKind::Move(local) => {
+                let value = self.body.use_var(self.vars[*local]);
+                let empty = self.body.ins().iconst(self.pointer, 0);
+                self.body.def_var(self.vars[*local], empty);
+                value
+            }
+            ExprKind::Retain(value) => {
+                let value = self.expr(value);
+                self.call(self.runtime.retain, &[value]);
                 value
             }
             ExprKind::Change(_) => unreachable!("only `call_task` reads these"),

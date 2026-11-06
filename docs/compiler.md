@@ -4,7 +4,7 @@ The compiler is written in Rust until M9, when its front end moves to Lucid (dec
 
 ## Status
 
-M3 is done, and M4 is next. `lucid run` compiles `int`, `float`, the sized numbers and wrapping math, `bool`, `none`, `text`, `list`, `map`, `set`, `type`, `choice`, `match`, unions, `is` with narrowing, interpolation, text slices, `let`, `var`, `if`, `while`, `for` over ranges, text, and collections, tasks with recursion and defaults, `change` and `take` parameters, `for change` over lists, lambdas, nested tasks, and task values, generic tasks, types, and aliases, traits with bounds, `any` values, `self` with dot calls, and `print`. It reports E0901 for anything else. `check.rs` binds names, checks types, and lowers to MIR in one pass, because with no modules those stages have nothing to do alone. It splits when they arrive. A generic body is checked once, with each parameter as an opaque `Ty::Param`. Flattening means that only the real type arguments show what is a union and what is counted, so `check.rs` records intent as `Wrap`, `View`, `Member`, and `Holds`, and `mono.rs` picks the code for each, starting from every task with no type parameters. `Ty` keeps compound types behind leaked references, so it stays `Copy`. `Ty::Data` holds a name, an index into the checker's table, and type arguments, so a recursive type needs no cycle in `Ty`. A `match` lowers to an `if` chain on a hidden local, and the last arm has no test, since the exhaustiveness check proves what remains. `Ty::Union` holds flat members in a fixed order, so two spellings are equal. Narrowing is a stack of facts in the checker, cut back at the end of each block. An assignment resets entries in place, and a loop first resets each name its body assigns. List, map, and set tasks stay built into `check.rs`. They can move to Lucid now that `change` parameters exist. `mono.rs` also replaces `==`, `<`, showing, and `in` on a compound value with a call: to a hand-written task if the type has one, or else to a task from `derive.rs`. It also gives each new map or set with a compound key its hash and equal tasks. `mono.rs` lists the types that reach each `any`. A task on an `any` tests its tag against that list, so `run` builds these tasks last, and again if building them boxed a new type. A task of a trait has a signature in `check.rs` and no body, and a call to one is `ExprKind::Method` until `mono.rs` knows the receiver. Trait checks are structural, so `Checker::satisfied` runs at each use, and walks a type's fields for a derived trait. `ownership.rs` is the naive stage: it gives each new heap value an owner, and "Counting" in `mir.rs` states the rules that a backend follows.
+M3 is done, and M4 is in progress. `lucid run` compiles `int`, `float`, the sized numbers and wrapping math, `bool`, `none`, `text`, `list`, `map`, `set`, `type`, `choice`, `match`, unions, `is` with narrowing, interpolation, text slices, `let`, `var`, `if`, `while`, `for` over ranges, text, and collections, tasks with recursion and defaults, `change` and `take` parameters, `for change` over lists, lambdas, nested tasks, and task values, generic tasks, types, and aliases, traits with bounds, `any` values, `self` with dot calls, and `print`. It reports E0901 for anything else. `check.rs` binds names, checks types, and lowers to MIR in one pass, because with no modules those stages have nothing to do alone. It splits when they arrive. A generic body is checked once, with each parameter as an opaque `Ty::Param`. Flattening means that only the real type arguments show what is a union and what is counted, so `check.rs` records intent as `Wrap`, `View`, `Member`, and `Holds`, and `mono.rs` picks the code for each, starting from every task with no type parameters. `Ty` keeps compound types behind leaked references, so it stays `Copy`. `Ty::Data` holds a name, an index into the checker's table, and type arguments, so a recursive type needs no cycle in `Ty`. A `match` lowers to an `if` chain on a hidden local, and the last arm has no test, since the exhaustiveness check proves what remains. `Ty::Union` holds flat members in a fixed order, so two spellings are equal. Narrowing is a stack of facts in the checker, cut back at the end of each block. An assignment resets entries in place, and a loop first resets each name its body assigns. List, map, and set tasks stay built into `check.rs`. They can move to Lucid now that `change` parameters exist. `mono.rs` also replaces `==`, `<`, showing, and `in` on a compound value with a call: to a hand-written task if the type has one, or else to a task from `derive.rs`. It also gives each new map or set with a compound key its hash and equal tasks. `mono.rs` lists the types that reach each `any`. A task on an `any` tests its tag against that list, so `run` builds these tasks last, and again if building them boxed a new type. A task of a trait has a signature in `check.rs` and no body, and a call to one is `ExprKind::Method` until `mono.rs` knows the receiver. Trait checks are structural, so `Checker::satisfied` runs at each use, and walks a type's fields for a derived trait. `ownership.rs` gives each new heap value an owner, makes every count explicit with `Move` and `Retain`, and finds moves with a backward walk of what is live. The walk repeats until each loop head settles, which takes a pass per level of nesting. "Counting" in `mir.rs` states the rules that a backend follows. `check.rs` lets go of the names in a block with `Stmt::Clear`, and `ownership.rs` does the same for temporaries after their statement.
 
 ## Pipeline
 
@@ -15,7 +15,7 @@ source text
   -> resolver       names bound across modules (in check.rs for now)
   -> type checker   inference, narrowing, exhaustiveness, exclusivity, MIR (check.rs)
   -> monomorphizer  concrete tasks and types only (mono.rs)
-  -> ownership      owners of new values (naive). Moves and reuse are planned
+  -> ownership      owners of new values, last-use moves. Reuse is planned
   -> backend        Cranelift (native, JIT) or wasm-encoder (web)
 ```
 
@@ -38,7 +38,7 @@ compiler/          Rust crate `lucid`: the CLI and compiler
         mono.rs    one concrete task per use of a generic
         derive.rs  derived tasks, as MIR for one concrete type
         mir.rs     typed, structured operations
-        ownership.rs   owners of new heap values
+        ownership.rs   owners and counts of heap values, last-use moves
         native.rs  Cranelift backend
         wasm.rs        planned: WebAssembly backend
     tests/golden.rs    runs everything in `tests/` and `examples/`
@@ -65,7 +65,7 @@ Compiled code reads a list's length and elements inline. Every change goes throu
 
 ### Parameters
 
-A read parameter is a borrowed value. A `take` parameter is a read parameter plus a local, which takes its own count when the task starts, so callers and task values need no case for it. M4 can turn that count into a move.
+A read parameter is a borrowed value. A `take` parameter of a top-level task arrives with a count from the caller, listed in `Task::take`. A lifted task, and a written `equal`, cannot get one, so each takes its own count when it starts.
 
 A `change` argument is a pointer to a stack slot of the caller. The caller stores the local there, and loads it back after the call. The task loads it on entry, and stores it in its one exit block, so it is an ordinary variable in between, and its count moves with it. This is the copy-in copy-out of Swift `inout`, and the checker's exclusivity rules make it correct: nothing can see the value during the call. MIR marks this with `Task::change` and `ExprKind::Change`, which only `Call` holds. A task value has no such case, since a task with a `change` parameter has no value form.
 
@@ -116,6 +116,7 @@ cargo clippy --all-targets                    # lints
 cargo fmt                                     # formatting
 sh benchmarks/run.sh                          # build, then 15 paired rounds, needs python
 sh benchmarks/run.sh fib                      # one program
+ROUNDS=3 sh benchmarks/run.sh                 # fewer rounds
 ```
 
 | Command | Behavior | State |
@@ -131,6 +132,8 @@ sh benchmarks/run.sh fib                      # one program
 | `lucid context MODULE` | Print a compact API | Planned |
 | `lucid doc` | Generate docs | Planned |
 
+`run.py` also reports peak memory, on Windows only, with the peak of an empty program taken off the Lucid figure, since `lucid run` holds the compiler. The `LUCID_NAIVE` environment variable turns ownership optimizations off, for tests and for measuring them.
+
 The `bench-unchecked` cargo feature removes `+`, `-`, and `*` overflow checks, only so that `benchmarks/run.sh` can measure their cost. It must never ship: `docs/security.md` promises traps in all builds.
 
 Exit codes: 0 for success, 1 for compile errors, 2 for bad usage, and 101 for a trap or a compiler bug. If the reader of compiler output has gone, the output is dropped and the exit code does not change.
@@ -143,7 +146,7 @@ Exit codes: 0 for success, 1 for compile errors, 2 for bad usage, and 101 for a 
 - **Error code check:** `compiler/tests/golden.rs` fails if a code in the source has no golden test or is missing from `docs/agents.md`.
 - **Examples:** everything in `examples/` must parse. Later milestones raise this to compile.
 - **Agent guide:** every `lucid` block in `docs/agent-guide.md` must run with exit code 0, and the guide must stay under the token budget, at about 4 bytes per token.
-- **Ownership-off mode:** the whole suite runs with ownership optimizations disabled, and output must match.
+- **Ownership-off mode:** the run and trap tests run a second time with `LUCID_NAIVE` set, which turns ownership optimizations off. Output must match.
 - **Memory checks:** the debug runtime counts live values, so every golden test also fails on a leak or double free.
 - **Fuzzing:** add from M5. Parser and checker must never panic.
 

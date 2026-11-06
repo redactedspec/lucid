@@ -120,6 +120,26 @@ Level: **Snippet**.
 
 Sources: [Regehr](https://blog.regehr.org/archives/1384), [Luu](https://danluu.com/integer-overflow/). Regehr's figures and cause were read in full for decision 29. Luu's update says the register allocation problem is gone from clang 3.8 and gcc 5.
 
+### Counts and moves (M4)
+
+Level: **Read** for Perceus, in the entry above. Decision 92 takes one idea from it, explicit `dup` and `drop` instructions, and departs from it on when a value is released, in decision 94. That departure is a judgment call with no measurement behind it. The first M4 benchmark table is under "M4 benchmarks".
+
+### M4 benchmarks
+
+Level: **Read** (own measurement), one run of each program on 2026-11-06, before any M4 work. Lucid includes JIT compile time.
+
+| Program | Rust ms | Lucid ms | Lucid / Rust |
+| --- | --- | --- | --- |
+| `nbody`, 2 million steps | 171 | 3558 | 20.8 |
+| `trees`, depth 18 | 3097 | 5291 | 1.71 |
+| `hashmap`, 1 million keys | 452 | 688 | 1.52 |
+| `strings`, 300,000 appends | 28 | 45005 | 1607 |
+| `json`, 5 parses of 2.4 MB | 196 | over 280000 | over 1400 |
+
+Limits: one run each, so these show size and not detail.
+
+Last-use moves alone left `trees`, `hashmap`, and `nbody` within noise of these figures. They remove count pairs, and the time goes elsewhere. `strings` and `json` are quadratic: each append copies all the text, and each slice scans from the start.
+
 ### First Lucid benchmarks (M2)
 
 Level: **Read** (own measurement). `sh benchmarks/run.sh`, 2026-11-05, on the development machine: 15 paired rounds, so drift hits every build alike. Lucid includes JIT compile time. Rust is `rustc -O`, and "Rust checked" adds `-C overflow-checks=on`.

@@ -54,7 +54,7 @@ fn cli(args: &[String]) -> ExitCode {
             diags = mono::run(&mut program);
         }
         if run && diags.is_empty() {
-            ownership::run(&mut program);
+            ownership::run(&mut program, std::env::var_os("LUCID_NAIVE").is_none());
             diags = native::run(&program, path, &src, STACK_BYTES).err().unwrap_or_default();
         } else if !run {
             // `check` reports errors in the program. An unbuilt feature is not one.

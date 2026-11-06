@@ -83,7 +83,9 @@ struct Frame<'a> {
     mutable: Vec<bool>,
     /// The return type, or `None` at top level.
     returns: Option<Ty>,
-    loops: usize,
+    /// The first scope of each open loop, and its loop name, if it has one. A
+    /// loop name stays out of `Frame::leaving`, since `for` lets go of it.
+    loop_scopes: Vec<(usize, Option<Local>)>,
     /// What tests have proved about locals, latest last. See `forget`.
     narrowed: Vec<(Local, Ty)>,
     /// What this lambda or nested task captured so far, with each value as the
@@ -1560,11 +1562,15 @@ impl<'a> Checker<'a> {
             self.signatures[id].params.iter().map(|p| (p.name, p.ty, p.mode)).collect();
         let mut scope = HashMap::new();
         let mut change = Vec::new();
+        // The runtime calls a written `equal` directly, and passes no count.
+        let written = self.signatures[id].name.text != "equal";
+        let mut take = Vec::new();
         for &(name, ty, mode) in &params {
             let changes = mode == ast::ParamMode::Change;
             let local = self.new_local(ty, changes);
             scope.insert(name, local);
             change.extend(changes.then_some(local));
+            take.extend((written && mode == ast::ParamMode::Take).then_some(local));
         }
         self.frame.params = params.len();
         let mut lowered = Vec::new();
@@ -1587,11 +1593,12 @@ impl<'a> Checker<'a> {
         let locals = std::mem::take(&mut self.frame.locals);
         let captures = Vec::new();
         self.frame.params = 0;
-        Task { params: params.len(), type_params, returns, locals, body, span, captures, change }
+        let params = params.len();
+        Task { params, type_params, returns, locals, body, span, captures, change, take }
     }
 
-    /// A `take` parameter arrives borrowed, like any other. A local takes its
-    /// own count on it, so the task can change it and the caller never sees.
+    /// A local holds a count of a `take` parameter, so the task can change it
+    /// and the caller never sees. See `Task::take`.
     fn own_param(&mut self, param: Local, span: Span) -> (Local, Stmt) {
         let local = self.new_local(self.frame.locals[param], true);
         (local, Stmt::Set(local, self.read(param, span)))
@@ -1611,8 +1618,9 @@ impl<'a> Checker<'a> {
         let body = self.stmts(&file.stmts);
         let span = Span { start: 0, end: 0 };
         let locals = std::mem::take(&mut self.frame.locals);
-        let (captures, change) = (Vec::new(), Vec::new());
-        Task { params: 0, type_params: 0, returns: Ty::None, locals, body, span, captures, change }
+        let (captures, change, take) = (Vec::new(), Vec::new(), Vec::new());
+        let (params, type_params, returns) = (0, 0, Ty::None);
+        Task { params, type_params, returns, locals, body, span, captures, change, take }
     }
 
     fn new_local(&mut self, ty: Ty, mutable: bool) -> Local {
@@ -1641,9 +1649,31 @@ impl<'a> Checker<'a> {
 
     fn block(&mut self, stmts: &'a [ast::Stmt]) -> Vec<Stmt> {
         self.frame.scopes.push(HashMap::new());
-        let stmts = self.stmts(stmts);
-        self.frame.scopes.pop();
+        let mut stmts = self.stmts(stmts);
+        self.close_scope(&mut stmts, None);
         stmts
+    }
+
+    /// Ends the innermost scope. If control can reach its end, each name in it
+    /// lets go of its value, newest first. `keep` stays, for a loop to handle.
+    fn close_scope(&mut self, stmts: &mut Vec<Stmt>, keep: Option<Local>) {
+        let scope = self.frame.scopes.pop().expect("a scope is open");
+        if !ends(stmts, true) {
+            let mut names: Vec<Local> = scope.into_values().filter(|&l| Some(l) != keep).collect();
+            names.sort_unstable_by_key(|&local| std::cmp::Reverse(local));
+            stmts.extend(names.into_iter().map(Stmt::Clear));
+        }
+    }
+
+    /// What a `break` or `continue` leaves: each name from the scopes of the
+    /// open loop's body, newest first. `Stmt::Clear` of a plain number is
+    /// dropped later.
+    fn leaving(&self) -> Vec<Stmt> {
+        let &(depth, keep) = self.frame.loop_scopes.last().expect("the checker found a loop");
+        let names = self.frame.scopes[depth..].iter().flat_map(|scope| scope.values().copied());
+        let mut names: Vec<Local> = names.filter(|&local| Some(local) != keep).collect();
+        names.sort_unstable_by_key(|&local| std::cmp::Reverse(local));
+        names.into_iter().map(Stmt::Clear).collect()
     }
 
     fn stmts(&mut self, stmts: &'a [ast::Stmt]) -> Vec<Stmt> {
@@ -1755,9 +1785,9 @@ impl<'a> Checker<'a> {
                 let test = self.condition(condition, "`while`");
                 let facts = self.facts(condition, true);
                 self.frame.narrowed.extend(facts);
-                self.frame.loops += 1;
+                self.frame.loop_scopes.push((self.frame.scopes.len(), None));
                 let body = self.block(body);
-                self.frame.loops -= 1;
+                self.frame.loop_scopes.pop();
                 self.frame.narrowed.truncate(start);
                 Stmt::While { condition: test, body }
             }
@@ -1803,12 +1833,16 @@ impl<'a> Checker<'a> {
                     Stmt::Print(self.showable(value))
                 }
             },
-            StmtKind::Break | StmtKind::Continue if self.frame.loops == 0 => {
+            StmtKind::Break | StmtKind::Continue if self.frame.loop_scopes.is_empty() => {
                 self.fail("E0311", "`break` and `continue` need a loop".into(), span);
                 return None;
             }
-            StmtKind::Break => Stmt::Break,
-            StmtKind::Continue => Stmt::Continue,
+            StmtKind::Break | StmtKind::Continue => {
+                let mut stmts = self.leaving();
+                let breaks = matches!(stmt.kind, StmtKind::Break);
+                stmts.push(if breaks { Stmt::Break } else { Stmt::Continue });
+                Stmt::Block(stmts)
+            }
             StmtKind::Placeholder => Stmt::Placeholder(span),
             StmtKind::Expr(value) => return self.expr_stmt(value, span),
             StmtKind::Use { .. } => return self.later("`use`", span),
@@ -1840,8 +1874,9 @@ impl<'a> Checker<'a> {
         let captures = values.iter().map(|value| value.ty).collect();
         let (type_params, args) = self.own_type_args();
         let params = params.len() + 1;
-        let change = Vec::new();
-        let task = Task { params, type_params, returns, locals, body, span, captures, change };
+        let (change, take) = (Vec::new(), Vec::new());
+        let task =
+            Task { params, type_params, returns, locals, body, span, captures, change, take };
         self.lifted.push(task);
         let task = self.first_lifted + self.lifted.len() - 1;
         let fields = values.into_iter().enumerate().collect();
@@ -2033,10 +2068,10 @@ impl<'a> Checker<'a> {
                 locals.extend(&types);
                 let params = locals.len();
                 let type_params = own.len();
-                let (captures, change) = (Vec::new(), Vec::new());
+                let (captures, change, take) = (Vec::new(), Vec::new(), Vec::new());
                 let body = vec![Stmt::Return(call)];
                 let code =
-                    Task { params, type_params, returns, locals, body, span, captures, change };
+                    Task { params, type_params, returns, locals, body, span, captures, change, take };
                 self.lifted.push(code);
                 let task = self.first_lifted + self.lifted.len() - 1;
                 self.task_values.insert(id, task);
@@ -2193,7 +2228,7 @@ impl<'a> Checker<'a> {
                 }
                 ast::ArmBody::Block(stmts) => body.extend(self.stmts(stmts)),
             }
-            self.frame.scopes.pop();
+            self.close_scope(&mut body, None);
             lowered.push((test, body));
         }
         let missing = self.missing(ty, &covered);
@@ -3064,10 +3099,10 @@ impl<'a> Checker<'a> {
         self.forget_assigned(body);
         self.frame.scopes.push(HashMap::new());
         let local = self.bind(name, ty, mutable);
-        self.frame.loops += 1;
-        let body = self.stmts(body);
-        self.frame.loops -= 1;
-        self.frame.scopes.pop();
+        self.frame.loop_scopes.push((self.frame.scopes.len() - 1, Some(local)));
+        let mut body = self.stmts(body);
+        self.frame.loop_scopes.pop();
+        self.close_scope(&mut body, Some(local));
         (local, body)
     }
 
@@ -3277,6 +3312,7 @@ impl<'a> Checker<'a> {
             Stmt::Set(owner, value),
             Stmt::Set(position, expr(first, Ty::Int)),
             Stmt::While { condition: expr(inside, Ty::Bool), body: inner },
+            Stmt::Clear(current),
             Stmt::Clear(owner),
         ])
     }

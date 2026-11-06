@@ -1,0 +1,180 @@
+# Each block reads a value where a wrong move, or a release that came too
+# early, would show as a wrong answer, or as a trap from the debug runtime.
+
+type Box
+    items: list[int]
+    name: text
+
+choice Tree
+    Leaf
+    Node(left: Tree, value: text, right: Tree)
+
+task grow(take items: list[int], extra: int) -> list[int]
+    items.push(extra)
+    return items
+
+task both(a: list[int], take b: list[int]) -> int
+    b.push(1)
+    return a.len() + b.len()
+
+task last_of(take box: Box) -> text
+    box.items.push(9)
+    return "{box.name}{box.items.len()}"
+
+task pass_on(take items: list[int]) -> list[int]
+    return grow(items, 7)
+
+task keep_first(first: text, second: text) -> text
+    return first
+
+task swap_tree(take tree: Tree) -> Tree
+    return match tree
+        Leaf -> Leaf
+        Node(left, value, right) -> Node(left: swap_tree(right), value: value, right: swap_tree(left))
+
+task words(tree: Tree) -> text
+    return match tree
+        Leaf -> ""
+        Node(left, value, right) -> "{words(left)}{value}{words(right)}"
+
+task early(flag: bool) -> list[int]
+    var a = [1]
+    let b = a
+    if flag
+        return b
+    a.push(2)
+    return a
+
+task in_place(take items: list[int]) -> int
+    for i in 0..3
+        items = grow(items, i)
+    return items.len()
+
+# Moved at the end, and read before.
+var one = [1, 2]
+print one.len()
+let two = grow(one, 3)
+print two
+
+# Still used later, so `take` must not take it.
+let three = [1]
+let four = grow(three, 2)
+print three
+print four
+
+# One value read twice in a statement.
+let five = [5]
+print both(five, five)
+print five
+
+# Moved in one branch and read in the other.
+let flag = two.len() == 3
+let six = "six {flag}"
+var seven = ""
+if flag
+    seven = six
+else
+    print six
+print seven
+
+# Read again on the next pass of a loop.
+let eight = [8]
+var total = 0
+for i in 0..3
+    let copy = eight
+    total += grow(copy, i).len()
+print total
+print eight
+
+# Replaced on each pass, so each pass can move it.
+var nine = [0]
+for i in 0..3
+    nine = grow(nine, i)
+print nine
+
+# Assigned on one path only, so a later pass reads it.
+var ten = [1]
+var count = 0
+while count < 3
+    if count == 1
+        let gone = ten
+        print gone
+        ten = [2]
+    count += 1
+print ten
+
+# Moved into a record, then read through the record.
+let eleven = [1, 2, 3]
+let box = Box(items: eleven, name: "box")
+print box
+print last_of(box)
+print box
+
+# A field read and the whole value in one statement.
+let twelve = Box(items: [1], name: "n")
+print keep_first(twelve.name, last_of(twelve))
+
+# A nested value that outlives its parent.
+task first_item(boxes: list[Box]) -> list[int]
+    let inner = boxes[0].items
+    return inner
+
+print first_item([Box(items: [4], name: "x")])
+
+# `break` and `continue` let go of the names in the loop.
+var kept: list[text] = []
+for word in ["a", "b", "c", "d"]
+    let up = "{word}!"
+    if word == "b"
+        continue
+    kept.push(up)
+    if word == "c"
+        break
+print kept
+
+# A value held only by a loop that ends early.
+for word in ["x", "y"]
+    let held = word
+    print held
+    break
+
+# Values that end at the end of an inner block.
+if flag
+    let inner = ["inner"]
+    print inner
+print "after"
+
+# Shapes of a recursive value.
+let tree = Node(left: Node(left: Leaf, value: "a", right: Leaf), value: "b", right: Leaf)
+print words(tree)
+print words(swap_tree(tree))
+print words(tree)
+
+# A closure takes its capture by move, or by count if read later.
+let thirteen = [1, 2]
+let counts: task() -> int = () => thirteen.len()
+print counts()
+print thirteen
+let fourteen = [1]
+let once: task() -> int = () => fourteen.len()
+print once()
+
+print early(true)
+print early(false)
+print in_place([])
+print pass_on([1])
+
+# A text key that a map already holds, given again.
+var seen: map[text, int] = {}
+let key = "k"
+seen[key] = 1
+seen[key] = 2
+seen["{key}"] = 3
+print seen
+print key
+
+# A list inside itself.
+var nest = [[1]]
+nest.push(nest[0])
+nest[1].push(2)
+print nest

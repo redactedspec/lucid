@@ -18,6 +18,13 @@ fn lucid(dir: &Path, args: &[&str]) -> Output {
     Command::new(LUCID).args(args).current_dir(dir).output().expect("cannot start lucid")
 }
 
+/// With ownership optimizations off. See "Testing" in docs/compiler.md.
+fn naive(dir: &Path, args: &[&str]) -> Output {
+    let mut command = Command::new(LUCID);
+    command.args(args).current_dir(dir).env("LUCID_NAIVE", "1");
+    command.output().expect("cannot start lucid")
+}
+
 fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).replace("\r\n", "\n")
 }
@@ -45,9 +52,11 @@ fn golden(dir: &str, expected_extension: &str, check: fn(&Output, &str) -> Optio
         let name = file_name(&source);
         let expected = fs::read(source.with_extension(expected_extension))
             .unwrap_or_else(|e| panic!("{name}: no .{expected_extension} file: {e}"));
-        let output = lucid(&dir, &["run", name]);
-        if let Some(problem) = check(&output, &text(&expected)) {
-            failures.push(format!("{name}: {problem}"));
+        for run in [lucid, naive] {
+            let output = run(&dir, &["run", name]);
+            if let Some(problem) = check(&output, &text(&expected)) {
+                failures.push(format!("{name}: {problem}"));
+            }
         }
     }
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));

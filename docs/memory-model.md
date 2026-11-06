@@ -41,7 +41,7 @@ let numbers = [1, 2, 3]
 let more = add_all(numbers, 4)   # last use of numbers: moved, in place
 ```
 
-If `numbers` is used after the call, the list is shared at the call and `push` copies once. The program stays correct either way. Only its cost changes, and `lucid check --costs` reports the copy. As of M3 there are no moves, so `take` always shares and the first write copies once. Moves arrive at M4.
+If `numbers` is used after the call, the list is shared at the call and `push` copies once. The program stays correct either way. Only its cost changes, and `lucid check --costs` will report the copy.
 
 ## The exclusivity law
 
@@ -86,7 +86,7 @@ A task value is a counted record of what it captured, and holds no reference to 
 
 ## Destruction
 
-Values are destroyed deterministically when their last owner ends. Destroying never recurses, so a recursive value of any depth is safe to drop (decision 54). As of M3 a local's owner ends when the local is overwritten or the task returns, not at the end of its block. That must tighten before `Close` arrives at M5. A type that has `task close(change self: T)` from the `Close` trait has it called automatically at that moment. Files and sockets close without `defer` or `with`.
+Values are destroyed deterministically when their last owner ends. Destroying never recurses, so a recursive value of any depth is safe to drop (decision 54). A name owns its value until the end of its block, newest name first, or until the value moves on, or until the name is assigned. `break`, `continue`, and `return` end the blocks they leave. A hidden value ends with its statement. A type that has `task close(change self: T)` from the `Close` trait has it called automatically at that moment. Files and sockets close without `defer` or `with`.
 
 ## Reference count performance
 
@@ -111,8 +111,11 @@ The published results for Perceus and Lean come from functional languages, with 
 This is the hardest part of the compiler, so it comes with a staged plan:
 
 1. **M3: naive.** Count every use. Correct and slow. Each new value goes to a hidden local, which holds it until overwritten or until the task returns. A `for` over text or a collection holds one count on it in another hidden local, so nothing in the body can free it. A store then counts again, so a value is rarely unique yet, and copy-on-write copies more than it must. `var x = [1]` holds two counts, so the first write copies once. After that `x` holds its own copy, and writes happen in place. A write through a path such as `grid[i][j] = 1` takes `grid[i]` out of its slot, writes, and puts it back, so it copies nothing unless `grid[i]` is shared. A `for` lets go of its count when the loop ends. A write to a field works like a write to a list element. A `change` argument that is a path takes its value out of its slot for the call, in the same way, and any other value of that call goes to a hidden local first. `for change` takes the list out of its place for the whole loop, and each element out of the list while the body runs, so a shared list copies once, and each write is then in place. A `take` parameter is a local that takes its own count on entry, so a write to it copies once. A `match` holds one count on its subject in a hidden local until it ends. A union holds one count on what it contains. `.pop` reads the element first, so its value outlives the list's count. `.get` keeps its receiver and key in hidden locals only if they are not plain reads, so `x.get(i)` and `g[0].get(i)` add no count to the list. With a computed path such as `g[i + 1].get(0)`, the hidden local holds a count until it is overwritten, so the next write to that element copies it once.
-2. **M4: last-use moves and borrow elision.** Measure against Rust.
-3. **M4: reuse analysis.** Only after measurements justify it.
+2. **M4: last-use moves.** Done. A value goes where it is kept without a count operation if nothing reads it again, and each count is explicit in MIR. See below.
+3. **M4: borrow elision.** Measure against Rust.
+4. **M4: reuse analysis.** Only after measurements justify it.
+
+Stage 2 runs on MIR after monomorphization. A local moves into a place that keeps it if it is not a parameter, nothing can read it after the statement, and the statement reads it once. The last rule is what keeps a borrow valid: in `f(x.name, take x)` the first argument borrows from `x`, so `x` is retained, not moved. A `take` argument is such a place, so a `take` parameter of a top-level task arrives with a count. A task that runs through a task value, and a written `equal`, which the runtime calls, keep the borrowed form with a retain on entry, since those callers cannot pass a count. Statements that one expression holds move nothing.
 
 If benchmarks miss the target in `vision.md` after these stages, revisit the model in `decisions.md`.
 

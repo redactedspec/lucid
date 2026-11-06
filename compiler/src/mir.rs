@@ -406,13 +406,21 @@ pub struct ShapeVariant {
 /// An index into `Task::locals`. Parameters come first.
 pub type Local = usize;
 
-// Counting: a counted expression yields a borrowed reference, which stays valid
-// for its whole statement because a local or `Temp` owns it. Each counted local
-// owns one count, and starts empty. `Set` retains the new value and releases the
-// old one. A parameter is borrowed from the caller, and is never `Set`, except a
-// `change` parameter, which holds the caller's count for the length of the call.
-// `Return` retains its value, then releases every counted local that is not a
-// parameter.
+// Counting: most counted expressions yield a borrowed reference, which stays
+// valid for its whole statement because a local or `Temp` owns it. Each counted
+// local owns one count, and starts empty. A parameter is borrowed from the
+// caller, and is never `Set`, except a `change` parameter, which holds the
+// caller's count for the length of the call. A `take` parameter of a task in
+// `Task::take` arrives with a count, which the first statement moves to a local.
+//
+// What keeps a value receives one count: `Set`, `Return`, a field of `New` or
+// `Closure`, an element of `ListOf` or `MapOf`, an argument of `Stmt::Update`
+// except a `MapRemove` key, and an argument to a `take` parameter. After
+// `ownership.rs` each of those holds a new value, a `Move`, or a `Retain`, and a
+// backend adds no count of its own. `Set` releases the old value after it reads
+// the new one. `Return` runs its value, then releases every counted local that
+// is not a parameter. A local holds null after `Move` and `Clear`. A null is
+// safe to release, and `ownership.rs` proves that nothing reads one.
 //
 // A list, map, set, or record in a local changes only through `Stmt::Update`, which gives
 // the runtime that local's count, and stores the value that comes back. So a
@@ -451,6 +459,10 @@ pub struct Task {
     pub captures: Vec<Ty>,
     /// The parameters passed by `change`, in order.
     pub change: Vec<Local>,
+    /// The `take` parameters whose caller gives a count. A task that may run
+    /// through a task value or the runtime has a borrowed one instead, and a
+    /// first statement that retains it, since those callers pass no count.
+    pub take: Vec<Local>,
 }
 
 #[derive(Clone)]
@@ -673,6 +685,10 @@ pub enum ExprKind {
     /// Evaluates a new value, and stores its count in this local, whose old
     /// value is released. Added by `ownership.rs`.
     Temp(Local, Box<Expr>),
+    /// Gives this local's count away, and leaves it null. Added by `ownership.rs`.
+    Move(Local),
+    /// Adds a count to a borrowed value. Added by `ownership.rs`.
+    Retain(Box<Expr>),
 }
 
 /// Visits what a statement or expression holds. Each pass decides what to do
@@ -723,6 +739,7 @@ pub trait Visit {
             | ExprKind::Local(_)
             | ExprKind::Change(_)
             | ExprKind::Capture(_)
+            | ExprKind::Move(_)
             | ExprKind::Text(_) => {}
             ExprKind::Call(_, _, values)
             | ExprKind::Method(_, values)
@@ -762,6 +779,7 @@ pub trait Visit {
             | ExprKind::View(inner)
             | ExprKind::Holds(inner, _)
             | ExprKind::Temp(_, inner)
+            | ExprKind::Retain(inner)
             | ExprKind::Len(inner) => self.expr(inner),
             ExprKind::Binary(_, left, right)
             | ExprKind::Wrapping(_, left, right)
