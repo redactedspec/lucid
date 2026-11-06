@@ -134,3 +134,37 @@ print same in set([200])
 var optional: list[u8?] = [1, none]
 print 1 in optional
 print bytes == [2, 2, 255]
+
+# A byte list has its own slot size, through every path.
+var marks = "abc".bytes()
+marks.push(200)
+marks[0] = 7
+marks.swap(1, 2)
+print marks
+print marks[1..3]
+print 200 in marks
+print 8 in marks
+print set(marks).len()
+var shared_marks = marks
+shared_marks[1] = 9
+shared_marks.push(1)
+print marks
+print shared_marks
+let popped = shared_marks.pop()
+print popped
+for change mark in marks
+    mark += 1
+print marks
+var nested = ["ab".bytes(), "cd".bytes()]
+nested[1][0] = 1
+nested[1].push(2)
+print nested
+task bump(change item: byte)
+    item += 1
+bump(change nested[0][1])
+print nested
+var many: list[byte] = []
+for i in 0..300
+    many.push((i % 256).to_u8())
+print many.len()
+print many[299]

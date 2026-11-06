@@ -244,7 +244,7 @@ fn compile(
         text_char_at: import("lucid_text_char_at", &[value[0], int[0]], &value),
         text_bytes: import("lucid_text_bytes", &value, &value),
         text_quote: import("lucid_text_quote", &value, &value),
-        list_new: import("lucid_list_new", &[int[0], byte[0]], &value),
+        list_new: import("lucid_list_new", &[int[0], byte[0], byte[0]], &value),
         list_push: import("lucid_list_push", &two, &value),
         list_unique: import("lucid_list_unique", &value, &value),
         record_unique: import("lucid_record_unique", &value, &value),
@@ -836,11 +836,14 @@ impl Lower<'_, '_> {
         let inside = self.body.ins().icmp(IntCC::UnsignedLessThan, index, len);
         let unique = self.is_unique(list);
         let test = self.body.ins().band(inside, unique);
-        let counted = matches!(self.types[local], Ty::List(item) if item.is_counted());
+        let item = self.item_of(local);
         let fast = |lower: &mut Self| {
-            let offset = lower.body.ins().ishl_imm_s(index, 3);
-            let address = lower.body.ins().iadd(list, offset);
-            lower.replace(value, address, lucid_rt::SLOTS_OFFSET, counted);
+            let address = lower.list_slot(list, index, item);
+            if item.is_counted() {
+                lower.replace(value, address, lucid_rt::SLOTS_OFFSET, true);
+            } else {
+                lower.store_item(value, address, item);
+            }
             list
         };
         let task = self.runtime.list_set;
@@ -856,10 +859,10 @@ impl Lower<'_, '_> {
         let room = self.body.ins().icmp(IntCC::UnsignedLessThan, len, cap);
         let unique = self.is_unique(list);
         let test = self.body.ins().band(room, unique);
+        let item = self.item_of(local);
         let fast = |lower: &mut Self| {
-            let offset = lower.body.ins().ishl_imm_s(len, 3);
-            let address = lower.body.ins().iadd(list, offset);
-            lower.body.ins().store(flags, value, address, lucid_rt::SLOTS_OFFSET);
+            let address = lower.list_slot(list, len, item);
+            lower.store_item(value, address, item);
             let longer = lower.body.ins().iadd_imm_s(len, 1);
             lower.body.ins().store(flags, longer, list, lucid_rt::LEN_OFFSET);
             list
@@ -892,18 +895,16 @@ impl Lower<'_, '_> {
         self.update_paths(local, test, fast, self.runtime.record_set, &args, None);
     }
 
-    /// The address and offset of a slot of the list or record in `local`.
-    fn slot_of(&mut self, local: Local, key: &Expr) -> (Value, i32) {
+    /// Stores `value` in a slot of the list or record in `local`.
+    fn store_slot(&mut self, local: Local, key: &Expr, value: Value) {
         let holder = self.body.use_var(self.vars[local]);
-        match key.kind {
-            ExprKind::Int(slot) if !matches!(self.types[local], Ty::List(_)) => {
-                (holder, slot_offset(slot as usize))
-            }
-            _ => {
-                let index = self.expr(key);
-                let offset = self.body.ins().ishl_imm_s(index, 3);
-                (self.body.ins().iadd(holder, offset), lucid_rt::SLOTS_OFFSET)
-            }
+        if let (ExprKind::Int(slot), Ty::Data(..) | Ty::Union(_)) = (&key.kind, self.types[local]) {
+            let offset = slot_offset(*slot as usize);
+            self.body.ins().store(MemFlagsData::trusted(), value, holder, offset);
+        } else {
+            let (index, item) = (self.expr(key), self.item_of(local));
+            let address = self.list_slot(holder, index, item);
+            self.store_item(value, address, item);
         }
     }
 
@@ -915,15 +916,13 @@ impl Lower<'_, '_> {
             _ => self.runtime.record_unique,
         };
         self.update_paths(local, test, |_| value, task, &[value], None);
-        let (address, offset) = self.slot_of(local, key);
         let empty = self.body.ins().iconst(types::I64, 0);
-        self.body.ins().store(MemFlagsData::trusted(), empty, address, offset);
+        self.store_slot(local, key, empty);
     }
 
     fn put(&mut self, local: Local, args: &[Expr]) {
         let value = self.slot(&args[1]);
-        let (address, offset) = self.slot_of(local, &args[0]);
-        self.body.ins().store(MemFlagsData::trusted(), value, address, offset);
+        self.store_slot(local, &args[0], value);
     }
 
     fn update(&mut self, local: Local, op: Update, args: &[Expr], span: Span) {
@@ -964,8 +963,9 @@ impl Lower<'_, '_> {
     fn list_of(&mut self, items: &[Expr], item: Ty) -> Value {
         let cap = self.body.ins().iconst(types::I64, items.len() as i64);
         let counted = self.body.ins().iconst(types::I8, i64::from(item.is_counted()));
-        let mut list =
-            self.call(self.runtime.list_new, &[cap, counted]).expect("it returns a list");
+        let small = self.body.ins().iconst(types::I8, i64::from(item == Ty::Byte));
+        let new = self.call(self.runtime.list_new, &[cap, counted, small]);
+        let mut list = new.expect("it returns a list");
         for item in items {
             let value = self.slot(item);
             let pushed = self.call(self.runtime.list_push, &[list, value]);
@@ -1018,9 +1018,39 @@ impl Lower<'_, '_> {
         let len = self.body.ins().load(types::I64, flags, list, lucid_rt::LEN_OFFSET);
         let outside = self.body.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, index, len);
         self.trap_if(outside, OUT_OF_BOUNDS, span);
+        if ty == Ty::Byte {
+            let address = self.body.ins().iadd(list, index);
+            return self.body.ins().uload8(types::I64, flags, address, lucid_rt::SLOTS_OFFSET);
+        }
         let offset = self.body.ins().ishl_imm_s(index, 3);
         let address = self.body.ins().iadd(list, offset);
         self.load_slot(address, lucid_rt::SLOTS_OFFSET, ty)
+    }
+
+    /// The address of a slot of a list with elements of this type, less
+    /// `SLOTS_OFFSET`.
+    fn list_slot(&mut self, list: Value, index: Value, item: Ty) -> Value {
+        if item == Ty::Byte {
+            return self.body.ins().iadd(list, index);
+        }
+        let offset = self.body.ins().ishl_imm_s(index, 3);
+        self.body.ins().iadd(list, offset)
+    }
+
+    /// Stores a slot value of a list with elements of this type.
+    fn store_item(&mut self, value: Value, address: Value, item: Ty) {
+        let flags = MemFlagsData::trusted();
+        let offset = lucid_rt::SLOTS_OFFSET;
+        if item == Ty::Byte {
+            self.body.ins().istore8(flags, value, address, offset);
+        } else {
+            self.body.ins().store(flags, value, address, offset);
+        }
+    }
+
+    fn item_of(&self, local: Local) -> Ty {
+        let Ty::List(item) = self.types[local] else { unreachable!("it has a list type") };
+        *item
     }
 
     fn print_text(&mut self, text: &str) {
