@@ -58,7 +58,7 @@ Build a thin end-to-end path first. Depth comes later.
 ## M4: Ownership performance
 
 - [x] Last-use moves, and block-level release of locals
-- [ ] Static text literals, with no allocation
+- [x] Static text literals, with no allocation
 - [ ] Borrow elision of count operations
 - [ ] Reuse analysis, if measurements justify it
 - [ ] Shifts for division and remainder by a constant power of two

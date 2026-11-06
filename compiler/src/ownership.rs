@@ -101,6 +101,16 @@ fn is_new(value: &Expr) -> bool {
     )
 }
 
+/// True for a value in static data. Its count never matters, so a borrow needs
+/// no owner for it, and a place may keep it with no `Retain`.
+fn is_static(value: &Expr) -> bool {
+    match &value.kind {
+        ExprKind::Text(_) => true,
+        ExprKind::New { fields, .. } => fields.is_empty(),
+        _ => false,
+    }
+}
+
 /// Counts each read of a local, including `Change` and `Update`.
 #[derive(Default)]
 struct Reads(HashMap<Local, usize>);
@@ -323,6 +333,12 @@ impl Owners<'_> {
             return self.expr(value);
         }
         if self.moves {
+            if let ExprKind::Join(parts) = &mut value.kind
+                && let ExprKind::Local(first) = parts[0].kind
+                && self.can_move(first)
+            {
+                parts[0].kind = ExprKind::Move(first);
+            }
             if is_new(value) {
                 return self.parts(value);
             }
@@ -403,7 +419,7 @@ impl Visit for Owners<'_> {
     /// Lowers a value that is only borrowed.
     fn expr(&mut self, value: &mut Expr) {
         self.parts(value);
-        if is_new(value) && value.ty.is_counted() {
+        if is_new(value) && value.ty.is_counted() && !is_static(value) {
             self.locals.push(value.ty);
             let (local, span, ty) = (self.locals.len() - 1, value.span, value.ty);
             let inner = std::mem::replace(value, Expr { kind: ExprKind::None, ty, span });

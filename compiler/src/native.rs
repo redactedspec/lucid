@@ -92,6 +92,7 @@ struct Runtime {
     release: FuncId,
     text_new: FuncId,
     text_join: FuncId,
+    text_append: FuncId,
     text_print: FuncId,
     text_compare: FuncId,
     text_len: FuncId,
@@ -166,6 +167,7 @@ fn compile(
     builder.symbol("lucid_release", lucid_rt::lucid_release as *const u8);
     builder.symbol("lucid_text_new", lucid_rt::lucid_text_new as *const u8);
     builder.symbol("lucid_text_join", lucid_rt::lucid_text_join as *const u8);
+    builder.symbol("lucid_text_append", lucid_rt::lucid_text_append as *const u8);
     builder.symbol("lucid_text_print", lucid_rt::lucid_text_print as *const u8);
     builder.symbol("lucid_text_compare", lucid_rt::lucid_text_compare as *const u8);
     builder.symbol("lucid_text_len", lucid_rt::lucid_text_len as *const u8);
@@ -228,6 +230,7 @@ fn compile(
         release: import("lucid_release", &value, &[]),
         text_new: import("lucid_text_new", &text, &value),
         text_join: import("lucid_text_join", &text, &value),
+        text_append: import("lucid_text_append", &text, &value),
         text_print: import("lucid_text_print", &value, &[]),
         text_compare: import("lucid_text_compare", &two, &int),
         text_len: import("lucid_text_len", &value, &int),
@@ -277,11 +280,13 @@ fn compile(
     let mut diags = Vec::new();
     let mut context = module.make_context();
     let mut builder_context = FunctionBuilderContext::new();
+    let mut statics = HashMap::new();
     let tasks = program.tasks.iter().zip(&ids).map(|(task, id)| (task, *id));
     for (task, id) in tasks.chain([(&program.main, main)]) {
         context.func.signature = signature_of(&module, task);
         let body = FunctionBuilder::new(&mut context.func, &mut builder_context);
         let (module, runtime, ids, lines) = (&mut module, &runtime, &ids, &lines);
+        let statics = &mut statics;
         let data_id = module.declare_anonymous_data(false, false).expect(CODEGEN);
         let data = module.declare_data_in_func(data_id, body.func);
         let (vars, loops, funcs, text) = (Vec::new(), Vec::new(), HashMap::new(), Vec::new());
@@ -301,6 +306,7 @@ fn compile(
             funcs,
             data,
             text,
+            statics,
             path,
             lines,
         }
@@ -346,6 +352,8 @@ struct Lower<'a, 'b> {
     /// All static text of this task, in one object: programs have many trap sites.
     data: GlobalValue,
     text: Vec<u8>,
+    /// Values in static data, each once in the program.
+    statics: &'a mut HashMap<Vec<u8>, DataId>,
     path: &'a str,
     lines: &'a Lines<'a>,
 }
@@ -520,6 +528,24 @@ impl Lower<'_, '_> {
         let address = self.body.ins().iadd_imm_s(base, offset);
         let len = self.body.ins().iconst(types::I64, text.len() as i64);
         [address, len]
+    }
+
+    /// The address of a value in static data, which counts write to.
+    fn static_value(&mut self, image: Vec<u8>) -> Value {
+        let id = match self.statics.get(&image) {
+            Some(&id) => id,
+            None => {
+                let id = self.module.declare_anonymous_data(true, false).expect(CODEGEN);
+                let mut description = DataDescription::new();
+                description.define(image.clone().into_boxed_slice());
+                description.set_align(8);
+                self.module.define_data(id, &description).expect(CODEGEN);
+                self.statics.insert(image, id);
+                id
+            }
+        };
+        let data = self.module.declare_data_in_func(id, self.body.func);
+        self.body.ins().symbol_value(self.pointer, data)
     }
 
     /// Ends the current block with a trap at `span`.
@@ -984,10 +1010,7 @@ impl Lower<'_, '_> {
                 let value = self.wrapped(*op, a, b);
                 self.extended(value, expr.ty)
             }
-            ExprKind::Text(text) => {
-                let text = self.text(text);
-                self.call(self.runtime.text_new, &text).expect("it returns a text")
-            }
+            ExprKind::Text(text) => self.static_value(lucid_rt::static_text(text)),
             ExprKind::ToText(value) => self.text_of(value),
             ExprKind::Join(parts) => self.join(parts),
             ExprKind::TextLen(value) => {
@@ -1097,6 +1120,9 @@ impl Lower<'_, '_> {
                 let map = self.expr(map);
                 let key = self.slot(key);
                 self.call(self.runtime.map_position, &[map, key]).expect("it returns an int")
+            }
+            ExprKind::New { tag, fields, .. } if fields.is_empty() => {
+                self.static_value(lucid_rt::static_record(*tag))
             }
             ExprKind::New { tag, counted, fields } => {
                 let tag = self.body.ins().iconst(types::I64, *tag as i64);
@@ -1241,7 +1267,11 @@ impl Lower<'_, '_> {
         }
         let address = self.body.ins().stack_addr(self.pointer, slot, 0);
         let count = self.body.ins().iconst(types::I64, parts.len() as i64);
-        self.call(self.runtime.text_join, &[address, count]).expect("it returns a text")
+        let task = match parts[0].kind {
+            ExprKind::Move(_) => self.runtime.text_append,
+            _ => self.runtime.text_join,
+        };
+        self.call(task, &[address, count]).expect("it returns a text")
     }
 
     fn if_value(&mut self, condition: &Expr, then: &Expr, otherwise: &Expr, ty: Type) -> Value {

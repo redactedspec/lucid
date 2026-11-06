@@ -1,0 +1,80 @@
+# A text grows in place only if nothing else holds it.
+
+# Another name holds the old value.
+let a = "x"
+var b = a
+b = "{b}y"
+print a
+print b
+
+# Grown once, then held twice.
+var c = "start"
+c = "{c}1"
+let d = c
+c = "{c}2"
+print d
+print c
+
+# A text joined to itself.
+var e = "ab"
+e = "{e}{e}"
+e = "{e}{e}"
+print e
+
+# Earlier values kept along the way.
+var f = ""
+var kept: list[text] = []
+for i in 0..4
+    f = "{f}{i}"
+    kept.push(f)
+print kept
+
+# Past its room, many times over.
+var g = ""
+for i in 0..1000
+    g = "{g}ab"
+print g.len()
+print g[1998..2000]
+
+# ASCII, then not, then ASCII slices of a text that is not.
+var h = "abc"
+print h.len()
+print h[1..2]
+h = "{h}é"
+print h.len()
+print h[2..4]
+h = "{h}z"
+print h.len()
+print h[3..5]
+print "é".len()
+print "aé"[1..2]
+
+# A literal is shared, and never changes.
+task tag(i: int) -> text
+    var out = "tag"
+    out = "{out}{i}"
+    return out
+
+print tag(1)
+print tag(2)
+
+# Literals as keys, and in a map that outlives them.
+var ages: map[text, int] = {}
+ages["a"] = 1
+ages["a"] = 2
+print ages
+print "a" in ages
+
+# A variant with no fields, in several places.
+choice Light
+    Red
+    Green(seconds: int)
+
+let lights = [Red, Green(seconds: 2), Red]
+print lights
+print lights[0] == lights[2]
+print lights[0] == lights[1]
+var one = lights[0]
+one = Green(seconds: 3)
+print one
+print lights

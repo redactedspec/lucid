@@ -594,11 +594,12 @@ pub enum ExprKind {
     Convert(Box<Expr>),
     /// `Add`, `Sub`, or `Mul` on two integers of one type, which wraps.
     Wrapping(BinaryOp, Box<Expr>, Box<Expr>),
-    /// A new text.
+    /// A text in static data.
     Text(String),
     /// A new text from an `int`, `float`, `bool`, or `none`.
     ToText(Box<Expr>),
-    /// A new text from these text values, in order.
+    /// A new text from these text values, in order. If the first is a `Move`,
+    /// the text may grow in place.
     Join(Vec<Expr>),
     /// A new text: this text as a literal, with quotes and escapes.
     TextQuote(Box<Expr>),

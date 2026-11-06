@@ -24,17 +24,29 @@ pub struct Head {
 #[repr(u8)]
 #[derive(Clone, Copy)]
 enum Kind {
-    Text,
+    Text { ascii: Ascii },
     List { counted: bool },
     Map { key_counted: bool, value_counted: bool },
     Record,
 }
 
-/// A counted, immutable UTF-8 text. Its bytes follow this header.
+/// Whether a text holds only ASCII, which makes a character position a byte
+/// position. Found on first need, and kept in the header.
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq)]
+enum Ascii {
+    Unknown,
+    Yes,
+    No,
+}
+
+/// A counted UTF-8 text. Its bytes follow this header, with room for `cap`. Only
+/// `lucid_text_append` changes one, and only if it alone holds it.
 #[repr(C)]
 pub struct Text {
     head: Head,
     len: usize,
+    cap: usize,
 }
 
 /// A counted list. `cap` 8-byte slots follow this header.
@@ -126,8 +138,8 @@ const DEAD: usize = usize::MAX;
 /// Debug builds only: the number of values not yet released.
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 
-fn text_size(len: usize) -> usize {
-    len.saturating_add(HEADER)
+fn text_size(cap: usize) -> usize {
+    cap.saturating_add(HEADER)
 }
 
 fn list_size(cap: usize) -> usize {
@@ -192,7 +204,66 @@ unsafe fn check_live(value: *const Head) {
 
 /// Allocates a text with a count of one. The caller fills its `len` bytes.
 fn text_alloc(len: usize) -> *mut Text {
-    object(text_size(len), Text { head: Head { count: 1, kind: Kind::Text }, len })
+    text_with_room(len, len)
+}
+
+fn text_with_room(len: usize, cap: usize) -> *mut Text {
+    let head = Head { count: 1, kind: Kind::Text { ascii: Ascii::Unknown } };
+    object(text_size(cap), Text { head, len, cap })
+}
+
+/// The count of a value in static data. Nothing can release it this many times.
+const IMMORTAL: usize = 1 << 62;
+
+/// Copies a header, for a backend to put in static data.
+///
+/// ponytail: a typed write leaves padding undefined, so this reads bytes that
+/// Rust does not promise, in the compiler and not in a program. Nothing ever
+/// reads that padding back. Name each byte of `Head` if Miri ever runs here.
+fn image<T>(value: T) -> Vec<u8> {
+    let mut words = vec![0u64; size_of::<T>().div_ceil(size_of::<u64>())];
+    // SAFETY: the buffer is large enough, and `u64` aligns every header here.
+    unsafe { words.as_mut_ptr().cast::<T>().write(value) };
+    let bytes = words.iter().flat_map(|word| word.to_ne_bytes());
+    bytes.take(size_of::<T>()).collect()
+}
+
+/// A text as static data. Compiled code uses its address like any text. Its
+/// count never reaches one, so nothing writes to it or frees it.
+pub fn static_text(text: &str) -> Vec<u8> {
+    let ascii = if text.is_ascii() { Ascii::Yes } else { Ascii::No };
+    let head = Head { count: IMMORTAL, kind: Kind::Text { ascii } };
+    let mut value = image(Text { head, len: text.len(), cap: text.len() });
+    value.extend_from_slice(text.as_bytes());
+    value
+}
+
+/// A record with no slots as static data, for a variant with no fields.
+pub fn static_record(tag: usize) -> Vec<u8> {
+    let head = Head { count: IMMORTAL, kind: Kind::Record };
+    image(Record { head, tag, len: 0, counted: 0 })
+}
+
+/// True if every character of `text` is one byte.
+///
+/// # Safety
+///
+/// `text` must point to a live text. Only the header's flag changes, so this
+/// is safe with slices of its bytes in use.
+unsafe fn is_ascii(text: *mut Text) -> bool {
+    // SAFETY: the caller guarantees a live text.
+    unsafe {
+        let Kind::Text { ascii } = (*text).head.kind else {
+            unreachable!("the caller holds a text");
+        };
+        if ascii != Ascii::Unknown {
+            return ascii == Ascii::Yes;
+        }
+        let found = bytes(text).is_ascii();
+        let ascii = if found { Ascii::Yes } else { Ascii::No };
+        (*text).head.kind = Kind::Text { ascii };
+        found
+    }
 }
 
 /// # Safety
@@ -251,6 +322,43 @@ pub unsafe extern "C" fn lucid_text_join(parts: *const *const Text, count: usize
     joined
 }
 
+/// Adds texts to the end of `parts[0]`, whose count the caller gives. A text
+/// that only this caller holds grows in place, and doubles when it runs out
+/// of room, so a loop of appends is linear.
+///
+/// # Safety
+///
+/// `parts` must point to `count` pointers to live texts, with at least one.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_append(parts: *const *mut Text, count: usize) -> *mut Text {
+    // SAFETY: the caller guarantees the range, and live texts.
+    unsafe {
+        let parts = std::slice::from_raw_parts(parts, count);
+        let first = parts[0];
+        let start = (*first).len;
+        let rest = parts[1..].iter().map(|&text| bytes(text));
+        let len = rest.clone().fold(start, |len, part| len.saturating_add(part.len()));
+        let unique = (*first).head.count == 1;
+        let text = if unique && len <= (*first).cap {
+            (*first).head.kind = Kind::Text { ascii: Ascii::Unknown };
+            first
+        } else {
+            let grown = text_with_room(len, len.saturating_mul(2));
+            let old = bytes(first);
+            std::ptr::copy_nonoverlapping(old.as_ptr(), grown.add(1).cast(), start);
+            lucid_release(first.cast());
+            grown
+        };
+        let mut next = text.add(1).cast::<u8>().add(start);
+        for part in rest {
+            std::ptr::copy_nonoverlapping(part.as_ptr(), next, part.len());
+            next = next.add(part.len());
+        }
+        (*text).len = len;
+        text
+    }
+}
+
 /// # Safety
 ///
 /// `value` must point to a live value.
@@ -284,7 +392,7 @@ pub unsafe extern "C" fn lucid_release(value: *mut Head) {
             let value = pending;
             pending = (*value).count as *mut Head;
             match (*value).kind {
-                Kind::Text => free(value, text_size((*value.cast::<Text>()).len)),
+                Kind::Text { .. } => free(value, text_size((*value.cast::<Text>()).cap)),
                 Kind::List { counted } => {
                     let list = value.cast::<List>();
                     if counted {
@@ -408,9 +516,13 @@ fn starts_character(byte: u8) -> bool {
 ///
 /// `text` must point to a live text.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn lucid_text_len(text: *const Text) -> i64 {
+pub unsafe extern "C" fn lucid_text_len(text: *mut Text) -> i64 {
     // SAFETY: the caller guarantees a live text.
     let bytes = unsafe { bytes(text) };
+    // SAFETY: as above.
+    if unsafe { is_ascii(text) } {
+        return bytes.len() as i64;
+    }
     bytes.iter().filter(|&&byte| starts_character(byte)).count() as i64
 }
 
@@ -430,14 +542,21 @@ pub unsafe extern "C" fn lucid_text_is_empty(text: *const Text) -> u8 {
 ///
 /// `text` must point to a live text.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn lucid_text_slice(text: *const Text, start: i64, end: i64) -> *mut Text {
+pub unsafe extern "C" fn lucid_text_slice(text: *mut Text, start: i64, end: i64) -> *mut Text {
     // SAFETY: the caller guarantees a live text.
     let bytes = unsafe { bytes(text) };
     if start < 0 || end < start {
         return std::ptr::null_mut();
     }
-    // ponytail: a scan and a copy per slice, so a loop of slices is O(n^2).
-    // A view or an ASCII flag can fix this if M4 benchmarks need it.
+    // SAFETY: as above.
+    if unsafe { is_ascii(text) } {
+        return match bytes.get(start as usize..end as usize) {
+            Some(part) => text_from(part),
+            None => std::ptr::null_mut(),
+        };
+    }
+    // ponytail: a scan per slice of text that is not ASCII, so a loop of those
+    // is O(n^2). A table of positions could fix it.
     let offset = |character: i64| {
         let starts = (0..bytes.len()).filter(|&at| starts_character(bytes[at]));
         starts.chain([bytes.len()]).nth(character as usize)
