@@ -45,7 +45,8 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] Traits, bounds, hand-written overrides, `self` and dot calls
 - [x] `Hash` on compound keys
 - [x] `any` values
-- [ ] Sized numbers, wrapping math tasks, nested tasks, lambdas, task values
+- [x] Sized numbers, wrapping math tasks
+- [ ] Nested tasks, lambdas, task values
 - [ ] Parameter modes, exclusivity checks, `for change` over lists
 - [x] Naive reference counting, leak-checking debug runtime
 - [ ] Draft `docs/agent-guide.md`, and run a 10-task agent trial

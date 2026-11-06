@@ -1,0 +1,3 @@
+let a: u64 = 1
+let b: u64 = 0
+print a // b

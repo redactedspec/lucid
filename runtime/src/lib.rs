@@ -1156,7 +1156,17 @@ pub extern "C" fn lucid_int_text(value: i64) -> *mut Text {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn lucid_uint_text(value: u64) -> *mut Text {
+    text_from(value.to_string().as_bytes())
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn lucid_float_text(value: f64) -> *mut Text {
+    text_from(float_text(value).as_bytes())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_f32_text(value: f32) -> *mut Text {
     text_from(float_text(value).as_bytes())
 }
 
@@ -1192,9 +1202,14 @@ pub extern "C" fn lucid_print_int(value: i64) {
     print_line(value);
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_print_uint(value: u64) {
+    print_line(value);
+}
+
 /// Debug format uses the fewest digits that read back as the same float. It
 /// writes `1e21`, but a Lucid float literal needs digits around a point.
-fn float_text(value: f64) -> String {
+fn float_text(value: impl std::fmt::Debug) -> String {
     let text = format!("{value:?}");
     match text.split_once('e') {
         Some((digits, exponent)) if !digits.contains('.') => format!("{digits}.0e{exponent}"),
@@ -1204,6 +1219,11 @@ fn float_text(value: f64) -> String {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn lucid_print_float(value: f64) {
+    print_line(float_text(value));
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_print_f32(value: f32) {
     print_line(float_text(value));
 }
 

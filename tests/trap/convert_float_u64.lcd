@@ -1,0 +1,2 @@
+let a = -1.0
+print a.to_u64()

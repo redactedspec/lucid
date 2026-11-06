@@ -44,27 +44,41 @@ A task may read a top-level `let` whose value is a literal, with or without a le
 | `bool` | `true` or `false` |
 | `text` | Immutable UTF-8 string |
 | `byte` | 8-bit unsigned integer |
-| `i8` `i16` `i32` `i64` `u8` `u16` `u32` `u64` `f32` | Sized numbers |
+| `i8` `i16` `i32` `u16` `u32` `u64` `f32` | Sized numbers |
+| `i64`, `u8` | Other names for `int` and `byte` |
 | `list[T]` | Growable ordered list |
 | `map[K, V]` | Hash map, keeps insertion order |
 | `set[T]` | Hash set, keeps insertion order |
 | `none` | Absence of a value |
 
-There are no implicit conversions. Use `.to_float()`, `.to_int()`, and similar tasks.
+There are no implicit conversions. Every number type has a task for each other one, named after its target: `x.to_float()`, `x.to_int()`, `x.to_u8()`, `x.to_f32()`, and so on. Each name in the table above works, and a task for the type a value already has does not exist.
 
-Integer overflow traps in every build. Wrapping math uses explicit tasks such as `a.wrapping_add(b)`.
+- To an integer type, a value that does not fit traps. A `float` rounds toward zero first, and NaN traps.
+- To `float` or `f32`, a value rounds to the nearest one. A `float` too large for `f32` becomes `inf`.
 
-`/` always yields `float`, and follows IEEE 754, so `1 / 0` is `inf`. Two `int` operands are converted to `float` first.
+Integer overflow traps in every build. Wrapping math uses explicit tasks: `a.wrapping_add(b)`, `a.wrapping_sub(b)`, and `a.wrapping_mul(b)`, on any integer type, wrap at the width of that type. The argument has the same type as `a`.
 
-`//` and `%` take `int` operands only. `//` rounds down, and `%` takes the sign of the divisor, so `(a // b) * b + a % b == a`. A zero divisor traps. A `float` operand is a compile error.
+`/` always yields a `float` type, and follows IEEE 754, so `1 / 0` is `inf`. Two integers of any type are converted to `float` first. Two `f32` values give an `f32`.
 
-Arithmetic and comparison need one type on both sides. `==` and `!=` also work on `bool`. `and` and `or` skip their right side when the left side decides the result.
+`//` and `%` take integers only. `//` rounds down, and `%` takes the sign of the divisor, so `(a // b) * b + a % b == a`. A zero divisor traps. A `float` operand is a compile error.
 
-`x.to_float()` converts an `int`. `x.to_int()` rounds a `float` toward zero, and traps on NaN or a value outside `int`.
+Arithmetic and comparison need one type on both sides. `==` and `!=` also work on `bool`. `and` and `or` skip their right side when the left side decides the result. `-x` needs a signed type or a `float` type.
 
-A number literal must fit its type, and a `float` literal that is not zero must not round to zero. A `-` directly before a number joins the literal, unless a call, index, or field follows the number. So `-9223372036854775808` is the lowest `int`, and `-1.5.to_int()` negates the result of the call.
+A number literal is an `int` or `float`, unless its context asks for a sized type. An annotation, parameter, field, or element gives that type, and so does the other side of an operator or `in`:
 
-A `byte` compares with `==`, `<`, and the like, prints as a number, and converts with `.to_int()`. For now `.bytes()` is the only source of one, and arithmetic on it reports E0901 until sized numbers arrive.
+```lucid
+let a: u8 = 200
+let b: i32? = 5
+let c = a + 1        # u8
+let d = 2 * 3 + a    # u8
+let e: i16 = 1 + 2   # both literals are i16
+```
+
+An integer literal never becomes a `float` type. A number literal must fit its type, and a `float` literal that is not zero must not round to zero. A `-` directly before a number joins the literal, unless a call, index, or field follows the number. So `-9223372036854775808` is the lowest `int`, and `-1.5.to_int()` negates the result of the call.
+
+Every integer type can be a key. Ranges, indexes, and `.len()` use `int`, so convert a sized number first.
+
+A `byte` prints as a number, as do the other sized integers. An `f32` prints with the fewest digits that read back as the same `f32`, so `0.1` stays `0.1`.
 
 `print` takes one value. A finite `float` prints as a valid literal, with the fewest digits that read back as the same value, such as `3.0`, `0.1`, `1000.0`, or `1.0e21`. The others print as `inf`, `-inf`, and `NaN`. A `none` prints as `none`.
 
@@ -134,7 +148,7 @@ seen.add(3)
 seen.remove(1)
 ```
 
-An index is an `int` from 0, and a negative index traps. A key of a map or set needs the `Hash` trait: `int`, `bool`, `byte`, `text`, or a value made of those. A `float` cannot be a key, nor can a value that holds one with no hand-written `hash`, because NaN does not equal itself. A key is a value like any other, so changing the variable it came from never changes the key.
+An index is an `int` from 0, and a negative index traps. A key of a map or set needs the `Hash` trait: an integer, `bool`, `text`, or a value made of those. A `float` type cannot be a key, nor can a value that holds one with no hand-written `hash`, because NaN does not equal itself. A key is a value like any other, so changing the variable it came from never changes the key.
 
 All three have `.len()` and `.is_empty()`. `x in items` and `x not in items` test a list, or the keys of a map or set. A list test is linear, and compares with `==`, so it finds no NaN.
 
@@ -461,9 +475,9 @@ A trait with type parameters, and a generic task in a trait, are planned.
 | `Show` | `print` and interpolation | every type, `any` included |
 | `Equal` | `==`, `!=`, `in` on a list | every type, `any` included |
 | `Order` | `<`, `<=`, `>`, `>=` | numbers, `text`, and lists and `type` or `choice` values made of those |
-| `Hash` | be a key of a map or set | `int`, `bool`, `byte`, `text`, and lists, maps, sets, unions, and `type` or `choice` values made of those. A `none` counts only inside such a value |
-| `Add`, `Sub`, `Mul` | `+`, `-`, `*` | `int`, `float` |
-| `Div` | `/`, which gives a `T` | `float`. An `int` does not have it, since `/` on `int` gives `float` |
+| `Hash` | be a key of a map or set | integers, `bool`, `text`, and lists, maps, sets, unions, and `type` or `choice` values made of those. A `none` counts only inside such a value |
+| `Add`, `Sub`, `Mul` | `+`, `-`, `*` | numbers |
+| `Div` | `/`, which gives a `T` | `float`, `f32`. An integer does not have it, since `/` on integers gives `float` |
 
 The compiler derives `Equal`, `Hash`, `Order`, `Show`, `Copy`, and `Json` for a type when all its fields support them. Writing the task by hand overrides the derived version, and works inside larger values too. There are no macros. So far `Equal`, `Hash`, `Order`, and `Show` are derived, by the rules in "Collections", "Types", and "Choices". In a derived order a NaN compares as neither less nor more, so it counts as a tie. Planned: `Copy` and `Json`.
 

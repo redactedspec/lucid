@@ -1,0 +1,1 @@
+convert_negative.lcd:2:7: trap: integer does not fit in `u64`

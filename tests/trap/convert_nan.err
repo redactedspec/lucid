@@ -1,0 +1,1 @@
+convert_nan.lcd:3:7: trap: float does not fit in `byte`

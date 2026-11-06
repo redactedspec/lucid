@@ -1,0 +1,2 @@
+let a: u8 = 0
+print a - 1

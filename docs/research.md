@@ -255,6 +255,17 @@ Decisions 67 and 68. Level: **Snippet**: all of this came through search summari
 
 Sources: [rustc monomorphization](https://rustc-dev-guide.rust-lang.org/backend/monomorph.html), [rustc collector](https://doc.rust-lang.org/nightly/nightly-rustc/rustc_monomorphize/collector/index.html), [Rust PR 156993](https://github.com/rust-lang/rust/pull/156993), [go/types infer.go](https://go.googlesource.com/go/+/refs/tags/go1.17/src/go/types/infer.go), [Go type inference post](https://go.googlesource.com/website/+show/HEAD/_content/blog/type-inference.md), [Lemire on concepts](https://isocpp.org/blog/2025/06/cpp20-concepts-for-nicer-compiler-errors-daniel-lemire).
 
+## Sized numbers
+
+Decisions 79 and 80. Level: **Snippet**: these came through search summaries and mirrors of the spec, so read the current pages before relying on exact wording.
+
+- **Go.** The numeric types section lists `byte` as an alias for `uint8`, and all numeric types are distinct except `byte` and `rune`. The source for `builtin` says that `byte` is equivalent to `uint8` in all ways. An untyped constant can be assigned to any type that can represent it, and `var b byte = 300` is a compile error. Lucid gives the same result for a single literal, with no exact constant math.
+- **Rust.** The standard library has `checked_add`, `wrapping_add`, and `overflowing_add` as methods. Lucid takes the wrapping names.
+- **Zig.** The language reference makes overflow on `+` Illegal Behavior, and gives `+%`, `-%`, and `*%` for wrapping. So a wrapping operator is also a known design. It costs three new tokens.
+- **Not found.** No source was read on which form agents write best. The M3 agent trial can test `x + 1` on a sized value, and the conversion tasks.
+
+Sources: [Go spec](https://go.dev/ref/spec#Numeric_types), [Go builtin](https://go.googlesource.com/go/+/go1.9/src/builtin/builtin.go), [Rust u8](https://doc.rust-lang.org/std/primitive.u8.html), [Zig integer rules](https://zig.guide/language-basics/integer-rules).
+
 ## Open research
 
 | Topic | Needed by |

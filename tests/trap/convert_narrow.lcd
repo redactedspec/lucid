@@ -1,0 +1,2 @@
+let a = 300
+print a.to_u8()

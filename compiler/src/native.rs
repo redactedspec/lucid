@@ -54,6 +54,12 @@ fn clif(ty: Ty) -> Type {
     match ty {
         Ty::Int
         | Ty::Byte
+        | Ty::I8
+        | Ty::I16
+        | Ty::I32
+        | Ty::U16
+        | Ty::U32
+        | Ty::U64
         | Ty::Text
         | Ty::List(_)
         | Ty::Map(..)
@@ -62,6 +68,7 @@ fn clif(ty: Ty) -> Type {
         | Ty::Union(_)
         | Ty::Any(_) => types::I64,
         Ty::Float => types::F64,
+        Ty::F32 => types::F32,
         Ty::Bool | Ty::None => types::I8,
         Ty::Param(..) => unreachable!("`mono.rs` replaces every parameter"),
         Ty::Error => unreachable!("errors stop before the backend"),
@@ -71,7 +78,9 @@ fn clif(ty: Ty) -> Type {
 struct Runtime {
     print: FuncId,
     print_int: FuncId,
+    print_uint: FuncId,
     print_float: FuncId,
+    print_f32: FuncId,
     print_bool: FuncId,
     trap: FuncId,
     retain: FuncId,
@@ -109,7 +118,9 @@ struct Runtime {
     record_new: FuncId,
     record_set: FuncId,
     int_text: FuncId,
+    uint_text: FuncId,
     float_text: FuncId,
+    f32_text: FuncId,
     bool_text: FuncId,
 }
 
@@ -137,7 +148,9 @@ fn compile(
     let mut builder = JITBuilder::with_flags(&flags, default_libcall_names()).expect(CODEGEN);
     builder.symbol("lucid_print", lucid_rt::lucid_print as *const u8);
     builder.symbol("lucid_print_int", lucid_rt::lucid_print_int as *const u8);
+    builder.symbol("lucid_print_uint", lucid_rt::lucid_print_uint as *const u8);
     builder.symbol("lucid_print_float", lucid_rt::lucid_print_float as *const u8);
+    builder.symbol("lucid_print_f32", lucid_rt::lucid_print_f32 as *const u8);
     builder.symbol("lucid_print_bool", lucid_rt::lucid_print_bool as *const u8);
     builder.symbol("lucid_trap", lucid_rt::lucid_trap as *const u8);
     builder.symbol("lucid_retain", lucid_rt::lucid_retain as *const u8);
@@ -175,7 +188,9 @@ fn compile(
     builder.symbol("lucid_record_new", lucid_rt::lucid_record_new as *const u8);
     builder.symbol("lucid_record_set", lucid_rt::lucid_record_set as *const u8);
     builder.symbol("lucid_int_text", lucid_rt::lucid_int_text as *const u8);
+    builder.symbol("lucid_uint_text", lucid_rt::lucid_uint_text as *const u8);
     builder.symbol("lucid_float_text", lucid_rt::lucid_float_text as *const u8);
+    builder.symbol("lucid_f32_text", lucid_rt::lucid_f32_text as *const u8);
     builder.symbol("lucid_bool_text", lucid_rt::lucid_bool_text as *const u8);
     let mut module = JITModule::new(builder);
 
@@ -189,12 +204,15 @@ fn compile(
     let text = [AbiParam::new(pointer), AbiParam::new(types::I64)];
     let (int, float) = ([AbiParam::new(types::I64)], [AbiParam::new(types::F64)]);
     let (byte, value) = ([AbiParam::new(types::I8).uext()], [AbiParam::new(pointer)]);
+    let small_float = [AbiParam::new(types::F32)];
     let two = [value[0], value[0]];
     let with_two = [value[0], int[0], int[0]];
     let runtime = Runtime {
         print: import("lucid_print", &text, &[]),
         print_int: import("lucid_print_int", &int, &[]),
+        print_uint: import("lucid_print_uint", &int, &[]),
         print_float: import("lucid_print_float", &float, &[]),
+        print_f32: import("lucid_print_f32", &small_float, &[]),
         print_bool: import("lucid_print_bool", &byte, &[]),
         trap: import("lucid_trap", &text, &[]),
         retain: import("lucid_retain", &value, &[]),
@@ -232,7 +250,9 @@ fn compile(
         record_new: import("lucid_record_new", &[int[0], int[0], int[0]], &value),
         record_set: import("lucid_record_set", &with_two, &value),
         int_text: import("lucid_int_text", &int, &value),
+        uint_text: import("lucid_uint_text", &int, &value),
         float_text: import("lucid_float_text", &float, &value),
+        f32_text: import("lucid_f32_text", &small_float, &value),
         bool_text: import("lucid_bool_text", &byte, &value),
     };
 
@@ -604,8 +624,10 @@ impl Lower<'_, '_> {
     fn print(&mut self, expr: &Expr) {
         let value = self.expr(expr);
         match expr.ty {
-            Ty::Int | Ty::Byte => self.call(self.runtime.print_int, &[value]),
+            Ty::U64 => self.call(self.runtime.print_uint, &[value]),
+            ty if ty.is_integer() => self.call(self.runtime.print_int, &[value]),
             Ty::Float => self.call(self.runtime.print_float, &[value]),
+            Ty::F32 => self.call(self.runtime.print_f32, &[value]),
             Ty::Bool => self.call(self.runtime.print_bool, &[value]),
             Ty::Text => self.call(self.runtime.text_print, &[value]),
             Ty::None => {
@@ -621,6 +643,10 @@ impl Lower<'_, '_> {
         let value = self.expr(expr);
         match expr.ty {
             Ty::Float => self.body.ins().bitcast(types::I64, MemFlagsData::new(), value),
+            Ty::F32 => {
+                let bits = self.body.ins().bitcast(types::I32, MemFlagsData::new(), value);
+                self.body.ins().uextend(types::I64, bits)
+            }
             Ty::Bool | Ty::None => self.body.ins().uextend(types::I64, value),
             _ => value,
         }
@@ -630,6 +656,10 @@ impl Lower<'_, '_> {
     fn read_slot(&mut self, slot: Value, ty: Ty) -> Value {
         match ty {
             Ty::Float => self.body.ins().bitcast(types::F64, MemFlagsData::new(), slot),
+            Ty::F32 => {
+                let bits = self.body.ins().ireduce(types::I32, slot);
+                self.body.ins().bitcast(types::F32, MemFlagsData::new(), bits)
+            }
             Ty::Bool | Ty::None => self.body.ins().ireduce(types::I8, slot),
             _ => slot,
         }
@@ -734,6 +764,7 @@ impl Lower<'_, '_> {
     fn expr(&mut self, expr: &Expr) -> Value {
         match &expr.kind {
             ExprKind::Int(value) => self.body.ins().iconst(types::I64, *value),
+            ExprKind::Float(value) if expr.ty == Ty::F32 => self.body.ins().f32const(*value as f32),
             ExprKind::Float(value) => self.body.ins().f64const(*value),
             ExprKind::Bool(value) => self.body.ins().iconst(types::I8, i64::from(*value)),
             ExprKind::None => self.none(),
@@ -754,21 +785,12 @@ impl Lower<'_, '_> {
             ExprKind::If(condition, then, otherwise) => {
                 self.if_value(condition, then, otherwise, clif(expr.ty))
             }
-            ExprKind::ToFloat(value) => {
-                let value = self.expr(value);
-                self.body.ins().fcvt_from_sint(types::F64, value)
-            }
-            ExprKind::ToInt(value) => {
-                let value = self.expr(value);
-                let low = self.body.ins().f64const(-(2f64.powi(63)));
-                let high = self.body.ins().f64const(2f64.powi(63));
-                // Both comparisons are false for NaN.
-                let above = self.body.ins().fcmp(FloatCC::GreaterThanOrEqual, value, low);
-                let below = self.body.ins().fcmp(FloatCC::LessThan, value, high);
-                let fits = self.body.ins().band(above, below);
-                let outside = self.body.ins().icmp_imm_s(IntCC::Equal, fits, 0);
-                self.trap_if(outside, "float does not fit in `int`", expr.span);
-                self.body.ins().fcvt_to_sint(types::I64, value)
+            ExprKind::Convert(value) => self.convert(value, expr.ty, expr.span),
+            ExprKind::Wrapping(op, left, right) => {
+                let a = self.expr(left);
+                let b = self.expr(right);
+                let value = self.wrapped(*op, a, b);
+                self.extended(value, expr.ty)
             }
             ExprKind::Text(text) => {
                 let text = self.text(text);
@@ -934,8 +956,10 @@ impl Lower<'_, '_> {
     fn text_of(&mut self, expr: &Expr) -> Value {
         let value = self.expr(expr);
         let text = match expr.ty {
-            Ty::Int | Ty::Byte => self.call(self.runtime.int_text, &[value]),
+            Ty::U64 => self.call(self.runtime.uint_text, &[value]),
+            ty if ty.is_integer() => self.call(self.runtime.int_text, &[value]),
             Ty::Float => self.call(self.runtime.float_text, &[value]),
+            Ty::F32 => self.call(self.runtime.f32_text, &[value]),
             Ty::Bool => self.call(self.runtime.bool_text, &[value]),
             Ty::None => {
                 let text = self.text("none");
@@ -980,15 +1004,16 @@ impl Lower<'_, '_> {
     }
 
     fn binary(&mut self, op: BinaryOp, left: &Expr, right: &Expr, span: Span) -> Value {
-        let float = left.ty == Ty::Float;
+        let (ty, float) = (left.ty, left.ty.is_float());
         let a = self.expr(left);
         let b = self.expr(right);
-        if left.ty == Ty::Text {
+        if ty == Ty::Text {
             let cc = int_cc(op).expect("the checker allows only comparisons on text");
             let order = self.call(self.runtime.text_compare, &[a, b]);
             return self.body.ins().icmp_imm_s(cc, order.expect("it returns an int"), 0);
         }
         if let Some(cc) = int_cc(op) {
+            let cc = if ty == Ty::U64 { cc.unsigned() } else { cc };
             let ins = self.body.ins();
             return if float { ins.fcmp(float_cc(cc), a, b) } else { ins.icmp(cc, a, b) };
         }
@@ -997,24 +1022,145 @@ impl Lower<'_, '_> {
             (BinaryOp::Sub, true) => self.body.ins().fsub(a, b),
             (BinaryOp::Mul, true) => self.body.ins().fmul(a, b),
             (BinaryOp::Div, true) => self.body.ins().fdiv(a, b),
-            (BinaryOp::Add, false) if !CHECK_OVERFLOW => self.body.ins().iadd(a, b),
-            (BinaryOp::Sub, false) if !CHECK_OVERFLOW => self.body.ins().isub(a, b),
-            (BinaryOp::Mul, false) if !CHECK_OVERFLOW => self.body.ins().imul(a, b),
-            (BinaryOp::Add, false) => {
-                let (value, overflow) = self.body.ins().sadd_overflow(a, b);
-                self.checked(value, overflow, span)
+            (BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul, false) => {
+                self.checked_math(op, a, b, ty, span)
             }
-            (BinaryOp::Sub, false) => {
-                let (value, overflow) = self.body.ins().ssub_overflow(a, b);
-                self.checked(value, overflow, span)
+            (BinaryOp::FloorDiv, false) if ty == Ty::U64 => {
+                self.check_divisor(b, span);
+                self.body.ins().udiv(a, b)
             }
-            (BinaryOp::Mul, false) => {
-                let (value, overflow) = self.body.ins().smul_overflow(a, b);
-                self.checked(value, overflow, span)
+            (BinaryOp::Rem, false) if ty == Ty::U64 => {
+                self.check_divisor(b, span);
+                self.body.ins().urem(a, b)
             }
-            (BinaryOp::FloorDiv, false) => self.floor_div(a, b, span),
+            (BinaryOp::FloorDiv, false) => {
+                let value = self.floor_div(a, b, span);
+                self.check_fits(value, ty, span);
+                value
+            }
             (BinaryOp::Rem, false) => self.floor_rem(a, b, span),
             _ => unreachable!("the checker allows only these operators"),
+        }
+    }
+
+    fn wrapped(&mut self, op: BinaryOp, a: Value, b: Value) -> Value {
+        match op {
+            BinaryOp::Add => self.body.ins().iadd(a, b),
+            BinaryOp::Sub => self.body.ins().isub(a, b),
+            BinaryOp::Mul => self.body.ins().imul(a, b),
+            _ => unreachable!("only these operators wrap"),
+        }
+    }
+
+    /// The low bits of `value`, extended the way that `ty` holds them. A value
+    /// of 64 bits comes back as it is.
+    fn extended(&mut self, value: Value, ty: Ty) -> Value {
+        let (narrow, signed) = match ty {
+            Ty::I8 => (types::I8, true),
+            Ty::I16 => (types::I16, true),
+            Ty::I32 => (types::I32, true),
+            Ty::Byte => (types::I8, false),
+            Ty::U16 => (types::I16, false),
+            Ty::U32 => (types::I32, false),
+            _ => return value,
+        };
+        let low = self.body.ins().ireduce(narrow, value);
+        if signed {
+            self.body.ins().sextend(types::I64, low)
+        } else {
+            self.body.ins().uextend(types::I64, low)
+        }
+    }
+
+    /// Traps unless `ty` can hold a result computed in 64 bits. That result
+    /// is exact for any type of 32 bits or fewer, even `u32` times `u32` as an
+    /// unsigned value, so a result that fits keeps all its bits when extended.
+    fn check_fits(&mut self, value: Value, ty: Ty, span: Span) {
+        let extended = self.extended(value, ty);
+        if extended != value {
+            let overflow = self.body.ins().icmp(IntCC::NotEqual, extended, value);
+            self.trap_if(overflow, "integer overflow", span);
+        }
+    }
+
+    fn checked_math(&mut self, op: BinaryOp, a: Value, b: Value, ty: Ty, span: Span) -> Value {
+        if ty == Ty::Int && !CHECK_OVERFLOW {
+            return self.wrapped(op, a, b);
+        }
+        let ins = self.body.ins();
+        let (value, overflow) = match (ty, op) {
+            (Ty::Int, BinaryOp::Add) => ins.sadd_overflow(a, b),
+            (Ty::Int, BinaryOp::Sub) => ins.ssub_overflow(a, b),
+            (Ty::Int, _) => ins.smul_overflow(a, b),
+            (Ty::U64, BinaryOp::Add) => ins.uadd_overflow(a, b),
+            (Ty::U64, BinaryOp::Sub) => ins.usub_overflow(a, b),
+            (Ty::U64, _) => ins.umul_overflow(a, b),
+            _ => {
+                let value = self.wrapped(op, a, b);
+                self.check_fits(value, ty, span);
+                return value;
+            }
+        };
+        self.checked(value, overflow, span)
+    }
+
+    /// The number `value` as a `to`. See `ExprKind::Convert`.
+    fn convert(&mut self, value: &Expr, to: Ty, span: Span) -> Value {
+        let from = value.ty;
+        let value = self.expr(value);
+        let ins = self.body.ins();
+        match (from.is_float(), to.is_float()) {
+            (true, true) if to == Ty::Float => ins.fpromote(types::F64, value),
+            (true, true) => ins.fdemote(types::F32, value),
+            (false, true) if from == Ty::U64 => ins.fcvt_from_uint(clif(to), value),
+            (false, true) => ins.fcvt_from_sint(clif(to), value),
+            (false, false) => self.convert_int(value, from, to, span),
+            (true, false) => {
+                let wide = if from == Ty::F32 { ins.fpromote(types::F64, value) } else { value };
+                self.float_to_int(wide, to, span)
+            }
+        }
+    }
+
+    fn convert_int(&mut self, value: Value, from: Ty, to: Ty, span: Span) -> Value {
+        let (low, high) = to.int_range();
+        let (from_low, from_high) = from.int_range();
+        let message = format!("integer does not fit in `{}`", to.name());
+        if from == Ty::U64 {
+            let cc = IntCC::UnsignedGreaterThan;
+            let above = self.body.ins().icmp_imm_s(cc, value, high as i64);
+            self.trap_if(above, &message, span);
+            return value;
+        }
+        if from_low < low {
+            let below = self.body.ins().icmp_imm_s(IntCC::SignedLessThan, value, low as i64);
+            self.trap_if(below, &message, span);
+        }
+        if high < from_high {
+            let above = self.body.ins().icmp_imm_s(IntCC::SignedGreaterThan, value, high as i64);
+            self.trap_if(above, &message, span);
+        }
+        value
+    }
+
+    /// Rounds toward zero. The bounds are exact, except that `low - 1` has no
+    /// `float` for `int`, whose test is then `>= low`. A NaN fails either test.
+    fn float_to_int(&mut self, value: Value, to: Ty, span: Span) -> Value {
+        let (low, high) = to.int_range();
+        let floor = (low - 1) as f64;
+        let exact = floor as i128 == low - 1;
+        let cc = if exact { FloatCC::GreaterThan } else { FloatCC::GreaterThanOrEqual };
+        let floor = self.body.ins().f64const(floor);
+        let ceiling = self.body.ins().f64const((high + 1) as f64);
+        let above = self.body.ins().fcmp(cc, value, floor);
+        let below = self.body.ins().fcmp(FloatCC::LessThan, value, ceiling);
+        let fits = self.body.ins().band(above, below);
+        let outside = self.body.ins().icmp_imm_s(IntCC::Equal, fits, 0);
+        self.trap_if(outside, &format!("float does not fit in `{}`", to.name()), span);
+        if to == Ty::U64 {
+            self.body.ins().fcvt_to_uint(types::I64, value)
+        } else {
+            self.body.ins().fcvt_to_sint(types::I64, value)
         }
     }
 

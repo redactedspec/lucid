@@ -1,0 +1,31 @@
+let a: u8 = 256
+let b: u8 = -1
+let c: i8 = -129
+let d: u64 = 18446744073709551616
+let e: f32 = 1.0e39
+let f: f32 = 1.0e-46
+let g: i32 = 1
+let h: i64 = 1
+print g + h
+print -255.to_u8()
+let i: u8 = 1
+print -i
+print i % 1.5
+print i.wrapping_add()
+print i.wrapping_add(h)
+print 1.5.wrapping_add(1.0)
+print i.to_u8()
+let j: float = g
+let k: f32 = 1.5.to_float()
+let l: list[i8] = [300]
+let n: i32 = h
+print g == h
+print 1.5 + g
+print g.to_string()
+let o: map[f32, int] = {}
+task t(x: f32) -> u8
+    return x
+type u16
+    x: int
+type Box[i32]
+    x: int

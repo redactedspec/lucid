@@ -1,0 +1,33 @@
+sized_numbers.lcd:1:13: error E0312: `256` does not fit in `byte`
+sized_numbers.lcd:2:13: error E0312: `-1` does not fit in `byte`
+sized_numbers.lcd:3:13: error E0312: `-129` does not fit in `i8`
+sized_numbers.lcd:4:14: error E0312: `18446744073709551616` does not fit in `u64`
+sized_numbers.lcd:5:14: error E0312: `1.0e39` does not fit in `f32`
+sized_numbers.lcd:6:14: error E0312: `1.0e-46` does not fit in `f32`
+sized_numbers.lcd:9:7: error E0303: `+` needs one type on both sides, found `i32` and `int`
+  note: conversions are explicit: use `.to_i32()`
+sized_numbers.lcd:10:8: error E0303: `-` needs a signed number, found `byte`
+sized_numbers.lcd:12:8: error E0303: `-` needs a signed number, found `byte`
+sized_numbers.lcd:13:7: error E0303: `%` needs one type on both sides, found `byte` and `float`
+  note: conversions are explicit: use `.to_byte()`
+sized_numbers.lcd:14:7: error E0307: `wrapping_add` takes 1 positional argument
+sized_numbers.lcd:15:22: error E0303: this argument needs `byte`, found `int`
+  note: conversions are explicit: use `.to_byte()`
+sized_numbers.lcd:16:7: error E0303: `wrapping_add` does not work on `float`
+sized_numbers.lcd:17:7: error E0303: `to_u8` does not work on `byte`
+sized_numbers.lcd:18:16: error E0303: this annotation needs `float`, found `i32`
+  note: conversions are explicit: use `.to_float()`
+sized_numbers.lcd:19:14: error E0303: `to_float` does not work on `float`
+sized_numbers.lcd:20:20: error E0312: `300` does not fit in `i8`
+sized_numbers.lcd:21:14: error E0303: this annotation needs `i32`, found `int`
+  note: conversions are explicit: use `.to_i32()`
+sized_numbers.lcd:22:7: error E0303: `==` needs one type on both sides, found `i32` and `int`
+  note: conversions are explicit: use `.to_i32()`
+sized_numbers.lcd:23:7: error E0303: `+` needs one type on both sides, found `float` and `i32`
+  note: conversions are explicit: use `.to_float()`
+sized_numbers.lcd:24:7: error E0303: `to_string` does not work on `i32`
+sized_numbers.lcd:25:8: error E0303: `f32` cannot be a key
+sized_numbers.lcd:27:12: error E0303: this `return` needs `byte`, found `f32`
+  note: conversions are explicit: use `.to_byte()`
+sized_numbers.lcd:28:6: error E0304: `u16` is already defined
+sized_numbers.lcd:30:10: error E0304: `i32` is already defined

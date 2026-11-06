@@ -1,0 +1,129 @@
+# Literals take the type around them.
+let small: i8 = -128
+let big: u64 = 0xFFFFFFFFFFFFFFFF
+let mid: u32 = 4_000_000_000
+let half: f32 = 0.1
+let same: u8 = 200
+let wide: i64 = 5
+let joined: byte = same
+print small
+print big
+print mid
+print half
+print "{big} {half} {same} {wide + 1} {joined}"
+
+# Arithmetic stays in the type, and a literal joins either side.
+let a: i32 = 7
+print a + 1
+print 2 * 3 + a
+print 1 - a
+print -a
+print a // 2
+print -7 % a + a
+print a / 2
+print (a * a).to_int() + 1
+
+let m: u32 = 65535
+print m * m
+print big - 1
+print big // 3
+print big % 10
+print big > 1
+print big == big
+print (1.5 + half) * 2.0
+print half / half
+print -half
+let sum: i16 = 1 + 2 * 3
+print sum
+let maybe: i16? = 5
+print maybe
+
+# Conversions.
+print 300.to_i16()
+print a.to_float()
+print a.to_u8()
+print big.to_float()
+print big.to_f32()
+print 1.5.to_i8()
+print -1.5.to_i8()
+print 255.9.to_u8()
+print 1.0e19.to_u64()
+print half.to_float()
+print 0.1.to_f32()
+print half.to_int()
+print 5.to_f32()
+print mid.to_int()
+print small.to_i64()
+print (-128).to_i8()
+
+# Wrapping math.
+print same.wrapping_add(100)
+print small.wrapping_sub(1)
+print big.wrapping_add(2)
+print big.wrapping_mul(big)
+print mid.wrapping_mul(4)
+print 9223372036854775807.wrapping_add(1)
+let hash: u64 = 14695981039346656037
+print hash.wrapping_mul(1099511628211)
+
+# Sized numbers in values, keys, and generics.
+type Pixel
+    r: u8
+    gamma: f32 = 2.2
+    big: u64 = 18446744073709551615
+
+let p = Pixel(r: 255)
+print p
+var q = p
+q.r -= 1
+print q.r
+print p < q
+print p == p
+var bytes: list[byte] = [1, 2]
+bytes[0] += 1
+bytes.push(255)
+print bytes
+print bytes[2] == 255
+let values: list[u64] = [big]
+print values
+print big in values
+let floats: list[f32] = [0.1, 0.2]
+print floats
+print 0.2 in floats
+var counts: map[u32, i8] = {1: -1}
+counts[2] = 2
+counts[1] += 1
+print counts
+print set([big, big])
+let either: i32 or text = 5
+print either
+
+task twice[T: Add](x: T) -> T
+    return x + x
+
+task least[T: Order](a: T, b: T) -> T
+    return if a < b then a else b
+
+task split[T: Div](x: T, y: T) -> T
+    return x / y
+
+print twice(a)
+print twice(half)
+print least(big, big - 1)
+print split(half, half)
+
+task describe(self: u8) -> text
+    return "byte {self}"
+
+print same.describe()
+
+let label = match same
+    200 -> "two hundred"
+    _ -> "other"
+print label
+
+for c in "é".bytes()
+    print c + 1
+
+let shown: list[i8] = [-1]
+print "{shown} {p.gamma}"

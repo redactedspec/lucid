@@ -1,0 +1,2 @@
+let a: u32 = 65536
+print a * a

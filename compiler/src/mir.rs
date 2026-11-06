@@ -10,8 +10,17 @@ pub enum Ty {
     Int,
     Float,
     Bool,
-    /// Held in an `int`-sized value, always from 0 to 255.
+    /// `u8`. Every integer is held in an `int`-sized value, extended from its
+    /// own width, so a comparison or store needs no special case. `U64` shares
+    /// its bits with `int`, and is told apart by its type.
     Byte,
+    I8,
+    I16,
+    I32,
+    U16,
+    U32,
+    U64,
+    F32,
     None,
     /// A counted heap value, as are the three below. See "Counting".
     Text,
@@ -53,6 +62,13 @@ impl Ty {
             Ty::Float => "float".into(),
             Ty::Bool => "bool".into(),
             Ty::Byte => "byte".into(),
+            Ty::I8 => "i8".into(),
+            Ty::I16 => "i16".into(),
+            Ty::I32 => "i32".into(),
+            Ty::U16 => "u16".into(),
+            Ty::U32 => "u32".into(),
+            Ty::U64 => "u64".into(),
+            Ty::F32 => "f32".into(),
             Ty::None => "none".into(),
             Ty::Text => "text".into(),
             Ty::List(item) => format!("list[{}]", item.name()),
@@ -169,7 +185,36 @@ impl Ty {
 
     /// True for a value that the runtime can hash and compare as a key.
     pub fn is_key(self) -> bool {
-        matches!(self, Ty::Int | Ty::Bool | Ty::Byte | Ty::Text)
+        self.is_integer() || matches!(self, Ty::Bool | Ty::Text)
+    }
+
+    pub fn is_integer(self) -> bool {
+        matches!(
+            self,
+            Ty::Int | Ty::Byte | Ty::I8 | Ty::I16 | Ty::I32 | Ty::U16 | Ty::U32 | Ty::U64
+        )
+    }
+
+    pub fn is_float(self) -> bool {
+        matches!(self, Ty::Float | Ty::F32)
+    }
+
+    pub fn is_number(self) -> bool {
+        self.is_integer() || self.is_float()
+    }
+
+    /// The lowest and highest value of an integer type.
+    pub fn int_range(self) -> (i128, i128) {
+        match self {
+            Ty::Byte => (0, u8::MAX.into()),
+            Ty::I8 => (i8::MIN.into(), i8::MAX.into()),
+            Ty::I16 => (i16::MIN.into(), i16::MAX.into()),
+            Ty::I32 => (i32::MIN.into(), i32::MAX.into()),
+            Ty::U16 => (0, u16::MAX.into()),
+            Ty::U32 => (0, u32::MAX.into()),
+            Ty::U64 => (0, u64::MAX.into()),
+            _ => (i64::MIN.into(), i64::MAX.into()),
+        }
     }
 }
 
@@ -461,8 +506,11 @@ pub enum ExprKind {
     Binary(BinaryOp, Box<Expr>, Box<Expr>),
     /// Also expresses `and` and `or`, which skip their right side.
     If(Box<Expr>, Box<Expr>, Box<Expr>),
-    ToFloat(Box<Expr>),
-    ToInt(Box<Expr>),
+    /// A number as this expression's number type. Traps if an integer result
+    /// cannot hold it. A `float` only rounds, as IEEE 754 says.
+    Convert(Box<Expr>),
+    /// `Add`, `Sub`, or `Mul` on two integers of one type, which wraps.
+    Wrapping(BinaryOp, Box<Expr>, Box<Expr>),
     /// A new text.
     Text(String),
     /// A new text from an `int`, `float`, `bool`, or `none`.
@@ -618,8 +666,7 @@ pub trait Visit {
             }
             ExprKind::Neg(inner)
             | ExprKind::Not(inner)
-            | ExprKind::ToFloat(inner)
-            | ExprKind::ToInt(inner)
+            | ExprKind::Convert(inner)
             | ExprKind::ToText(inner)
             | ExprKind::TextQuote(inner)
             | ExprKind::TextLen(inner)
@@ -637,6 +684,7 @@ pub trait Visit {
             | ExprKind::Temp(_, inner)
             | ExprKind::Len(inner) => self.expr(inner),
             ExprKind::Binary(_, left, right)
+            | ExprKind::Wrapping(_, left, right)
             | ExprKind::Hash(_, left, right)
             | ExprKind::TextCharAt(left, right)
             | ExprKind::ListGet(left, right)

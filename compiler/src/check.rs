@@ -13,11 +13,10 @@ use crate::mir::{
 use std::collections::{HashMap, HashSet};
 
 /// Names of the spec's built-in types that this milestone cannot represent.
-const LATER_TYPES: [&str; 10] =
-    ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "pointer"];
+const LATER_TYPES: [&str; 1] = ["pointer"];
 
-/// Type names that a program cannot define for itself.
-const BUILT_IN_TYPES: [&str; 8] = ["int", "float", "bool", "byte", "text", "list", "map", "set"];
+/// Type names that a program cannot define for itself, beyond `number_type`.
+const BUILT_IN_TYPES: [&str; 5] = ["bool", "text", "list", "map", "set"];
 
 /// The same limit as nesting in the parser, for a chain of aliases.
 const MAX_ALIASES: usize = 128;
@@ -202,11 +201,44 @@ fn own_params(params: &[ast::TypeParam]) -> TypeEnv<'_> {
         .collect()
 }
 
+/// The number type of a written name. `i64` and `u8` are other names for `int`
+/// and `byte`, so each size has one type. See decision 79.
+fn number_type(name: &str) -> Option<Ty> {
+    Some(match name {
+        "int" | "i64" => Ty::Int,
+        "float" => Ty::Float,
+        "byte" | "u8" => Ty::Byte,
+        "i8" => Ty::I8,
+        "i16" => Ty::I16,
+        "i32" => Ty::I32,
+        "u16" => Ty::U16,
+        "u32" => Ty::U32,
+        "u64" => Ty::U64,
+        "f32" => Ty::F32,
+        _ => return None,
+    })
+}
+
+/// The number type that a task such as `to_i32` gives, on another number type.
+fn conversion(ty: Ty, name: &str) -> Option<Ty> {
+    let target = number_type(name.strip_prefix("to_")?)?;
+    (ty.is_number() && target != ty).then_some(target)
+}
+
+/// The operator of a task such as `wrapping_add`, on an integer type.
+fn wrapping_op(ty: Ty, name: &str) -> Option<BinaryOp> {
+    match name {
+        "wrapping_add" if ty.is_integer() => Some(BinaryOp::Add),
+        "wrapping_sub" if ty.is_integer() => Some(BinaryOp::Sub),
+        "wrapping_mul" if ty.is_integer() => Some(BinaryOp::Mul),
+        _ => None,
+    }
+}
+
 /// True for a task that the language builds in for this type.
 fn builtin_method(ty: Ty, name: &str) -> bool {
     match ty {
-        Ty::Int => name == "to_float",
-        Ty::Float | Ty::Byte => name == "to_int",
+        ty if ty.is_number() => conversion(ty, name).is_some() || wrapping_op(ty, name).is_some(),
         Ty::Text => matches!(name, "len" | "is_empty" | "bytes"),
         Ty::List(_) => matches!(name, "len" | "is_empty" | "get" | "push" | "pop" | "swap"),
         Ty::Map(..) => matches!(name, "len" | "is_empty" | "get" | "remove"),
@@ -281,6 +313,29 @@ fn repeatable(value: &Expr) -> bool {
         }
         _ => false,
     }
+}
+
+/// True for a number with no other value in it, which takes its type from the
+/// other side of an operator. So `2 * 3 + x` works for any number type of `x`.
+fn literal_math(expr: &ast::Expr) -> bool {
+    match &expr.kind {
+        Ast::Int(_) | Ast::Float(_) => true,
+        Ast::Unary(UnaryOp::Neg, value) => literal_math(value),
+        Ast::Binary(op, left, right) => is_math(*op) && literal_math(left) && literal_math(right),
+        _ => false,
+    }
+}
+
+fn is_math(op: BinaryOp) -> bool {
+    matches!(
+        op,
+        BinaryOp::Add
+            | BinaryOp::Sub
+            | BinaryOp::Mul
+            | BinaryOp::Div
+            | BinaryOp::FloorDiv
+            | BinaryOp::Rem
+    )
 }
 
 fn want_name(want: Option<Ty>) -> String {
@@ -503,8 +558,9 @@ impl<'a> Checker<'a> {
         let message = format!("{what} needs `{}`, found `{}`", want.name(), value.ty.name());
         let diag = Diagnostic::new("E0303", message, value.span);
         self.report(match (want, value.ty) {
-            (Ty::Float, Ty::Int) => diag.note("conversions are explicit: use `.to_float()`"),
-            (Ty::Int, Ty::Float) => diag.note("conversions are explicit: use `.to_int()`"),
+            (want, have) if want.is_number() && have.is_number() => {
+                diag.note(format!("conversions are explicit: use `.to_{}()`", want.name()))
+            }
             _ => diag,
         });
     }
@@ -587,12 +643,9 @@ impl<'a> Checker<'a> {
             return self.collection_type(name, &args, span);
         }
         let plain = match name {
-            "int" => Some(Ty::Int),
-            "float" => Some(Ty::Float),
             "bool" => Some(Ty::Bool),
-            "byte" => Some(Ty::Byte),
             "text" => Some(Ty::Text),
-            _ => None,
+            _ => number_type(name),
         };
         if let Some(plain) = plain {
             return if self.arity(name, 0, args.len(), span) { plain } else { Ty::Error };
@@ -727,6 +780,7 @@ impl<'a> Checker<'a> {
     fn define_data(&mut self, name: &'a ast::Name) -> bool {
         let text = name.text.as_str();
         let reserved = BUILT_IN_TYPES.contains(&text)
+            || number_type(text).is_some()
             || LATER_TYPES.contains(&text)
             || BUILT_IN_TRAITS.contains(&text)
             || LATER_TRAITS.contains(&text)
@@ -887,12 +941,9 @@ impl<'a> Checker<'a> {
         let holds = match name {
             "Show" | "Equal" => true,
             "Hash" => ty.is_key() || (ty.is_compound() && !matches!(ty, Ty::Any(_))),
-            "Order" => {
-                matches!(ty, Ty::Int | Ty::Float | Ty::Byte | Ty::Text | Ty::List(_))
-                    || matches!(ty, Ty::Data(..))
-            }
-            "Div" => return ty == Ty::Float,
-            _ => return matches!(ty, Ty::Int | Ty::Float),
+            "Order" => ty.is_number() || matches!(ty, Ty::Text | Ty::List(_) | Ty::Data(..)),
+            "Div" => return ty.is_float(),
+            _ => return ty.is_number(),
         };
         if !holds {
             return false;
@@ -972,6 +1023,7 @@ impl<'a> Checker<'a> {
                 || self.is_trait(text)
                 || LATER_TRAITS.contains(&text)
                 || BUILT_IN_TYPES.contains(&text)
+                || number_type(text).is_some()
                 || LATER_TYPES.contains(&text);
             if taken {
                 self.fail("E0304", format!("`{text}` is already defined"), param.name.span);
@@ -1852,7 +1904,7 @@ impl<'a> Checker<'a> {
             self.fail("E0318", "a text pattern cannot hold `{}`".into(), span);
             return None;
         }
-        let value = self.expr(value);
+        let value = self.lower(value, Some(ty));
         self.expect(&value, ty, "this pattern");
         if value.ty != ty {
             covered.failed = true;
@@ -1963,7 +2015,7 @@ impl<'a> Checker<'a> {
         let ty = self.locals[local];
         let value = match compound(op) {
             Some(op) => {
-                let value = self.binary(op, target, value, span);
+                let value = self.binary(op, target, value, None, span);
                 self.widen(value, ty)
             }
             None => {
@@ -2116,7 +2168,7 @@ impl<'a> Checker<'a> {
         let value = match compound(op) {
             Some(op) => {
                 let old = self.element(local, key, item, span);
-                let value = self.expr(value);
+                let value = self.lower(value, Some(old.ty).filter(|ty| ty.is_number()));
                 self.binary_values(op, old, value, span)
             }
             None => self.expected(value, Some(item)),
@@ -2147,7 +2199,7 @@ impl<'a> Checker<'a> {
         let value = match compound(op) {
             Some(op) => {
                 let old = self.slot_of(local, slot, ty, span);
-                let value = self.expr(value);
+                let value = self.lower(value, Some(old.ty).filter(|ty| ty.is_number()));
                 self.binary_values(op, old, value, span)
             }
             None => self.expected(value, Some(ty)),
@@ -2619,7 +2671,9 @@ impl<'a> Checker<'a> {
         self.fail("E0301", format!("name `{name}` is not defined"), span)
     }
 
-    fn int(&mut self, lexeme: &str, span: Span) -> Expr {
+    /// A literal has `want` if that is an integer type, or else `int`.
+    fn int(&mut self, lexeme: &str, want: Option<Ty>, span: Span) -> Expr {
+        let ty = want.filter(|ty| ty.is_integer()).unwrap_or(Ty::Int);
         let negative = lexeme.starts_with('-');
         let digits = lexeme.trim_start_matches('-').replace('_', "");
         let parsed = match digits.get(..2) {
@@ -2627,25 +2681,41 @@ impl<'a> Checker<'a> {
             Some("0b") => u64::from_str_radix(&digits[2..], 2),
             _ => digits.parse(),
         };
-        let limit = i64::MAX as u64 + u64::from(negative);
-        match parsed {
-            Ok(value) if value <= limit => {
-                let value = if negative { value.wrapping_neg() } else { value } as i64;
-                Expr { kind: ExprKind::Int(value), ty: Ty::Int, span }
+        let value = parsed.map(|value: u64| {
+            let value = i128::from(value);
+            if negative { -value } else { value }
+        });
+        let (low, high) = ty.int_range();
+        match value {
+            Ok(value) if (low..=high).contains(&value) => {
+                Expr { kind: ExprKind::Int(value as i64), ty, span }
             }
-            _ => self.fail("E0312", format!("`{lexeme}` does not fit in `int`"), span),
+            _ => {
+                let message = format!("`{lexeme}` does not fit in `{}`", ty.name());
+                self.fail("E0312", message, span)
+            }
         }
     }
 
-    fn float(&mut self, lexeme: &str, span: Span) -> Expr {
+    /// A literal is a `float` unless `want` is `f32`.
+    fn float(&mut self, lexeme: &str, want: Option<Ty>, span: Span) -> Expr {
+        let ty = if want == Some(Ty::F32) { Ty::F32 } else { Ty::Float };
         let digits = lexeme.replace('_', "");
         let mantissa = digits.split(['e', 'E']).next().unwrap_or_default();
         let nonzero = mantissa.contains(|c: char| matches!(c, '1'..='9'));
-        match digits.parse::<f64>() {
+        // A direct parse rounds once, so the `f32` is the one nearest the text.
+        let parsed = match ty {
+            Ty::F32 => digits.parse::<f32>().map(f64::from),
+            _ => digits.parse::<f64>(),
+        };
+        match parsed {
             Ok(value) if value.is_finite() && (value != 0.0 || !nonzero) => {
-                Expr { kind: ExprKind::Float(value), ty: Ty::Float, span }
+                Expr { kind: ExprKind::Float(value), ty, span }
             }
-            _ => self.fail("E0312", format!("`{lexeme}` does not fit in `float`"), span),
+            _ => {
+                let message = format!("`{lexeme}` does not fit in `{}`", ty.name());
+                self.fail("E0312", message, span)
+            }
         }
     }
 
@@ -2660,9 +2730,21 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// The number type that `want` asks of a literal, with a `T?` counting as `T`.
+    fn number_want(&self, want: Option<Ty>) -> Option<Ty> {
+        self.literal_want(want, |ty| ty.is_number()).filter(|ty| ty.is_number())
+    }
+
     fn lower(&mut self, expr: &'a ast::Expr, want: Option<Ty>) -> Expr {
         let span = expr.span;
+        let number = self.number_want(want);
         match &expr.kind {
+            Ast::Int(lexeme) => self.int(lexeme, number, span),
+            Ast::Float(lexeme) => self.float(lexeme, number, span),
+            Ast::Unary(op @ UnaryOp::Neg, value) => self.unary(*op, value, number, span),
+            Ast::Binary(op, left, right) if is_math(*op) => {
+                self.binary(*op, left, right, number, span)
+            }
             Ast::List(items) => self.list(items, want, span),
             Ast::Map(entries) => self.map(entries, want, span),
             Ast::If { condition, then, otherwise } => {
@@ -2798,13 +2880,13 @@ impl<'a> Checker<'a> {
     fn expr(&mut self, expr: &'a ast::Expr) -> Expr {
         let span = expr.span;
         let (kind, ty) = match &expr.kind {
-            Ast::Int(lexeme) => return self.int(lexeme, span),
-            Ast::Float(lexeme) => return self.float(lexeme, span),
+            Ast::Int(lexeme) => return self.int(lexeme, None, span),
+            Ast::Float(lexeme) => return self.float(lexeme, None, span),
             Ast::Bool(value) => (ExprKind::Bool(*value), Ty::Bool),
             Ast::None => (ExprKind::None, Ty::None),
             Ast::Name(name) => return self.name(name, span),
-            Ast::Unary(op, value) => return self.unary(*op, value, span),
-            Ast::Binary(op, left, right) => return self.binary(*op, left, right, span),
+            Ast::Unary(op, value) => return self.unary(*op, value, None, span),
+            Ast::Binary(op, left, right) => return self.binary(*op, left, right, None, span),
             Ast::If { .. } | Ast::List(_) | Ast::Map(_) => return self.expected(expr, None),
             Ast::Call { callee, args } => return self.call(callee, args, None, span),
             Ast::Text(parts) => return self.text(parts, span),
@@ -3073,19 +3155,22 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn unary(&mut self, op: UnaryOp, value: &'a ast::Expr, span: Span) -> Expr {
+    fn unary(&mut self, op: UnaryOp, value: &'a ast::Expr, hint: Option<Ty>, span: Span) -> Expr {
         match op {
             UnaryOp::Neg => {
-                let value = self.expr(value);
+                let value = self.lower(value, hint);
                 match value.ty {
                     Ty::Error => poisoned(span),
-                    Ty::Int => {
-                        let zero = Expr { kind: ExprKind::Int(0), ty: Ty::Int, span };
+                    ty if ty.is_float() => Expr { kind: ExprKind::Neg(value.into()), ty, span },
+                    ty if ty.is_integer() && ty.int_range().0 < 0 => {
+                        let zero = Expr { kind: ExprKind::Int(0), ty, span };
                         let kind = ExprKind::Binary(BinaryOp::Sub, zero.into(), value.into());
-                        Expr { kind, ty: Ty::Int, span }
+                        Expr { kind, ty, span }
                     }
-                    Ty::Float => Expr { kind: ExprKind::Neg(value.into()), ty: Ty::Float, span },
-                    Ty::Byte => self.unsupported("arithmetic on `byte`", span),
+                    ty if ty.is_integer() => {
+                        let message = format!("`-` needs a signed number, found `{}`", ty.name());
+                        self.fail("E0303", message, value.span)
+                    }
                     ty => {
                         let message = format!("`-` needs a number, found `{}`", ty.name());
                         self.fail("E0303", message, value.span)
@@ -3102,11 +3187,13 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// A literal takes the number type of the other side, or else `hint`.
     fn binary(
         &mut self,
         op: BinaryOp,
         left: &'a ast::Expr,
         right: &'a ast::Expr,
+        hint: Option<Ty>,
         span: Span,
     ) -> Expr {
         match op {
@@ -3126,8 +3213,15 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
-        let left = self.expr(left);
-        let right = self.expr(right);
+        let other = |value: &Expr| Some(value.ty).filter(|ty| ty.is_number()).or(hint);
+        let (left, right) = if literal_math(left) && !literal_math(right) {
+            let right = self.lower(right, hint);
+            (self.lower(left, other(&right)), right)
+        } else {
+            let left = self.lower(left, hint);
+            let right = self.lower(right, other(&left));
+            (left, right)
+        };
         self.binary_values(op, left, right, span)
     }
 
@@ -3138,17 +3232,22 @@ impl<'a> Checker<'a> {
         right: &'a ast::Expr,
         span: Span,
     ) -> Expr {
-        let left = self.expr(left);
+        // The right side goes first, since a literal takes its type from it.
         let right = self.expr(right);
         let (item, list) = match right.ty {
-            Ty::Error => return poisoned(span),
+            Ty::Error => {
+                self.expr(left);
+                return poisoned(span);
+            }
             Ty::List(item) => (*item, true),
             Ty::Set(item) | Ty::Map(item, _) => (*item, false),
             ty => {
+                self.expr(left);
                 let message = format!("`in` needs a list, map, or set, found `{}`", ty.name());
                 return self.fail("E0303", message, right.span);
             }
         };
+        let left = self.lower(left, Some(item).filter(|ty| ty.is_number()));
         if list && !self.require(item, "Equal", right.span) {
             return poisoned(span);
         }
@@ -3185,6 +3284,7 @@ impl<'a> Checker<'a> {
         if left.ty != right.ty {
             let (a, b) = (left.ty.name(), right.ty.name());
             let message = format!("`{name}` needs one type on both sides, found `{a}` and `{b}`");
+            let sized = format!("conversions are explicit: use `.to_{a}()`");
             let note = if left.ty == Ty::None
                 || right.ty == Ty::None
                 || matches!(left.ty, Ty::Union(_))
@@ -3193,6 +3293,11 @@ impl<'a> Checker<'a> {
                 "test a union with `is`, as in `x is none`"
             } else if left.ty == Ty::Text || right.ty == Ty::Text {
                 JOIN_TEXT
+            } else if left.ty.is_number()
+                && right.ty.is_number()
+                && !matches!((left.ty, right.ty), (Ty::Int, Ty::Float) | (Ty::Float, Ty::Int))
+            {
+                sized.as_str()
             } else {
                 "conversions are explicit: use `.to_float()` or `.to_int()`"
             };
@@ -3203,12 +3308,10 @@ impl<'a> Checker<'a> {
         let order = matches!(op, BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge);
         let int_only = matches!(op, BinaryOp::FloorDiv | BinaryOp::Rem);
         let valid = match ty {
-            Ty::Int => true,
-            Ty::Float => !int_only,
+            ty if ty.is_integer() => true,
+            ty if ty.is_float() => !int_only,
             Ty::Bool => equality,
             Ty::Text => equality || order,
-            Ty::Byte if equality || order => true,
-            Ty::Byte => return self.unsupported("arithmetic on `byte`", span),
             ty if (ty.is_compound() || matches!(ty, Ty::Param(..))) && (equality || order) => {
                 let trait_name = if equality { "Equal" } else { "Order" };
                 if !self.require(ty, trait_name, span) {
@@ -3242,14 +3345,14 @@ impl<'a> Checker<'a> {
         }
         let result = match op {
             _ if equality || order => Ty::Bool,
-            BinaryOp::Div if matches!(ty, Ty::Int | Ty::Float) => Ty::Float,
+            BinaryOp::Div if ty.is_integer() => Ty::Float,
             _ => ty,
         };
         let float = |value: Expr| {
             let span = value.span;
-            Expr { kind: ExprKind::ToFloat(value.into()), ty: Ty::Float, span }
+            Expr { kind: ExprKind::Convert(value.into()), ty: Ty::Float, span }
         };
-        let (left, right) = if op == BinaryOp::Div && ty == Ty::Int {
+        let (left, right) = if op == BinaryOp::Div && ty.is_integer() {
             (float(left), float(right))
         } else {
             (left, right)
@@ -3481,20 +3584,28 @@ impl<'a> Checker<'a> {
         if text == "get" {
             return self.get(value, args, span);
         }
+        if let Some(op) = wrapping_op(ty, text) {
+            let [ast::Arg { name: None, change: false, value: other }] = args else {
+                return self.fail("E0307", format!("`{text}` takes 1 positional argument"), span);
+            };
+            let other = self.expected(other, Some(ty));
+            self.expect(&other, ty, "this argument");
+            return Expr { kind: ExprKind::Wrapping(op, value.into(), other.into()), ty, span };
+        }
         if !args.is_empty() {
             self.poison_args(args, span);
             return self.fail("E0307", format!("`{text}` takes no arguments"), span);
         }
+        if let Some(ty) = conversion(ty, text) {
+            return Expr { kind: ExprKind::Convert(value.into()), ty, span };
+        }
         let int = |kind| Expr { kind, ty: Ty::Int, span };
         let boxed: Box<Expr> = value.clone().into();
         match (ty, text) {
-            (Ty::Int, "to_float") => Expr { kind: ExprKind::ToFloat(boxed), ty: Ty::Float, span },
-            (Ty::Float, "to_int") => int(ExprKind::ToInt(boxed)),
             (Ty::Text, "len") => int(ExprKind::TextLen(boxed)),
             (Ty::Text, "bytes") => {
                 Expr { kind: ExprKind::TextBytes(boxed), ty: Ty::List(&Ty::Byte), span }
             }
-            (Ty::Byte, "to_int") => Expr { ty: Ty::Int, ..value },
             (_, "len") => int(ExprKind::Len(boxed)),
             _ => self.is_empty(value, span),
         }

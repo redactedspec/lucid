@@ -4,7 +4,4 @@ let b = 1
 var c = [1]
 for change d in c
     print d
-let e = "a".bytes()
-print e[0] + e[0]
 print {1: 2}[1..2]
-print -e[0]
