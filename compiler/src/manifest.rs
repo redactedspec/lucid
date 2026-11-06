@@ -308,12 +308,8 @@ fn check_name(name: &str, span: Span, diags: &mut Vec<Diagnostic>) {
 }
 
 fn text_list(entry: &Entry, diags: &mut Vec<Diagnostic>) {
-    let items = match &entry.value {
-        Value::List(items) => items.as_slice(),
-        _ => &[],
-    };
-    let list = matches!(entry.value, Value::List(_));
-    if !list || items.iter().any(|(item, _)| !matches!(item, Value::Text(_))) {
+    let text = |(item, _): &(Value, Span)| matches!(item, Value::Text(_));
+    if !matches!(&entry.value, Value::List(items) if items.iter().all(text)) {
         diags.push(error(format!("`{}` must be a list of strings", entry.key), entry.span));
     }
 }
@@ -352,15 +348,13 @@ fn read_package(table: &Table, diags: &mut Vec<Diagnostic>) -> Option<String> {
 
 fn read_permissions(table: &Table, diags: &mut Vec<Diagnostic>) {
     for entry in &table.entries {
-        match entry.key.as_str() {
-            "net" | "process" | "unsafe" => {
-                if !matches!(entry.value, Value::Bool) {
-                    let message = format!("`{}` must be `true` or `false`", entry.key);
-                    diags.push(error(message, entry.span));
-                }
-            }
-            "files" | "env" => text_list(entry, diags),
-            key => diags.push(error(format!("no permission `{key}`"), entry.span)),
+        let key = entry.key.as_str();
+        if !PERMISSIONS.contains(&key) {
+            diags.push(error(format!("no permission `{key}`"), entry.span));
+        } else if matches!(key, "files" | "env") {
+            text_list(entry, diags);
+        } else if !matches!(entry.value, Value::Bool) {
+            diags.push(error(format!("`{key}` must be `true` or `false`"), entry.span));
         }
     }
 }
