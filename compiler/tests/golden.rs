@@ -264,6 +264,20 @@ fn examples_parse() {
     }
 }
 
+/// The browser examples build for the web. The build goes to a temporary
+/// directory, so the example directory stays clean.
+#[test]
+fn web_examples_build() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("web-examples");
+    let _ = fs::remove_dir_all(&dir);
+    copy_dir(&repo().join("examples").join("web"), &dir);
+    for example in files(&dir, "lcd") {
+        let name = file_name(&example);
+        let output = lucid(&dir, &["build", "--target", "web", name]);
+        assert!(output.status.success(), "{name}: {}", text(&output.stderr));
+    }
+}
+
 #[test]
 fn agent_guide_runs_and_fits() {
     let source = fs::read_to_string(repo().join("docs/agent-guide.md")).expect("no guide");
@@ -776,7 +790,7 @@ fn fmt_reports_and_rewrites() {
 /// Lucid code that ships with the compiler must already be formatted.
 #[test]
 fn shipped_code_is_formatted() {
-    for dir in ["std", "tools", "examples"] {
+    for dir in ["std", "tools", "examples", "examples/web"] {
         let dir = repo().join(dir);
         for file in files(&dir, "lcd") {
             let name = file_name(&file);
