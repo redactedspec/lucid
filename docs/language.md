@@ -33,7 +33,7 @@ Every value must be initialized. Shadowing in the same scope is an error.
 
 Tasks cannot read or write a top-level `var`. Pass it as a parameter. This keeps exclusivity checks static.
 
-A task may read a top-level `let` whose value is a literal, with or without a leading `-`. A text with no interpolation is a literal. Such a value exists before any statement runs, so a task never sees it uninitialized. Reading any other top-level `let` reports E0901, see the open questions in `decisions.md`.
+A task may read a top-level `let` whose value is a literal, with or without a leading `-`. A text with no interpolation is a literal. Such a value exists before any statement runs, so a task never sees it uninitialized. Reading any other top-level `let` reports E0901, by decision 151.
 
 ## Basic types
 
@@ -59,6 +59,8 @@ There are no implicit conversions. Every number type has a task for each other o
 `x.sqrt()` gives the square root of a `float` or `f32`, and NaN below zero, as IEEE 754 says.
 
 Integer overflow traps in every build. Wrapping math uses explicit tasks: `a.wrapping_add(b)`, `a.wrapping_sub(b)`, and `a.wrapping_mul(b)`, on any integer type, wrap at the width of that type. The argument has the same type as `a`.
+
+Planned for M7, by decision 153: bit operators `&`, `|`, `^`, `~`, `<<`, and `>>` on integer types. They bind tighter than comparisons and looser than `+`, as in Python. A shift count below 0 or not less than the width traps.
 
 `/` always yields a `float` type, and follows IEEE 754, so `1 / 0` is `inf`. Two integers of any type are converted to `float` first. Two `f32` values give an `f32`.
 

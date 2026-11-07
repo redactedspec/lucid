@@ -100,6 +100,7 @@ Build a thin end-to-end path first. Depth comes later.
 - [ ] `spawn`, structured waiting, `channel`, `lock`
 - [ ] Decide scheduler: OS threads or lightweight tasks
 - [ ] `std.net`, `std.http`, TLS, `std.html`
+- [ ] Bit operators, by decision 153
 
 **Exit:** `examples/website.lcd` serves pages under a load test.
 

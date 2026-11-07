@@ -252,7 +252,7 @@ The tasks covered text, maps, unions, `choice`, `change`, `for change`, recursiv
 - It is not independent. One author wrote the language, guide, and tasks, the subjects are the same model family as that author, and they saw the project's `AGENTS.md`, which has no syntax. An agent on 5 tasks could also learn from its own earlier ones, though no attempt failed.
 - The credit cannot be split between the guide and the language, which is why decision 90 adds an arm to the M5 benchmark.
 
-**Guide gaps.** The subjects listed what they had to guess. Each guess worked, and these went into the guide after the trial: `%` sign, unary `-`, trailing commas, expressions in slices, `.get` with a negative index, `is empty` on text, and `_` for every field of a variant. They called task 03 and task 10 hardest, for `.pop` with narrowing, and for hex with no bit operations. The second supports the open question on bit operations.
+**Guide gaps.** The subjects listed what they had to guess. Each guess worked, and these went into the guide after the trial: `%` sign, unary `-`, trailing commas, expressions in slices, `.get` with a negative index, `is empty` on text, and `_` for every field of a variant. They called task 03 and task 10 hardest, for `.pop` with narrowing, and for hex with no bit operations. The second supports decision 153, on bit operators.
 
 ### M5 agent benchmark pilot
 
@@ -551,6 +551,17 @@ Decision 144.
 - **Weak ground.** No measurement shows that a canonical layout helps agents. The case rests on smaller diffs and on Go's long use of gofmt. The M5 agent benchmark did not test it.
 
 Sources: [Effective Go, Formatting](https://go.dev/doc/effective_go#formatting), [Go Proverbs](https://go-proverbs.github.io/), [Black code style](https://black.readthedocs.io/en/stable/the_black_code_style/current_style.html), [PEP 8, Comments](https://peps.python.org/pep-0008/#comments).
+
+## M5 open questions
+
+Decisions 151, 152, and 153. Evidence is the M5 agent benchmark logs, plus language references recalled, not read for this entry.
+
+- **Top-level values.** The Go spec orders package-level variables by their dependencies, and reports a cycle. Swift initializes each global lazily, on first use, behind a one-time check. Rust requires a `static` to have a constant initializer, and adds lazy globals only through `LazyLock` in the library. In 100 Lucid solutions of the benchmark, no attempt hit E0901 for a top-level `let`. Two subjects listed "top-level let of text" as a guess, and it was a literal, which works. Level: **None** for the languages, own logs for the count.
+- **Literal types.** In 50 TypeScript solutions, a search for a union of string literals found none. No Lucid subject tried to write one. Level: own logs.
+- **Bit operations.** Python and TypeScript solutions used `& 0xFFFFFFFF`, `& 0xFF`, and `>>> 0` for hashes, checksums, and a random number generator. The M3 trial's subjects called the hex task hard for lack of bit operations, see "M3 agent trial". Python's reference puts `|`, `^`, `&`, and shifts above comparisons, unlike C. Level: own logs, and **None** for the precedence claim.
+- **Weak ground.** The benchmark tasks did not target these features, so absence of use is weak evidence.
+
+Sources: [Go spec, Package initialization](https://go.dev/ref/spec#Package_initialization), [Swift, Global and Local Variables](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/properties/#Global-and-Local-Variables), [Rust reference, Static items](https://doc.rust-lang.org/reference/items/static-items.html), [Python, Operator precedence](https://docs.python.org/3/reference/expressions.html#operator-precedence).
 
 ## Open research
 
