@@ -37,6 +37,11 @@ const STD_MODULES: [(&str, &str); 5] = [
     ("time", include_str!("../../std/time.lcd")),
 ];
 
+/// `lucid fmt`, a Lucid program inside the compiler. Like a `std` module, its
+/// path is one that no file on disk is read from.
+pub const FMT_PATH: &str = "@tools/fmt.lcd";
+const FMT: &str = include_str!("../../tools/fmt.lcd");
+
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     Task,
@@ -228,6 +233,9 @@ impl Loader {
         let module = path.strip_prefix("@std/").and_then(|file| file.strip_suffix(".lcd"));
         if let Some(&(_, text)) = STD_MODULES.iter().find(|(name, _)| Some(*name) == module) {
             return Some((self.source.add(shown, text), text.to_string()));
+        }
+        if path == FMT_PATH {
+            return Some((self.source.add(shown, FMT), FMT.to_string()));
         }
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,

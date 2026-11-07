@@ -1,0 +1,8 @@
+let s = """
+    keep   
+      these {1+1}
+    """
+print s
+print "a  {f( 1,
+  2 )}  b"  # after
+print "{{ #x }}"  #   comment

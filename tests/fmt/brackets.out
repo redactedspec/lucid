@@ -1,0 +1,22 @@
+let point = Point(
+    x: 1,
+    y: 2,
+)
+print sum([
+    1,
+    2,
+])
+if a
+    let m = {
+        "a": f(
+            1,
+        ),
+    }
+    call(a, [
+        b,
+    ], c)
+    call(
+        a,
+        # a comment inside
+        b
+    )

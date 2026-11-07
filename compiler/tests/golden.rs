@@ -663,3 +663,62 @@ fn explain_prints_one_entry() {
     assert_eq!(missing.status.code(), Some(1));
     assert_eq!(text(&missing.stderr), "lucid: no error code `E9999`, see docs/errors.md\n");
 }
+
+/// `tests/fmt/x.lcd` must format to `x.out`, and `x.out` must stay as it is.
+#[test]
+fn fmt_gives_the_layout() {
+    let dir = repo().join("tests").join("fmt");
+    let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fmt");
+    fs::create_dir_all(&scratch).expect("cannot make directory");
+    let mut failures = Vec::new();
+    for source in files(&dir, "lcd") {
+        let name = file_name(&source);
+        let expected = fs::read(source.with_extension("out")).expect("no .out file");
+        fs::copy(&source, scratch.join(name)).expect("cannot copy");
+        let output = lucid(&scratch, &["fmt", name]);
+        let got = fs::read(scratch.join(name)).expect("cannot read");
+        if !output.status.success() || got != expected {
+            failures.push(format!("{name}: {}\n{}", text(&got), text(&output.stderr)));
+        }
+        fs::write(scratch.join(name), &expected).expect("cannot write");
+        if !lucid(&scratch, &["fmt", "--check", name]).status.success() {
+            failures.push(format!("{name}: the .out file is not stable"));
+        }
+    }
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+}
+
+/// Generated, since git may change line breaks in a file it holds.
+#[test]
+fn fmt_reports_and_rewrites() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fmt_cases");
+    fs::create_dir_all(&dir).expect("cannot make directory");
+    let raw = "\u{feff}if a\r\n\t# tab\r\n    print  1   \r\n\r\n";
+    fs::write(dir.join("crlf.lcd"), raw).expect("cannot write");
+    let check = lucid(&dir, &["fmt", "--check", "crlf.lcd"]);
+    assert_eq!(check.status.code(), Some(1));
+    assert_eq!(text(&check.stdout), "crlf.lcd\n");
+    assert_eq!(fs::read_to_string(dir.join("crlf.lcd")).expect("cannot read"), raw);
+    assert!(lucid(&dir, &["fmt", "crlf.lcd"]).status.success());
+    let formatted = fs::read_to_string(dir.join("crlf.lcd")).expect("cannot read");
+    assert_eq!(formatted, "if a\n    # tab\n    print 1\n");
+    // A lexer error is reported, and the file stays as it was.
+    fs::write(dir.join("bad.lcd"), "print  \"a}\"\n").expect("cannot write");
+    let bad = lucid(&dir, &["fmt", "bad.lcd"]);
+    assert_eq!(bad.status.code(), Some(1));
+    assert!(text(&bad.stderr).contains("error E0106"), "{}", text(&bad.stderr));
+    assert_eq!(fs::read_to_string(dir.join("bad.lcd")).expect("cannot read"), "print  \"a}\"\n");
+}
+
+/// Lucid code that ships with the compiler must already be formatted.
+#[test]
+fn shipped_code_is_formatted() {
+    for dir in ["std", "tools", "examples"] {
+        let dir = repo().join(dir);
+        for file in files(&dir, "lcd") {
+            let name = file_name(&file);
+            let output = lucid(&dir, &["fmt", "--check", name]);
+            assert!(output.status.success(), "{name}: {}", text(&output.stdout));
+        }
+    }
+}

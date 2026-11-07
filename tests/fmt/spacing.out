@@ -1,0 +1,19 @@
+let a = f(1, 2) + items[0]
+let b = -a * -(a - 1)
+let c = [1, 2, 3][0..2]
+let d = 0..=3
+let e: int? = none
+print {"a": 1}["a"]
+print a.b.c()
+print if (a) then -1 else -2
+for x in [1]
+    print x
+task g[T](x: T, f: task(T) -> int) -> int
+    return f(x)
+let h = (x) => x + 1
+print task(int)
+print self.x
+print "t"[0..1]
+print true - 1
+print x? - 1
+use ./a.b

@@ -1,0 +1,398 @@
+# `lucid fmt`: puts each file named on the command line in the one layout that
+# Lucid has. `lucid` has already lexed each file, so each holds valid tokens.
+# Only space and line breaks change. See "`lucid fmt`" in docs/compiler.md.
+
+use std.args
+use std.fs
+
+let TAB = 9
+let LINE = 10
+let RETURN = 13
+let SPACE = 32
+let QUOTE = 34
+let HASH = 35
+let OPEN_ROUND = 40
+let CLOSE_ROUND = 41
+let DOT = 46
+let ZERO = 48
+let NINE = 57
+let BIG_A = 65
+let BIG_E = 69
+let BIG_Z = 90
+let OPEN_SQUARE = 91
+let BACKSLASH = 92
+let CLOSE_SQUARE = 93
+let UNDERSCORE = 95
+let SMALL_A = 97
+let SMALL_E = 101
+let SMALL_Z = 122
+let OPEN_BRACE = 123
+let CLOSE_BRACE = 125
+let PLUS = 43
+let MINUS = 45
+
+# What the last token on the line was. `START` means none yet.
+let START = 0
+let NAME = 1
+let KEYWORD = 2
+let NUMBER = 3
+let TEXT = 4
+let SYMBOL = 5
+
+type Unformatted
+    count: int
+
+task error_message(self: Unformatted) -> text
+    return "files that are not formatted: {self.count}"
+
+# Keywords and symbols as in lexer.rs, with symbols longest first.
+type Tables
+    keywords: list[text]
+    keyword_bytes: list[list[byte]]
+    symbols: list[text]
+    symbol_bytes: list[list[byte]]
+
+task tables() -> Tables
+    let keywords = [
+        "and", "any", "as", "break", "change", "choice", "continue", "else", "empty", "expect",
+        "extern", "false", "for", "if", "in", "is", "let", "match", "none", "not", "or", "print",
+        "public", "return", "self", "shared", "spawn", "take", "task", "test", "then", "trait",
+        "true", "try", "type", "unsafe", "use", "var", "weak", "while",
+    ]
+    let symbols = [
+        "...", "..=", "..", "./", ".", "=>", "==", "=", "!=", "<=", "<", ">=", ">", "->", "-=",
+        "-", "+=", "+", "*=", "*", "//", "/=", "/", "%", "(", ")", "[", "]", "{{", "}}", ",", ":",
+        "?",
+    ]
+    var keyword_bytes: list[list[byte]] = []
+    for word in keywords
+        keyword_bytes.push(word.bytes())
+    var symbol_bytes: list[list[byte]] = []
+    for symbol in symbols
+        symbol_bytes.push(symbol.bytes())
+    return Tables(
+        keywords: keywords,
+        keyword_bytes: keyword_bytes,
+        symbols: symbols,
+        symbol_bytes: symbol_bytes,
+    )
+
+type Formatter
+    src: list[byte]
+    at: int
+    out: list[byte]
+    tables: Tables
+    # The indentation of the current line.
+    indent: int
+    # For each open bracket, innermost last, the indentation of its line.
+    opened: list[int]
+    # The indentation of the last code or comment line, or -1 before one.
+    last_indent: int
+    # A blank line was read, and waits for the next line to decide on it.
+    blank: bool
+    last_kind: int
+    # The keyword or symbol of the last token, or empty.
+    last_word: text
+    # The last token was a prefix `-`.
+    prefix: bool
+
+# The byte at `place`, or -1 past the end.
+task byte_at(self: Formatter, place: int) -> int
+    if place < self.src.len()
+        return self.src[place].to_int()
+    return -1
+
+task is_letter(b: int) -> bool
+    return (b >= SMALL_A and b <= SMALL_Z) or (b >= BIG_A and b <= BIG_Z) or b == UNDERSCORE
+
+task is_digit(b: int) -> bool
+    return b >= ZERO and b <= NINE
+
+task is_word(b: int) -> bool
+    return is_letter(b) or is_digit(b)
+
+task put(change self: Formatter, b: int)
+    self.out.push(b.to_byte())
+
+# Copies `src[from..to]`, with each `\r\n` as `\n`.
+task copy(change self: Formatter, from: int, to: int)
+    for place in from..to
+        let b = self.src[place].to_int()
+        if b != RETURN or self.byte_at(place + 1) != LINE
+            self.put(b)
+
+task format(take src: list[byte], tables: Tables) -> list[byte]
+    var start = 0
+    if src.len() >= 3 and src[0].to_int() == 239 and src[1].to_int() == 187
+        if src[2].to_int() == 191
+            start = 3
+    var f = Formatter(
+        src: src,
+        at: start,
+        out: [],
+        tables: tables,
+        indent: 0,
+        opened: [],
+        last_indent: -1,
+        blank: false,
+        last_kind: START,
+        last_word: "",
+        prefix: false,
+    )
+    while f.at < f.src.len()
+        f.next_line()
+    if f.out.len() > 0 and f.out[f.out.len() - 1].to_int() != LINE
+        f.put(LINE)
+    return f.out
+
+# Reads one line from its start, and the text or brackets that carry on past it.
+task next_line(change self: Formatter)
+    var width = 0
+    while true
+        let b = self.byte_at(self.at)
+        if b == SPACE
+            width += 1
+        else if b == TAB
+            width += 4
+        else
+            break
+        self.at += 1
+    let first = self.byte_at(self.at)
+    if first == -1
+        return
+    if first == LINE or (first == RETURN and self.byte_at(self.at + 1) == LINE)
+        self.at += (if first == LINE then 1 else 2)
+        self.blank = true
+        return
+    var indent = width
+    if first == HASH
+        indent = width // 4 * 4
+        if self.opened is not empty
+            indent = self.inner_indent(0)
+    else if self.opened is not empty
+        indent = self.inner_indent(self.leading_closers())
+    if self.blank and indent <= self.last_indent
+        self.put(LINE)
+    self.blank = false
+    self.last_indent = indent
+    self.indent = indent
+    for _ in 0..indent
+        self.put(SPACE)
+    self.tokens()
+
+# How many closing brackets start the line, which close before it is indented.
+task leading_closers(self: Formatter) -> int
+    var count = 0
+    var place = self.at
+    while true
+        let b = self.byte_at(place)
+        if b == CLOSE_ROUND or b == CLOSE_SQUARE or b == CLOSE_BRACE
+            count += 1
+        else if b != SPACE and b != TAB
+            return count
+        place += 1
+    ...
+
+# 4 spaces past the line that opened the innermost bracket. A line that starts
+# with `closed` closing brackets lines up with the line that opened the first.
+task inner_indent(self: Formatter, closed: int) -> int
+    let count = self.opened.len()
+    if closed == 0
+        return self.opened[count - 1] + 4
+    if closed >= count
+        return self.opened[0]
+    return self.opened[count - closed]
+
+# Writes the tokens and comment of a line, and its line break.
+task tokens(change self: Formatter)
+    self.last_kind = START
+    self.last_word = ""
+    self.prefix = false
+    while true
+        let b = self.byte_at(self.at)
+        if b == SPACE or b == TAB
+            self.at += 1
+        else if b == RETURN and self.byte_at(self.at + 1) == LINE
+            self.at += 1
+        else if b == -1
+            return
+        else if b == LINE
+            self.at += 1
+            self.put(LINE)
+            return
+        else if b == HASH
+            self.comment()
+        else
+            self.token()
+
+task comment(change self: Formatter)
+    if self.last_kind != START
+        self.put(SPACE)
+        self.put(SPACE)
+    var end = self.at
+    while self.byte_at(end) != -1 and self.byte_at(end) != LINE
+        end += 1
+    var keep = end
+    while self.src[keep - 1].to_int() == SPACE or self.src[keep - 1].to_int() == RETURN
+        keep -= 1
+    self.copy(self.at, keep)
+    self.at = end
+
+task token(change self: Formatter)
+    let start = self.at
+    let b = self.byte_at(start)
+    var kind = SYMBOL
+    var word = ""
+    if b == QUOTE
+        kind = TEXT
+        self.at = self.text_end(start)
+    else if is_digit(b)
+        kind = NUMBER
+        self.at = self.number_end(start)
+    else if is_letter(b)
+        kind = NAME
+        var end = start
+        while is_word(self.byte_at(end))
+            end += 1
+        self.at = end
+        let found = self.src[start..end]
+        for place in 0..self.tables.keywords.len()
+            if self.tables.keyword_bytes[place] == found
+                kind = KEYWORD
+                word = self.tables.keywords[place]
+    else
+        self.at = start + 1
+        for place in 0..self.tables.symbols.len()
+            let symbol = self.tables.symbol_bytes[place]
+            let end = start + symbol.len()
+            if end <= self.src.len() and self.src[start..end] == symbol
+                self.at = end
+                word = self.tables.symbols[place]
+                break
+    if self.spaced(kind, word)
+        self.put(SPACE)
+    self.copy(start, self.at)
+    if kind == SYMBOL
+        let prefix = word == "-" and self.starts_operand()
+        self.prefix = prefix
+        if word == "(" or word == "[" or word == "{{"
+            self.opened.push(self.indent)
+        else if (word == ")" or word == "]" or word == "}}") and self.opened is not empty
+            self.opened.pop()
+    else
+        self.prefix = false
+    self.last_kind = kind
+    self.last_word = word
+
+# True if the last token leaves room for an operand, so a `-` after it is prefix.
+task starts_operand(self: Formatter) -> bool
+    if self.last_kind == START
+        return true
+    if self.last_kind == SYMBOL
+        return self.last_word not in [")", "]", "}}", "?"]
+    if self.last_kind == KEYWORD
+        return self.last_word not in ["true", "false", "none", "self"]
+    return false
+
+# Whether one space goes between the last token and this one.
+task spaced(self: Formatter, kind: int, word: text) -> bool
+    let last = self.last_word
+    if self.last_kind == START or self.prefix
+        return false
+    if self.last_kind == SYMBOL and last in ["(", "[", "{{", ".", "./", "..", "..="]
+        return false
+    if kind != SYMBOL
+        return true
+    if word in [")", "]", "}}", ",", ":", ".", "?", "..", "..="]
+        return false
+    if word == "(" or word == "["
+        if self.last_kind == NAME or self.last_kind == TEXT
+            return false
+        if self.last_kind == KEYWORD and (last == "self" or last == "task")
+            return false
+        if self.last_kind == SYMBOL and last in [")", "]", "}}"]
+            return false
+    return true
+
+# The end of a number, by the rules of `number` in lexer.rs.
+task number_end(self: Formatter, start: int) -> int
+    var end = start
+    while is_word(self.byte_at(end))
+        end += 1
+    if self.byte_at(end) == DOT and is_digit(self.byte_at(end + 1))
+        end += 1
+        while is_word(self.byte_at(end))
+            end += 1
+        let e = self.byte_at(end - 1)
+        let sign = self.byte_at(end)
+        if (e == SMALL_E or e == BIG_E) and (sign == PLUS or sign == MINUS)
+            if is_digit(self.byte_at(end + 1))
+                end += 1
+                while is_word(self.byte_at(end))
+                    end += 1
+    return end
+
+# The end of the text that starts at `start`, with all it interpolates.
+task text_end(self: Formatter, start: int) -> int
+    let triple = self.byte_at(start + 1) == QUOTE and self.byte_at(start + 2) == QUOTE
+    var at = start + (if triple then 3 else 1)
+    while at < self.src.len()
+        let b = self.src[at].to_int()
+        if b == BACKSLASH
+            at += 2
+        else if b == QUOTE and not triple
+            return at + 1
+        else if b == QUOTE and self.byte_at(at + 1) == QUOTE and self.byte_at(at + 2) == QUOTE
+            return at + 3
+        else if b == OPEN_BRACE and self.byte_at(at + 1) == OPEN_BRACE
+            at += 2
+        else if b == OPEN_BRACE
+            at = self.interpolation_end(at + 1)
+        else
+            at += 1
+    return at
+
+# The end of an `{expression}` in text, after its `}`.
+task interpolation_end(self: Formatter, start: int) -> int
+    var at = start
+    var depth = 0
+    while at < self.src.len()
+        let b = self.src[at].to_int()
+        if b == QUOTE
+            at = self.text_end(at)
+        else if b == HASH
+            while self.byte_at(at) != -1 and self.byte_at(at) != LINE
+                at += 1
+        else
+            at += 1
+            if b == OPEN_ROUND or b == OPEN_SQUARE or b == OPEN_BRACE
+                depth += 1
+            else if b == CLOSE_BRACE and depth == 0
+                return at
+            else if (b == CLOSE_ROUND or b == CLOSE_SQUARE or b == CLOSE_BRACE) and depth > 0
+                depth -= 1
+    return at
+
+let table = tables()
+var check = false
+var changed = 0
+for arg in args.all()
+    if arg == "--check"
+        check = true
+        continue
+    let old = try fs.read_bytes(arg)
+    let new = format(old, table)
+    if new != old
+        changed += 1
+        if check
+            print arg
+        else
+            try fs.write_bytes(arg, new)
+
+task verdict(changed: int) -> none or Unformatted
+    if changed > 0
+        return Unformatted(count: changed)
+    return none
+
+if check
+    try verdict(changed)

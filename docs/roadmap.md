@@ -80,7 +80,7 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] `lucid explain`
 - [x] `lucid context`
 - [x] `lucid fix`
-- [ ] `lucid fmt`, written in Lucid as first dogfooding test. Build from the spec in "`lucid fmt`" in `docs/compiler.md`
+- [x] `lucid fmt`, written in Lucid as first dogfooding test: `tools/fmt.lcd`
 - [ ] Permission checks
 - [ ] Full agent benchmark
 - [ ] Fuzzing

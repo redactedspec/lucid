@@ -20,10 +20,13 @@ use resolve::{load, package_files, package_root};
 use std::io::Write;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\n       lucid fix [--json] [PATH]\n       lucid explain [--json] CODE\n       lucid context [--json] MODULE\nPATH is a file or a package directory, by default the current directory.";
+const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\n       lucid fix [--json] [PATH]\n       lucid explain [--json] CODE\n       lucid context [--json] MODULE\n       lucid fmt [--check] [PATH]\nPATH is a file or a package directory, by default the current directory.";
 
 /// Set for the child process of `lucid test`, to the place of its first test.
 const TEST_FROM: &str = "LUCID_TEST_FROM";
+
+/// Set for the child process of `lucid fmt`, which runs the formatter.
+const FMT_CHILD: &str = "LUCID_FMT_CHILD";
 
 /// Debug builds use large stack frames, and `MAX_DEPTH` levels of nesting must fit.
 const STACK_BYTES: usize = 256 * 1024 * 1024;
@@ -50,6 +53,7 @@ fn cli(args: &[String]) -> ExitCode {
         ("context", [module]) if !module.starts_with('-') => return context(module, false),
         ("context", ["--json", module]) => return context(module, true),
         ("context", _) => return usage(),
+        ("fmt", _) => return fmt(rest),
         _ => {}
     }
     // What follows the path of `lucid run` belongs to the program.
@@ -359,6 +363,144 @@ fn context(name: &str, json: bool) -> ExitCode {
     }
     emit(std::io::stdout(), &context::render(&modules, json));
     ExitCode::SUCCESS
+}
+
+/// `lucid fmt`: formats a file, or every file of a package, with the Lucid
+/// program `tools/fmt.lcd`. A file with a lexer error is reported and left
+/// alone. The formatter runs in a child process, so that a trap in it still
+/// leaves this process to check each changed file: if its tokens changed, that
+/// is a formatter bug, and the old text goes back. See "`lucid fmt`" in
+/// docs/compiler.md.
+fn fmt(rest: &[&str]) -> ExitCode {
+    if std::env::var_os(FMT_CHILD).is_some() {
+        return run_formatter(rest);
+    }
+    let (check, path) = match rest {
+        [] => (false, "."),
+        ["--check"] => (true, "."),
+        [path] if !path.starts_with('-') => (false, *path),
+        ["--check", path] if !path.starts_with('-') => (true, *path),
+        _ => return usage(),
+    };
+    let files = if std::path::Path::new(path).is_dir() {
+        package_files(path)
+    } else {
+        vec![path.to_string()]
+    };
+    if files.is_empty() {
+        emit(
+            std::io::stderr(),
+            &format!(
+                "lucid: `{path}` has no `src` with `.lcd` files
+"
+            ),
+        );
+        return ExitCode::FAILURE;
+    }
+    let mut failed = false;
+    let mut kept = Vec::new();
+    for file in files {
+        let text = match std::fs::read_to_string(&file) {
+            Ok(text) => text,
+            Err(e) => {
+                emit(
+                    std::io::stderr(),
+                    &format!(
+                        "lucid: cannot read `{file}`: {e}
+"
+                    ),
+                );
+                failed = true;
+                continue;
+            }
+        };
+        let (tokens, diags) = lexer::lex(&text);
+        if diags.is_empty() {
+            kept.push((file, text, tokens));
+        } else {
+            let mut source = Source::default();
+            source.add(file.leak(), &text);
+            report_errors(&source, &diags, false);
+            failed = true;
+        }
+    }
+    if kept.is_empty() {
+        return ExitCode::FAILURE;
+    }
+    let child = std::env::current_exe().and_then(|lucid| {
+        let mut command = std::process::Command::new(lucid);
+        command.arg("fmt").args(check.then_some("--check")).env(FMT_CHILD, "1");
+        command.args(kept.iter().map(|(file, ..)| file)).status()
+    });
+    for (file, old, tokens) in &kept {
+        let Ok(new) = std::fs::read_to_string(file) else { continue };
+        let (after, diags) = lexer::lex(&new);
+        if new == *old || (diags.is_empty() && same_tokens(tokens, &after)) {
+            continue;
+        }
+        let restored = match std::fs::write(file, old) {
+            Ok(()) => "its old text is back",
+            Err(_) => "and its old text could not be written back",
+        };
+        let problem = format!(
+            "lucid: bug in `lucid fmt`: it changed the tokens of `{file}`, {restored}
+"
+        );
+        emit(std::io::stderr(), &problem);
+        return ExitCode::from(101);
+    }
+    match child {
+        Ok(status) if status.success() && !failed => ExitCode::SUCCESS,
+        Ok(status) if status.code() == Some(101) => ExitCode::from(101),
+        Ok(_) => ExitCode::FAILURE,
+        Err(e) => {
+            emit(
+                std::io::stderr(),
+                &format!(
+                    "lucid: cannot start the formatter: {e}
+"
+                ),
+            );
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// True if two token lists differ only in their spans.
+fn same_tokens(a: &[lexer::Token], b: &[lexer::Token]) -> bool {
+    use lexer::{TextPart, TokenKind};
+    let same_part = |pair: (&TextPart, &TextPart)| match pair {
+        (TextPart::Expr(x), TextPart::Expr(y)) => same_tokens(x, y),
+        (x, y) => x == y,
+    };
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| match (&x.kind, &y.kind) {
+            (TokenKind::Text(x), TokenKind::Text(y)) => {
+                x.len() == y.len() && x.iter().zip(y).all(same_part)
+            }
+            (x, y) => x == y,
+        })
+}
+
+/// The child of `lucid fmt`: compiles `tools/fmt.lcd` and runs it on `args`.
+fn run_formatter(args: &[&str]) -> ExitCode {
+    lucid_rt::set_args(args.iter().map(|arg| (*arg).to_string()).collect());
+    let (source, file, mut diags) = load(resolve::FMT_PATH, true);
+    if diags.is_empty()
+        && let Some(file) = &file
+    {
+        let (mut program, errors) = check::check(file, &source, false);
+        diags = errors;
+        if diags.is_empty() {
+            diags = mono::run(&mut program);
+        }
+        if diags.is_empty() {
+            ownership::run(&mut program, true);
+            diags = native::run(&program, &source, STACK_BYTES).err().unwrap_or_default();
+        }
+    }
+    report_errors(&source, &diags, false);
+    if diags.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
 
 /// The result of one test.

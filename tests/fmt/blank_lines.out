@@ -1,0 +1,8 @@
+# head
+let a = 1
+
+if a
+    print a
+
+    # odd comment
+    print 2
