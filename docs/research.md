@@ -276,6 +276,8 @@ Every Lucid failure was a compile error, and every program that compiled gave th
 
 **Guide gaps.** Both arms guessed that `\n` and `\"` work in text, which the guide never shows.
 
+**Fixed after the pilot.** Decision 149 allows an empty `[]` or `{}` as a default. E0318 on a union now names the choice to match first, E0201 says when a name is a keyword, and E0303 on a union suggests `else`. The guide now shows escapes, and that a union match names no variant. The bare guide drops that last line.
+
 **What it does not show.** The bare arm did no worse than the full one, but 10 tasks cannot tell the arms apart, and none of the guide's stripped warnings fired. Limits of the M3 trial still hold: one author, one model family.
 
 ### The biggest risk

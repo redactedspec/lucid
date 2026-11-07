@@ -362,6 +362,7 @@ match maybe
 ```
 
 - `is` tests a type, `none`, or `empty`, and it narrows. It never tests equality.
+- A `match` on a union names no variant. Match `e: ParseError`, then `match e` inside that arm.
 - `x == 1` on an `int?` is an error: test it with `is` first.
 - Only a local name or parameter narrows, never a field or call. Write `let b = a.b`, test `b`, and use `b`.
 - Assigning to a name ends its narrowing. A loop forgets what it knows about a name assigned in its body.

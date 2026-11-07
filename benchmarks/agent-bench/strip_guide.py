@@ -21,6 +21,7 @@ WARNINGS = [
     " Capturing a `var`, a `change` or `take` parameter, or a `for change` name is an error: write `let copy = count` first. A captured name cannot change, so a closure cannot keep a running count.",
     " `f(x)` is an error for such a task, and `x.f()` is an error for any other task.",
     "- Patterns do not nest, and there are no guards.\n",
+    "- A `match` on a union names no variant. Match `e: ParseError`, then `match e` inside that arm.\n",
     "- Only a local name or parameter narrows, never a field or call. Write `let b = a.b`, test `b`, and use `b`.\n",
     ", and `[1, none]` alone is an error. A `list[int]` is not a `list[int?]`",
 ]
