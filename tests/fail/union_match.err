@@ -7,7 +7,7 @@ union_match.lcd:29:9: error E0318: `int?` never holds `text`
 union_match.lcd:34:9: error E0318: `int` is not a union, so `none` is nothing to test
 union_match.lcd:35:9: error E0318: `int` is not a union, so `int` is nothing to test
 union_match.lcd:39:9: error E0318: `Shape?` is not a `choice`
-  note: match what the union holds, as in `s: Shape`
+  note: `Circle` is a variant of `Shape`: match `e: Shape` first, then match `e` in that arm
 union_match.lcd:44:9: error E0303: this pattern needs `int?`, found `int`
 union_match.lcd:49:9: error E0318: `Point` cannot be bound here
   note: it names a type or variant, and patterns do not nest, so use another name

@@ -116,6 +116,14 @@ impl Parser {
             let text = text.clone();
             let span = self.advance();
             Ok(Name { text, span })
+        } else if let TokenKind::Sym(word) = self.kind()
+            && crate::lexer::KEYWORDS.contains(word)
+        {
+            let token = self.token();
+            let message = format!("expected a name, found `{word}`");
+            let note = format!("`{word}` is a keyword, so pick another name");
+            self.diags.push(Diagnostic::new("E0201", message, token.span).note(note));
+            Err(())
         } else {
             self.expected("a name")
         }

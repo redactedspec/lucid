@@ -1,3 +1,4 @@
 recovery.lcd:1:5: error E0201: expected a name, found `=`
 recovery.lcd:2:6: error E0201: expected an expression, found end of line
 recovery.lcd:5:5: error E0201: expected a name, found `print`
+  note: `print` is a keyword, so pick another name

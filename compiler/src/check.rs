@@ -2920,6 +2920,27 @@ impl<'a> Checker<'a> {
     }
 
     /// The `choice` that a value of this type belongs to, if any.
+    /// Advice for a variant or type name matched straight on a union: match
+    /// the member first. Names the choice that has the variant, if one does.
+    fn union_member_note(&self, ty: Ty, name: &ast::Name) -> String {
+        let choice = ty.members().iter().find_map(|&member| {
+            let id = self.choice_of(member)?;
+            let data = &self.datas[id];
+            data.variants.iter().any(|variant| variant.name == name.text).then_some(data)
+        });
+        match choice {
+            Some(data) => {
+                // A choice from a module has a full path, which a pattern does not take.
+                let short = data.name.text.rsplit('.').next().unwrap_or_default();
+                format!(
+                    "`{}` is a variant of `{short}`: match `e: {short}` first, then match `e` in that arm",
+                    name.text
+                )
+            }
+            None => format!("to test what the union holds, write `x: {}`", name.text),
+        }
+    }
+
     fn choice_of(&self, ty: Ty) -> Option<usize> {
         match ty {
             Ty::Data(_, id, _) if self.datas[id].choice => Some(id),
@@ -2966,6 +2987,16 @@ impl<'a> Checker<'a> {
             ast::PatternKind::Literal(value) => (self.literal(value, holder, ty, covered), vec![]),
             ast::PatternKind::Name(name) if self.choice_of(ty).is_some() => {
                 self.variant_pattern(name, None, holder, ty, covered)
+            }
+            ast::PatternKind::Name(name)
+                if matches!(ty, Ty::Union(_))
+                    && self.constructor_names.contains(name.text.as_str()) =>
+            {
+                covered.failed = true;
+                let message = format!("`{}` is not a `choice`", ty.name());
+                let note = self.union_member_note(ty, name);
+                self.report(Diagnostic::new("E0318", message, name.span).note(note));
+                (None, Vec::new())
             }
             ast::PatternKind::Name(name) => {
                 let left: Vec<Ty> = (ty.members().iter().copied())
@@ -3094,7 +3125,8 @@ impl<'a> Checker<'a> {
                     let message = format!("`{}` is not a `choice`", ty.name());
                     let diag = Diagnostic::new("E0318", message, span);
                     self.report(if matches!(ty, Ty::Union(_)) {
-                        diag.note("match what the union holds, as in `s: Shape`")
+                        let note = self.union_member_note(ty, name);
+                        diag.note(note)
                     } else {
                         diag
                     });
@@ -4644,7 +4676,7 @@ impl<'a> Checker<'a> {
             return self.report(if union && !self.frames.is_empty() {
                 diag.note("test a union with `is`. A captured name does not narrow, so test a `let` copy of it")
             } else if union {
-                diag.note("test a union with `is`, as in `x is none`")
+                diag.note("narrow a union with `is` first, as in `x is none`, or give a fallback with `else`")
             } else if left.ty == Ty::Text || right.ty == Ty::Text {
                 diag.note(JOIN_TEXT)
             } else if numbers && !plain {

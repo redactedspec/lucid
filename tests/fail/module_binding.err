@@ -1,2 +1,2 @@
-module_binding.lcd:6:9: error E0318: `Red` cannot be bound here
-  note: it names a type or variant, and patterns do not nest, so use another name
+module_binding.lcd:6:9: error E0318: `modules_lib.colors.Color?` is not a `choice`
+  note: `Red` is a variant of `Color`: match `e: Color` first, then match `e` in that arm

@@ -7,7 +7,7 @@ union_types.lcd:16:12: error E0303: `User?` has no field `name`
 union_types.lcd:17:7: error E0303: `len` does not work on `User?`
   note: test it first, as in `if x is not none`. Only a name narrows, so name a field or call with `let`
 union_types.lcd:18:7: error E0303: `==` needs one type on both sides, found `User?` and `none`
-  note: test a union with `is`, as in `x is none`
+  note: narrow a union with `is` first, as in `x is none`, or give a fallback with `else`
 union_types.lcd:19:7: error E0303: `User?` has no index
   note: test it first, as in `if x is not none`. Only a name narrows, so name a field or call with `let`
 union_types.lcd:20:1: error E0303: `push` does not work on `User?`
