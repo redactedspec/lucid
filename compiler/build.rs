@@ -1,6 +1,6 @@
 //! Builds `lucid_rt` as a release static library with its C `main`, which
 //! `lucid build` embeds and links into each program. Also passes on the system
-//! libraries it needs. See "`lucid build`" in docs/compiler.md.
+//! libraries it needs, on Windows only. See "`lucid build`" in docs/compiler.md.
 
 use std::env;
 use std::path::PathBuf;
@@ -8,6 +8,10 @@ use std::process::Command;
 
 fn main() {
     println!("cargo::rerun-if-changed=../runtime");
+    // Only the Windows `link` in main.rs uses the library.
+    if env::var_os("CARGO_CFG_WINDOWS").is_none() {
+        return;
+    }
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("cargo sets OUT_DIR"));
     let cargo = env::var_os("CARGO").expect("cargo sets CARGO");
     // A target directory of its own, so this waits on no lock that the outer
