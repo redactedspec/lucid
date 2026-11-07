@@ -80,6 +80,51 @@ Every entry of every manifest read is checked, used or not, after the modules lo
 
 `Source` holds all the files end to end, entry file first, or the manifest and then the entry file for a package, so a span alone gives its file. `Lines::place` turns an offset into a file, line, and column.
 
+## `lucid fmt`
+
+Planned, by decision 144. This section is the spec for the build.
+
+**Shape.** The formatter is a Lucid program, `tools/fmt.lcd`, held inside the compiler through `include_str!` at the path `@tools/fmt.lcd`, as `std` modules are. `lucid fmt [--check] [PATH]` finds the files as `lucid test` does: a file, or every file in a package's `src`. It lexes each file with `lexer.rs` first. A file with a lexer error gets its diagnostics, as under `lucid check`, and is left alone. The rest go to the formatter, compiled with the JIT, through `lucid_rt::set_args`: `--check` if given, then the paths.
+
+The formatter reads each file as bytes and builds the output as a `list[byte]`. All syntax is ASCII, so a byte scan finds every token boundary. Text and comments are copied as bytes. It writes a file only if the output differs. With `--check` it writes nothing, prints each path that would change, and ends with a top-level `try` of an error, which exits with code 1.
+
+**Safety net.** Before the run, `lucid` keeps the text of each file. After it, `lucid` lexes each changed file again and compares the token kinds, spans aside, with the old ones. A difference is a formatter bug: `lucid` writes the old text back, names the file, and exits with 101. Comments are not tokens, so the net does not cover them. The formatter copies them unchanged.
+
+**Rules.** The formatter changes only space and line breaks. It never joins, splits, or reorders lines or tokens.
+
+1. Line breaks are `\n`. A byte order mark is dropped.
+2. Trailing spaces are removed, except inside `"""` text.
+3. Blank lines at the start of the file go. A run of blank lines becomes one. A blank line goes if the next code line is indented deeper than the previous code line, which is the first line of a block. A comment line counts as a code line here.
+4. A file that is not empty ends with one `\n`.
+5. A line outside brackets keeps its indentation, which the lexer has already checked.
+6. A line inside brackets is indented 4 spaces past the first line of its statement for each earlier line that opened a bracket that is still open. Leading closing brackets count as closed. So both lines below are canonical:
+
+   ```lucid
+   let point = Point(
+       x: 1,
+       y: 2,
+   )
+   print sum([
+       1,
+       2,
+   ])
+   ```
+
+7. A comment line keeps its indentation, cut to a multiple of 4. Inside brackets, it follows rule 6.
+8. Between two tokens on a line there is one space, except:
+   - none after `(`, `[`, `{`, `.`, `./`, or a prefix `-`;
+   - none before `)`, `]`, `}`, `,`, `:`, `.`, or `?`;
+   - none on either side of `..` or `..=`;
+   - none before `(` or `[` after a name that is not a keyword, `self`, `task`, a text, `)`, or `]`. So `f(x)`, `items[0]`, `task(int)`, and `f[int](x)`, but `if (a)` and `in [1]`.
+
+   A `-` is a prefix when it starts the line, or follows an operator other than `?`, an opening bracket, `,`, `:`, or a keyword other than `true`, `false`, `none`, and `self`.
+9. A comment after code has two spaces before `#`.
+10. Text, numbers, and comment text are copied unchanged. A text that spans lines, in `"""` form or through a `{}` with a line break, is copied whole, line breaks and indentation included.
+
+Line length has no limit, and no line is wrapped. Trailing commas, `use` order, and alignment are left as written.
+
+**Tests.** `tests/fmt/name.lcd` with `name.out`, the expected output. Every `.lcd` file in `std/`, `tools/`, and `examples/` must already be formatted, which `lucid fmt --check` tests. A second run over each `.out` file must change nothing.
+
 ## Repository layout
 
 Start with few files. Split a file only when it hurts.
@@ -107,6 +152,7 @@ compiler/          Rust crate `lucid`: the CLI and compiler
 runtime/           Rust crate `lucid_rt`: allocator, counting, text, traps
     src/exe.rs     start of a built program, only in the static library
 std/               standard library in Lucid, held inside the compiler
+tools/             planned: `fmt.lcd`, the formatter in Lucid, held inside the compiler
 tests/             golden tests
 benchmarks/        Lucid and Rust versions of each program
     agent-trial/   tasks, reference answers, and runner of the M3 trial
@@ -193,7 +239,7 @@ ROUNDS=3 sh benchmarks/run.sh                 # fewer rounds
 | `lucid build [--json] [PATH]` | Produce a native executable | Works on Windows, for the features under "Status". Writes `NAME.exe` to the current directory |
 | `lucid build --target web` | Produce WebAssembly and a loader | Planned |
 | `lucid test [--json] [PATH]` | Run `test` blocks | Works, for a file, or every file in a package's `src` |
-| `lucid fmt` | Format, no options | Planned |
+| `lucid fmt [--check] [PATH]` | Format in place, with no style options. `--check` lists files that would change, and exits with 1 if any would | Planned, see "`lucid fmt`" |
 | `lucid fix [--json] [PATH]` | Apply suggested fixes | Works. A `Diagnostic` holds `fixes`, each a set of edits. The command writes the edited text of each file back with its own line endings, from the text that `Source` holds |
 | `lucid explain [--json] CODE` | Explain an error code | Works, from `docs/errors.md`, which the compiler holds through `include_str!` |
 | `lucid context [--json] MODULE` | Print a compact API | Works for a file, a package directory, which means every file in its `src`, or `std.NAME`. `context.rs` reads tokens, not the tree, so a file with errors still shows its API |
@@ -215,6 +261,7 @@ Exit codes: 0 for success, 1 for compile errors or a failed test, 2 for bad usag
 - **Golden trap tests:** `tests/trap/name.lcd` with `name.err` for the trap message, and exit code 101.
 - **Modules:** a file that a golden test imports sits in `modules_lib/` under the test directory, which the runner does not list.
 - **Golden package tests:** `tests/package/name/` must print `expected.out` and exit 0, or `expected.err` and exit 1, under `lucid run name`. A directory with neither is a dependency of the others. E0338 and E0339 are tested here, since they need a manifest.
+- **Golden format tests:** planned, `tests/fmt/name.lcd` with `name.out` for what `lucid fmt` makes of it.
 - **Golden `lucid test` tests:** `tests/test/name.lcd` with `name.out` for the report. Exit code 1 if it holds a failure.
 - **Error code check:** `compiler/tests/golden.rs` fails if a code in the source has no golden test or no entry in `docs/errors.md`, or if an example there does not give its own code.
 - **Examples:** everything in `examples/` must parse. Later milestones raise this to compile.

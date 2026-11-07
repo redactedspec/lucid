@@ -487,6 +487,16 @@ Decision 143.
 
 Sources: [cargo fix](https://doc.rust-lang.org/cargo/commands/cargo-fix.html), [rustc edit_distance](https://doc.rust-lang.org/nightly/nightly-rustc/rustc_span/edit_distance/index.html).
 
+## Formatting
+
+Decision 144.
+
+- **One style, no options.** gofmt has no style options, and Effective Go says Go has no line length limit. The Go Proverbs put the result as "Gofmt's style is no one's favorite, yet gofmt is everyone's favorite." Black calls itself uncompromising for the same reason, though it keeps a line length option.
+- **Two spaces before a trailing comment.** PEP 8 asks for at least two, and Black writes two.
+- **Weak ground.** No measurement shows that a canonical layout helps agents. The case rests on smaller diffs and on Go's long use of gofmt. The full agent benchmark at M5 does not test it.
+
+Sources: [Effective Go, Formatting](https://go.dev/doc/effective_go#formatting), [Go Proverbs](https://go-proverbs.github.io/), [Black code style](https://black.readthedocs.io/en/stable/the_black_code_style/current_style.html), [PEP 8, Comments](https://peps.python.org/pep-0008/#comments).
+
 ## Open research
 
 | Topic | Needed by |
