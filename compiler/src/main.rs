@@ -6,6 +6,8 @@ mod check;
 mod context;
 mod derive;
 mod diag;
+#[cfg(test)]
+mod fuzz;
 mod lexer;
 mod manifest;
 mod mir;

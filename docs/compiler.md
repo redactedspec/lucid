@@ -140,6 +140,7 @@ compiler/          Rust crate `lucid`: the CLI and compiler
         main.rs    CLI, and linking for `lucid build`
         context.rs public API for `lucid context`
         diag.rs    diagnostics
+        fuzz.rs    test only: mutation fuzzing of the front end
         lexer.rs
         manifest.rs    reads `lucid.toml`
         ast.rs
@@ -229,6 +230,7 @@ Run from the repository root:
 cargo run -p lucid -- run examples/file.lcd   # the compiler
 cargo test                                    # unit and golden tests
 cargo test --release                          # the same, with inline counts
+LUCID_FUZZ=20000 cargo test fuzz              # a long fuzzing run
 cargo clippy --all-targets                    # lints
 cargo fmt                                     # formatting
 sh benchmarks/run.sh                          # build, then 15 paired rounds, needs python
@@ -277,7 +279,7 @@ Exit codes: 0 for success, 1 for compile errors or a failed test, 2 for bad usag
 - **Ownership-off mode:** the run and trap tests run a second time with `LUCID_NAIVE` set, which turns ownership optimizations off. Output must match.
 - **Memory checks:** the debug runtime counts live values, so every golden test also fails on a leak or double free.
 - **Built programs:** `todo_example_works` and `built_programs_match_run` build with `lucid build`, and compare the program with `lucid run`. Every run and trap test gave the same output built, when checked by hand on 2026-11-07.
-- **Fuzzing:** add from M5. Parser and checker must never panic.
+- **Fuzzing:** `front_end_never_panics` in `fuzz.rs` mutates the `.lcd` files of `tests/`, `examples/`, `std/`, and `tools/`, and runs each result through `load`, `check`, `mono`, and `ownership`. None may panic. `cargo test` runs 300 inputs from a fixed seed. `LUCID_FUZZ=20000` runs more, and `LUCID_FUZZ_SEED` changes the seed. An input that panics is saved as `target/fuzz-crash-<seed>-<n>.lcd`. On 2026-11-07, 20,000 inputs gave no panic, and about 14% of them reached the checker. Code generation is not fuzzed (decision 150).
 
 ## Development machine
 
