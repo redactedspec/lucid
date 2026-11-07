@@ -274,8 +274,7 @@ Every Lucid failure was a compile error, and every program that compiled gave th
 - **Variants matched on a union**, Lucid arm, task 11, 3 repair turns. `match` on `int or ParseError` cannot name `Empty`: it needs an arm `e: ParseError`, then a second `match`. E0318 adds a note on nesting that misled. A `match` as an arm's value, and a block after a typed arm, also cost turns.
 - **`==` on `text?` and `text`**, bare arm, task 19. E0303 points to `is`, which does not compare values.
 
-**Guide gaps.** Both arms guessed that `
-` and `\"` work in text, which the guide never shows.
+**Guide gaps.** Both arms guessed that `\n` and `\"` work in text, which the guide never shows.
 
 **What it does not show.** The bare arm did no worse than the full one, but 10 tasks cannot tell the arms apart, and none of the guide's stripped warnings fired. Limits of the M3 trial still hold: one author, one model family.
 
