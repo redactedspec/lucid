@@ -607,6 +607,24 @@ fn error_examples_give_their_code() {
 }
 
 #[test]
+fn context_shows_public_api() {
+    let dir = repo().join("tests/package");
+    let output = lucid(&dir, &["context", "greet"]);
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    assert_eq!(
+        text(&output.stdout),
+        "# greet/src/deep/count.lcd\n\ntask letters(s: text) -> int\n\n\
+         # greet/src/lib.lcd\n\ntype Name\n    text: text\n\ntask hello(name: Name) -> text\n"
+    );
+    let json = text(&lucid(&dir, &["context", "--json", "std.args"]).stdout);
+    assert!(json.starts_with("[{\"module\":\"std.args\",\"line\":"), "{json}");
+    assert!(json.contains("\"signature\":\"task all() -> list[text]\",\"doc\":\"Every"), "{json}");
+    let missing = lucid(&dir, &["context", "std.nope"]);
+    assert_eq!(missing.status.code(), Some(1));
+    assert_eq!(text(&missing.stderr), "lucid: `std` has no module `std.nope`\n");
+}
+
+#[test]
 fn explain_prints_one_entry() {
     let dir = repo();
     let output = lucid(&dir, &["explain", "e0301"]);

@@ -88,6 +88,7 @@ Start with few files. Split a file only when it hurts.
 compiler/          Rust crate `lucid`: the CLI and compiler
     src/
         main.rs    CLI, and linking for `lucid build`
+        context.rs public API for `lucid context`
         diag.rs    diagnostics
         lexer.rs
         manifest.rs    reads `lucid.toml`
@@ -195,7 +196,7 @@ ROUNDS=3 sh benchmarks/run.sh                 # fewer rounds
 | `lucid fmt` | Format, no options | Planned |
 | `lucid fix` | Apply suggested fixes | Planned |
 | `lucid explain [--json] CODE` | Explain an error code | Works, from `docs/errors.md`, which the compiler holds through `include_str!` |
-| `lucid context MODULE` | Print a compact API | Planned |
+| `lucid context [--json] MODULE` | Print a compact API | Works for a file, a package directory, which means every file in its `src`, or `std.NAME`. `context.rs` reads tokens, not the tree, so a file with errors still shows its API |
 | `lucid doc` | Generate docs | Planned |
 
 `run.py` also reports peak memory, on Windows only, with the peak of an empty program taken off the Lucid figure, since `lucid run` holds the compiler. The `LUCID_NAIVE` environment variable turns ownership optimizations off, for tests and for measuring them.

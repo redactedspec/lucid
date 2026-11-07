@@ -24,6 +24,11 @@ const PRELUDE: &str = "trait Error
 
 /// The standard library, inside the compiler, so that a program needs no files
 /// beside it. Each module sits at `@std/name.lcd`, a path that no `use` can write.
+/// The source of the `std` module with this name, as `fs`.
+pub fn std_module(name: &str) -> Option<&'static str> {
+    STD_MODULES.iter().find(|(module, _)| *module == name).map(|(_, text)| *text)
+}
+
 const STD_MODULES: [(&str, &str); 5] = [
     ("args", include_str!("../../std/args.lcd")),
     ("env", include_str!("../../std/env.lcd")),

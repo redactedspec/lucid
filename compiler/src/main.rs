@@ -3,6 +3,7 @@
 #[allow(dead_code)] // Later stages read the tree that the parser builds now.
 mod ast;
 mod check;
+mod context;
 mod derive;
 mod diag;
 mod lexer;
@@ -19,7 +20,7 @@ use resolve::{load, package_files, package_root};
 use std::io::Write;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\n       lucid explain [--json] CODE\nPATH is a file or a package directory, by default the current directory.";
+const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\n       lucid explain [--json] CODE\n       lucid context [--json] MODULE\nPATH is a file or a package directory, by default the current directory.";
 
 /// Set for the child process of `lucid test`, to the place of its first test.
 const TEST_FROM: &str = "LUCID_TEST_FROM";
@@ -46,6 +47,9 @@ fn cli(args: &[String]) -> ExitCode {
         ("explain", [code]) if !code.starts_with('-') => return explain(code, false),
         ("explain", ["--json", code]) => return explain(code, true),
         ("explain", _) => return usage(),
+        ("context", [module]) if !module.starts_with('-') => return context(module, false),
+        ("context", ["--json", module]) => return context(module, true),
+        ("context", _) => return usage(),
         _ => {}
     }
     // What follows the path of `lucid run` belongs to the program.
@@ -242,6 +246,40 @@ fn explain(code: &str, json: bool) -> ExitCode {
             field(fix),
         ),
     );
+    ExitCode::SUCCESS
+}
+
+/// `lucid context`: the public API of a file, of every file of a package, or of
+/// a `std` module, as `std.fs`.
+fn context(name: &str, json: bool) -> ExitCode {
+    let std = name.strip_prefix("std.").map(resolve::std_module);
+    let files = match std {
+        Some(Some(text)) => vec![(name.to_string(), Ok(text.to_string()))],
+        Some(None) => {
+            emit(std::io::stderr(), &format!("lucid: `std` has no module `{name}`\n"));
+            return ExitCode::FAILURE;
+        }
+        None if std::path::Path::new(name).is_dir() => {
+            let read = |file: String| (file.clone(), std::fs::read_to_string(&file));
+            package_files(name).into_iter().map(read).collect()
+        }
+        None => vec![(name.to_string(), std::fs::read_to_string(name))],
+    };
+    let mut modules = Vec::new();
+    for (file, text) in files {
+        match text {
+            Ok(text) => modules.push((file, context::items(&text))),
+            Err(e) => {
+                emit(std::io::stderr(), &format!("lucid: cannot read `{file}`: {e}\n"));
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    if modules.is_empty() {
+        emit(std::io::stderr(), &format!("lucid: `{name}` has no `src` with `.lcd` files\n"));
+        return ExitCode::FAILURE;
+    }
+    emit(std::io::stdout(), &context::render(&modules, json));
     ExitCode::SUCCESS
 }
 

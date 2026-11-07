@@ -78,7 +78,8 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] `std.fs`, `std.json`, `std.env`, `std.args`, `std.time`
 - [x] `lucid build`, `lucid test`
 - [x] `lucid explain`
-- [ ] `lucid fix`, `context`
+- [x] `lucid context`
+- [ ] `lucid fix`
 - [ ] `lucid fmt`, written in Lucid as first dogfooding test
 - [ ] Permission checks
 - [ ] Full agent benchmark
