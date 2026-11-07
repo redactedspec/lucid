@@ -1,0 +1,11 @@
+lucid task 41 attempt 1 compiled no exit - fail
+lucid task 41 attempt 2 compiled yes exit 0 pass
+lucid task 42 attempt 1 compiled yes exit 0 pass
+lucid task 43 attempt 1 compiled yes exit 0 pass
+lucid task 44 attempt 1 compiled yes exit 0 pass
+lucid task 45 attempt 1 compiled yes exit 0 pass
+lucid task 46 attempt 1 compiled yes exit 0 pass
+lucid task 47 attempt 1 compiled yes exit 0 pass
+lucid task 48 attempt 1 compiled yes exit 0 pass
+lucid task 49 attempt 1 compiled yes exit 0 pass
+lucid task 50 attempt 1 compiled yes exit 0 pass

@@ -18,20 +18,20 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | Cranelift for speed | Partly supported. 2x target is at risk | Read | Keep LLVM option open |
 | Overflow traps in release | Measured: 1.17x to 1.78x in Lucid, 1.56x to 1.92x in Rust | Read | Keep. Revisit with M4 benchmarks |
 | Permissions | Supported, but first design had holes | Snippet | `security.md` fixed |
-| Agent-friendliness | Weak. A small M3 trial passed 10 of 10, and an M5 pilot 7 of 10 on the first attempt against 10 of 10 for Python and TypeScript, with limits stated below | Snippet, trial | Agent benchmark at M5 |
+| Agent-friendliness | Moderate. The M5 benchmark passed 44 of 50 on the first attempt, against 49 for Python and 46 for TypeScript, and 50 of 50 in the end, with limits stated below | Snippet, trial, benchmark | Fix the diagnostics and guide gaps it found |
 | Indentation syntax helps agents | No evidence | None | Owner preference. Measure |
 | No `async`, lightweight tasks in browser | Now feasible through JSPI | Snippet | Decide at M7 |
 | ASCII names, text escapes | Judgment call from existing practice | None | Revisit before 1.0 |
-| Division, argument order | Judgment call from existing practice | None | Trial met no failure, and repair is untested. Agent benchmark at M5 |
-| Type arguments in brackets, read in one pass | Follows Go. Form also proposed for Python | Read, parser Snippet | Trial met no failure, and repair is untested. Agent benchmark at M5 |
-| Generic body checked once, then substituted in MIR | Follows Rust and Go, not C++ templates | Snippet | Trial met no failure, and repair is untested. Agent benchmark at M5 |
-| Dot calls by receiver type, bounds required for every use | Judgment call from Rust and Python practice | None | Trial met no failure, and repair is untested. Agent benchmark at M5 |
-| Union narrowing by control flow | Follows TypeScript and Kotlin, tightened for memory safety | Read | Trial met no failure, and repair is untested. Agent benchmark at M5 |
-| Text slices, no character type | Judgment call from existing practice | None | Trial met no failure, and repair is untested. Agent benchmark at M5 |
+| Division, argument order | Judgment call from existing practice | None | No failure in the M3 trial or the M5 benchmark |
+| Type arguments in brackets, read in one pass | Follows Go. Form also proposed for Python | Read, parser Snippet | No failure in the M3 trial or the M5 benchmark |
+| Generic body checked once, then substituted in MIR | Follows Rust and Go, not C++ templates | Snippet | No failure in the M3 trial or the M5 benchmark |
+| Dot calls by receiver type, bounds required for every use | Judgment call from Rust and Python practice | None | One M5 benchmark failure, a missing `Equal` bound, repaired in one turn |
+| Union narrowing by control flow | Follows TypeScript and Kotlin, tightened for memory safety | Read | No failure in the M3 trial or the M5 benchmark |
+| Text slices, no character type | Judgment call from existing practice | None | No failure in the M3 trial or the M5 benchmark |
 | Compact ordered map, SipHash with random keys | Supported by Python and Rust practice. `hashmap` is 1.74x of Rust with the same hash | Snippet, own measurement | Keep |
 | A written `equal` removes derived `Hash` | Python and Clippy both guard this rule | Snippet | None |
 | `any` by tag tests over the whole program, not a vtable | Differs from Rust and Swift, and no benchmark yet | Snippet | Measure at M4 |
-| `change` as copy-in copy-out, with static exclusivity | Follows Swift `inout`, and stricter than Rust or Swift inside a statement | Read | Trial met no failure, and repair is untested. Agent benchmark at M5 |
+| `change` as copy-in copy-out, with static exclusivity | Follows Swift `inout`, and stricter than Rust or Swift inside a statement | Read | No failure in the M3 trial or the M5 benchmark |
 
 ## Memory
 
@@ -280,6 +280,35 @@ Every Lucid failure was a compile error, and every program that compiled gave th
 
 **What it does not show.** The bare arm did no worse than the full one, but 10 tasks cannot tell the arms apart, and none of the guide's stripped warnings fired. Limits of the M3 trial still hold: one author, one model family.
 
+### M5 agent benchmark
+
+Run on 2026-11-07, by the method of decision 148: all 50 tasks in each of the four arms, one Claude Code subagent on Opus 5.5 per block of 10. Block 11 is the pilot's, run before the fixes listed above. The other blocks ran after them. Plan usage stopped the run partway, so the two Lucid arms of block 31 were run again whole in new workspaces, and their partial logs are not counted. Logs are in `benchmarks/agent-bench/results/`, and `score.py` reads them.
+
+| Arm | Compiled on the first attempt | Passed on the first attempt | Passed in the end | Repair turns |
+| --- | --- | --- | --- | --- |
+| Lucid | 44 of 50 | 44 of 50 | 50 of 50 | 10, on 6 tasks |
+| Lucid, bare guide | 40 of 50 | 40 of 50 | 50 of 50 | 11, on 10 tasks |
+| Python | 50 of 50 | 49 of 50 | 50 of 50 | 1, on 1 task |
+| TypeScript | 50 of 50 | 46 of 50 | 50 of 50 | 4, on 4 tasks |
+
+Without the pilot block, first-attempt passes are 37 of 40 for Lucid, 33 for the bare guide, 39 for Python, and 36 for TypeScript. With the full guide, blocks 01 and 21 had no failure. As in the pilot, every Lucid failure was a compile error, and every Lucid program that compiled gave the right output.
+
+**Lucid failures after the pilot, by cause.**
+
+- **A brace in text**, both arms, task 40. A `{` with no closing brace gives E0201 `expected '}', found ':'`, which does not say that `{` starts an interpolation. The guide shows `{{` but not `}}`. E0106, for a lone `}`, names the fix.
+- **A type named `Order`**, both arms, task 40. E0304 says `40.Order` is already defined, and E0302 then says it is not defined. Neither names the built-in trait it clashes with.
+- **A block as a match arm**, both arms, task 41. The guide allows an indented block as an arm but shows none. One subject left out `->`, and one put a `match` straight after it. Neither E0201 says that a block arm is `pattern ->` and then indented lines.
+- **A keyword as a name**: `change` in the Lucid arm, task 39, and `empty` in the bare arm, task 09. The E0201 keyword note added after the pilot fixed each in one turn.
+- **`+` on text**, bare arm, tasks 31 and 46. The bare guide drops this rule, and E0303 led to interpolation in one turn each.
+- **`==` with only an `Order` bound**, bare arm, task 36. E0320 was clear, but no guide says that `Order` does not include `Equal`.
+- **A field default that is not a literal**, bare arm, task 07. E0313 fixed it in one turn.
+
+**Other arms.** Python failed task 04 once: `sum` over floats gave a different last digit from the reference's loop, since `sum` compensates for rounding from Python 3.12. The task now says to add in list order. TypeScript failed four tasks once each, by declaring fields in constructor parameters. `tsc --strict` accepts that form, and Node's type stripping rejects it at run time.
+
+**Guide gaps.** Subjects guessed, correctly each time: methods on a generic type, `}}`, the form of `"""` text, that built-in trait names are taken, matching variants of `fs.FileError` from another module, that a literal in sized arithmetic takes the other side's type, the base of a `lucid.toml` dependency path and which sections may be left out, and that the `else` of `if x is none` narrows. Bare-guide subjects also wrote their own text split, number parsing, case change, and list sort. Those are missing from the standard library, not only from the guide.
+
+**What it shows.** Lucid passes on the first attempt less often than Python or TypeScript, at 88% against 98% and 92%, but every task passed in the end, mostly after one repair turn. Most failures came from diagnostics that do not name the fix, or from rules the guide does not state. The bare guide cost 4 first-attempt passes, mostly on rules it removes, and the diagnostics repaired each one in one or two turns. That supports keeping the guide's warnings, and it shows that the diagnostics alone can carry a subject through. 50 tasks per arm cannot separate 44 from 46 with confidence. Limits of the M3 trial still hold: one run per arm, one model family, and one author for the language, the tasks, and the guide.
+
 ### The biggest risk
 
 Models have seen billions of lines of Python and none of Lucid. "Syntax Without Semantics" (2026 preprint) describes this gap: models know the algorithm, but cannot express it in an unfamiliar language. No study was found on full languages taught through documentation alone.
@@ -407,7 +436,7 @@ Read for decisions 103 and 105. The evidence is weak on both.
 - **Zig.** The fetched language reference says that a `void` expression is the only kind whose value can be ignored. A summary of the page gave `try` as returning the error from the current function. The Errors section was only partly read, so treat this as a pointer, not as a confirmed rule for error unions.
 - **Rust `main`.** The `Termination` page says only that failure returns `libc::EXIT_FAILURE`. It gives no stream or format, so it gives no evidence for decision 105. Printing to stderr with exit code 1 comes from the spec and ordinary command-line practice, and is not tested.
 
-No user study or agent trial has tested these. The full agent benchmark at M5 can show whether E0328 helps or gets in the way.
+No user study or agent trial has tested these. The M5 agent benchmark never raised E0328, so it is still untested.
 
 Sources: [Rust diagnostics attributes](https://doc.rust-lang.org/reference/attributes/diagnostics.html), [Rust Termination](https://doc.rust-lang.org/std/process/trait.Termination.html), [Zig language reference](https://ziglang.org/documentation/master/).
 
@@ -500,7 +529,7 @@ Sources: [find-msvc-tools](https://docs.rs/find-msvc-tools), [MSVC /STACK](https
 Decision 141.
 
 - **rustc.** `rustc --explain E0308` prints a Markdown entry with a cause and code examples, and the entries live in the compiler source as one file per code. Its examples are compiled by its test suite. This is from memory of the Rust repository, not read for this entry.
-- **Weak ground.** No study shows that agents fix errors faster with an explanation than with the message alone. The full agent benchmark at M5 can test it, since it counts repair turns.
+- **Weak ground.** No study shows that agents fix errors faster with an explanation than with the message alone. The M5 agent benchmark did not record whether subjects ran `lucid explain`, so it is still open.
 
 Sources: [Rust error codes index](https://doc.rust-lang.org/error_codes/error-index.html).
 
@@ -509,7 +538,7 @@ Sources: [Rust error codes index](https://doc.rust-lang.org/error_codes/error-in
 Decision 143.
 
 - **rustc and cargo fix.** rustc tags each suggestion with an applicability, and `cargo fix` applies only those marked machine-applicable. Its name suggestions accept an edit distance of up to a third of the name's length. Both are from memory of the Rust compiler source, not read for this entry.
-- **Weak ground.** The fixes chosen here are the obvious ones. No measurement yet shows how often agents hit them. The full agent benchmark at M5 can count it.
+- **Weak ground.** The fixes chosen here are the obvious ones. No measurement yet shows how often agents hit them, and the M5 agent benchmark did not record it.
 
 Sources: [cargo fix](https://doc.rust-lang.org/cargo/commands/cargo-fix.html), [rustc edit_distance](https://doc.rust-lang.org/nightly/nightly-rustc/rustc_span/edit_distance/index.html).
 
@@ -519,7 +548,7 @@ Decision 144.
 
 - **One style, no options.** gofmt has no style options, and Effective Go says Go has no line length limit. The Go Proverbs put the result as "Gofmt's style is no one's favorite, yet gofmt is everyone's favorite." Black calls itself uncompromising for the same reason, though it keeps a line length option.
 - **Two spaces before a trailing comment.** PEP 8 asks for at least two, and Black writes two.
-- **Weak ground.** No measurement shows that a canonical layout helps agents. The case rests on smaller diffs and on Go's long use of gofmt. The full agent benchmark at M5 does not test it.
+- **Weak ground.** No measurement shows that a canonical layout helps agents. The case rests on smaller diffs and on Go's long use of gofmt. The M5 agent benchmark did not test it.
 
 Sources: [Effective Go, Formatting](https://go.dev/doc/effective_go#formatting), [Go Proverbs](https://go-proverbs.github.io/), [Black code style](https://black.readthedocs.io/en/stable/the_black_code_style/current_style.html), [PEP 8, Comments](https://peps.python.org/pep-0008/#comments).
 

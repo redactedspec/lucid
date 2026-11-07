@@ -41,7 +41,7 @@ Write these, each changing an inventory:
 - `discount(percent: float)` multiplies every price by `1.0 - percent / 100.0`.
 - `drop_empty()` removes items with `qty` 0.
 
-And `total(...) -> float`, the sum of `price * qty`.
+And `total(...) -> float`, the sum of `price * qty`, added one item at a time in list order.
 
 Start with apple 0.5 qty 10, pear 0.75 qty 4, kiwi 2.0 qty 1. Then run, in order: sell apple 3, sell pear 5, sell kiwi 1, sell plum 1, restock plum 2, discount 10, drop_empty. Print each `sell` result as it happens, then each item as `name price qty` with spaces, then the total.
 

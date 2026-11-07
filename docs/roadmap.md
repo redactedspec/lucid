@@ -82,7 +82,7 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] `lucid fix`
 - [x] `lucid fmt`, written in Lucid as first dogfooding test: `tools/fmt.lcd`
 - [x] Permission checks, specified in `security.md` by decision 146
-- [ ] Full agent benchmark: tasks and runner built in `benchmarks/agent-bench/`, and a pilot of tasks 11 to 20 run. The full run is next
+- [x] Full agent benchmark in `benchmarks/agent-bench/`, results in `research.md`
 - [ ] Fuzzing
 
 **Exit:** `examples/todo.lcd` builds to a standalone `.exe` and works.

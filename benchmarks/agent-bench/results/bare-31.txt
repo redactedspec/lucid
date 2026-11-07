@@ -6,3 +6,9 @@ lucid task 34 attempt 1 compiled yes exit 0 pass
 lucid task 35 attempt 1 compiled yes exit 0 pass
 lucid task 36 attempt 1 compiled no exit - fail
 lucid task 36 attempt 2 compiled yes exit 0 pass
+lucid task 37 attempt 1 compiled yes exit 0 pass
+lucid task 38 attempt 1 compiled yes exit 0 pass
+lucid task 39 attempt 1 compiled yes exit 0 pass
+lucid task 40 attempt 1 compiled no exit - fail
+lucid task 40 attempt 2 compiled no exit - fail
+lucid task 40 attempt 3 compiled yes exit 0 pass

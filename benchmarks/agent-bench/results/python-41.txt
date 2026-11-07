@@ -1,0 +1,10 @@
+python task 41 attempt 1 compiled yes exit 0 pass
+python task 42 attempt 1 compiled yes exit 0 pass
+python task 43 attempt 1 compiled yes exit 0 pass
+python task 44 attempt 1 compiled yes exit 0 pass
+python task 45 attempt 1 compiled yes exit 0 pass
+python task 46 attempt 1 compiled yes exit 0 pass
+python task 47 attempt 1 compiled yes exit 0 pass
+python task 48 attempt 1 compiled yes exit 0 pass
+python task 49 attempt 1 compiled yes exit 0 pass
+python task 50 attempt 1 compiled yes exit 0 pass
