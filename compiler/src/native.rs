@@ -1864,7 +1864,7 @@ impl Lower<'_, '_> {
     }
 }
 
-fn slot_offset(slot: usize) -> i32 {
+pub fn slot_offset(slot: usize) -> i32 {
     let offset = slot * size_of::<i64>() + lucid_rt::RECORD_SLOTS_OFFSET as usize;
     i32::try_from(offset).expect("the source fits in memory")
 }

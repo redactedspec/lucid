@@ -861,34 +861,29 @@ fn copy_dir(from: &Path, to: &Path) {
 }
 
 /// Builds each run and trap test with `--target web`, and runs it under
-/// `node`, against the same golden files. A test that uses what the web target
-/// does not build yet gives E0901, and is left out until M6 step 4, as is a
-/// trap whose expected output has a trace. These must not be left out, so the
-/// test fails if the web target loses them. See "WebAssembly" in
+/// `node`, against the same golden files. Only the tests in `HOST_ONLY` are
+/// left out: by decisions 159 and 162, the web has no files, arguments,
+/// environment, sleep, or user `extern`. See "WebAssembly" in
 /// docs/compiler.md.
 #[test]
 fn web_programs_match_run() {
-    const MUST_RUN: [&str; 7] =
-        ["hello", "arithmetic", "control", "fib", "fizzbuzz", "tasks", "text"];
+    const HOST_ONLY: [&str; 4] = ["std_args_env", "std_fs", "std_time", "unsafe"];
     let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("web");
     let _ = fs::remove_dir_all(&root);
     let mut failures = Vec::new();
-    let mut ran = Vec::new();
+    let mut ran = 0;
     for (kind, code, extension) in [("run", 0, "out"), ("trap", 101, "err")] {
         let dir = root.join(kind);
         copy_dir(&repo().join("tests").join(kind), &dir);
         for source in files(&dir, "lcd") {
             let name = file_name(&source);
-            let expected = text(&fs::read(source.with_extension(extension)).expect("no golden"));
-            if expected.contains("\n    at ") {
+            if HOST_ONLY.contains(&name.trim_end_matches(".lcd")) {
                 continue;
             }
+            let expected = text(&fs::read(source.with_extension(extension)).expect("no golden"));
             let output = lucid(&dir, &["build", "--target", "web", name]);
-            let stderr = text(&output.stderr);
             if !output.status.success() {
-                if !stderr.contains("error E0901") {
-                    failures.push(format!("{name}: build failed: {stderr}"));
-                }
+                failures.push(format!("{name}: build failed: {}", text(&output.stderr)));
                 continue;
             }
             let script = source.with_extension("js");
@@ -901,15 +896,24 @@ fn web_programs_match_run() {
             if output.status.code() != Some(code) || got != expected {
                 let stderr = text(&output.stderr);
                 failures.push(format!(
-                    "{name}: exit {:?}\ngot: {got:?}\nexpected: {expected:?}\nstderr: {stderr}",
+                    "{name}: exit {:?}
+got: {got:?}
+expected: {expected:?}
+stderr: {stderr}",
                     output.status.code()
                 ));
             }
-            ran.push(name.trim_end_matches(".lcd").to_string());
+            ran += 1;
         }
     }
-    let lost: Vec<_> = MUST_RUN.iter().filter(|name| !ran.iter().any(|r| r == *name)).collect();
-    assert!(lost.is_empty(), "no longer built for the web: {lost:?}");
-    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
-    eprintln!("web: ran {} tests: {}", ran.len(), ran.join(" "));
+    assert!(
+        failures.is_empty(),
+        "
+{}",
+        failures.join(
+            "
+"
+        )
+    );
+    assert!(ran > 90, "only {ran} web tests ran");
 }

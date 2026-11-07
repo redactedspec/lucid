@@ -580,7 +580,7 @@ Sources: [GCC Runtime Library Exception 3.1](https://www.gnu.org/licenses/gcc-ex
 
 ## WebAssembly
 
-Decisions 156 to 164, and 166.
+Decisions 156 to 164, 166, and 167.
 
 Level: **Read** for each source below, 2026-11-07, except where marked.
 
@@ -594,9 +594,11 @@ Level: **Read** for each source below, 2026-11-07, except where marked.
 - **Static room.** **Checked** in `library/vendor/dlmalloc-0.2.13/src/wasm.rs` of Rust 1.97.1 on 2026-11-07: after a chunk that the linker leaves, `alloc_via_grow` calls `memory_grow(0, pages)` and uses only the pages from the old size on, so memory that the loader grew before is never reused. Decision 166.
 - **Overflow tests.** WebAssembly has no overflow flag. A signed sum overflows when both operands have one sign and the result has the other, `((x ^ r) & (y ^ r)) < 0`, and a difference when the operands' signs differ and the result's is not `x`'s, `((x ^ y) & (x ^ r)) < 0`. These are the tests of Hacker's Delight, section 2-13, from memory. `web_programs_match_run` runs every overflow trap test against them.
 - **Async load.** The loader compiles with `WebAssembly.instantiate`, never `new WebAssembly.Module`: from memory, Chrome refuses a synchronous compile of over 4 KB on the main thread, and the runtime is about 150 KB. The M6 exit check tests the loader in Chrome.
-- **Weak ground.** No measurement yet. The cost of a call between the two modules, and of counting through runtime calls in place of inline code, is unknown until the backend exists. That `Error.stack` holds a function index and code offset for each WebAssembly frame is from memory of V8 and Node, and step 4 of M6 must check it.
+- **Multi-value.** Level: **Snippet**, 2026-11-07. The web-features data and MDN's compatibility data list multi-value returns in Chrome 86, Firefox 78, and Safari 13.1, and "widely available" since 2023-04-20. Caniuse gives Chrome 85, which conflicts. Decision 167.
+- **Stack traces.** **Checked** in Node 26.13.0 on 2026-11-07: each WebAssembly frame of `Error.stack` reads `wasm://wasm/HASH:wasm-function[i]:0xOFF`, with `i` the function index and `OFF` the byte offset in the module. A caller's frame gives the offset of its `call`. The runtime's frames show its name section, as `lucid_rt.wasm.lucid_trap`. An engine stack overflow is a `RangeError` whose innermost frame is the task that could not start. `web_programs_match_run` holds this for V8. Firefox's frame format is not checked.
+- **Weak ground.** No measurement yet. The cost of a call between the two modules, and of counting through runtime calls in place of inline code, is unknown.
 
-Sources: [Dynamic linking conventions](https://github.com/WebAssembly/tool-conventions/blob/main/DynamicLinking.md), [constant expressions](https://webassembly.github.io/spec/core/valid/instructions.html#constant-expressions), [wasm-ld](https://lld.llvm.org/WebAssembly.html), [wasm32-unknown-unknown](https://doc.rust-lang.org/rustc/platform-support/wasm32-unknown-unknown.html), [SipHasher](https://doc.rust-lang.org/std/hash/struct.SipHasher.html), [Modules on the web](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules/Modules_on_the_web), [The Elm Architecture](https://guide.elm-lang.org/architecture/).
+Sources: [Dynamic linking conventions](https://github.com/WebAssembly/tool-conventions/blob/main/DynamicLinking.md), [constant expressions](https://webassembly.github.io/spec/core/valid/instructions.html#constant-expressions), [wasm-ld](https://lld.llvm.org/WebAssembly.html), [wasm32-unknown-unknown](https://doc.rust-lang.org/rustc/platform-support/wasm32-unknown-unknown.html), [SipHasher](https://doc.rust-lang.org/std/hash/struct.SipHasher.html), [Modules on the web](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules/Modules_on_the_web), [The Elm Architecture](https://guide.elm-lang.org/architecture/), [web-features: multi-value](https://web-platform-dx.github.io/web-features-explorer/features/wasm-multi-value), [MDN compatibility data](https://chromium.googlesource.com/external/github.com/mdn/browser-compat-data/+/HEAD/webassembly/multi-value.json), [caniuse](https://caniuse.com/wasm-multi-value).
 
 ## Prelude tasks
 

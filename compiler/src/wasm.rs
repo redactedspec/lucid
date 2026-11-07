@@ -2,18 +2,23 @@
 //! that imports the runtime's memory and tasks, and wraps both modules in a
 //! JavaScript loader. See "WebAssembly" in docs/compiler.md.
 //!
-//! Built so far: numbers, `bool`, `none`, text values, control flow, calls,
-//! `print`, and traps with no trace. Anything else is E0901, until M6 step 4.
+//! A user `extern` and `.pointer()` are E0901 here, until decision 162 gives
+//! them a code of their own.
 
 use crate::ast::BinaryOp;
 use crate::diag::{Diagnostic, Lines, Source, Span};
-use crate::mir::{Expr, ExprKind, Local, Program, Stmt, Task, Ty};
+use crate::mir::{Expr, ExprKind, HashOp, KeyTasks, Local, Program, Stmt, Task, Ty, Update};
+use crate::native::slot_offset;
+use lucid_rt::{CAP_OFFSET, COUNT_OFFSET, LEN_OFFSET, SLOTS_OFFSET, TAG_OFFSET};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use wasm_encoder::{
-    BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
-    Function, FunctionSection, GlobalType, ImportSection, InstructionSink, MemoryType, Module,
-    TypeSection, ValType,
+    BlockType, CodeSection, ConstExpr, DataSection, ElementSection, Elements, EntityType,
+    ExportKind, ExportSection, Function, FunctionSection, GlobalType, ImportSection,
+    InstructionSink, MemArg, MemoryType, Module, RefType, TableType, TypeSection, ValType,
 };
+
+const OUT_OF_BOUNDS: &str = "list index out of bounds";
 
 /// The runtime, built for `wasm32-unknown-unknown` by `build.rs`.
 const RUNTIME: &[u8] = include_bytes!(env!("LUCID_RT_WASM"));
@@ -116,6 +121,11 @@ const IMPORTS: &[(&str, &[Abi], Option<Abi>)] = &[
     ("lucid_bytes_text", &[Ptr], Some(Ptr)),
 ];
 
+/// A load or store at `offset`, aligned to `2^align` bytes.
+fn mem(offset: i32, align: u32) -> MemArg {
+    MemArg { offset: offset as u64, align, memory_index: 0 }
+}
+
 fn abi_type(abi: Abi) -> ValType {
     match abi {
         Ptr | Small => ValType::I32,
@@ -140,19 +150,50 @@ fn val(ty: Ty) -> ValType {
 
 /// The global that holds where the program's static data starts.
 const MEMORY_BASE: u32 = 0;
+/// The global that holds where the program's tasks start in the shared table.
+const TABLE_BASE: u32 = 1;
+
+/// A task's parameters, and its results: its own, then each `change`
+/// parameter's value when it ends, by decision 167.
+fn signature(task: &Task) -> (Vec<ValType>, Vec<ValType>) {
+    let params = task.locals[..task.params].iter().map(|&ty| val(ty)).collect();
+    let changed = task.change.iter().map(|&local| val(task.locals[local]));
+    (params, [val(task.returns)].into_iter().chain(changed).collect())
+}
+
+/// What the loader needs besides the program module. See "Traps" in
+/// docs/compiler.md.
+struct Loaded {
+    /// Bytes of static data.
+    data: usize,
+    /// Each call between tasks, by function index and offset in the module,
+    /// as JavaScript: `"index:offset": "file:line:column in task"`, or `""`
+    /// for a call that a trace leaves out.
+    sites: String,
+    /// The place of each task, by function index, for a stack overflow.
+    tasks: String,
+}
 
 /// Compiles the program to a JavaScript file that holds the loader and both
 /// modules. See "Output" in docs/compiler.md.
 pub fn script(program: &Program, source: &Source) -> Result<String, Vec<Diagnostic>> {
-    let (module, data) = module(program, source)?;
+    let (module, extra) = module(program, source)?;
     Ok(LOADER
-        .replace("@DATA@", &data.to_string())
+        .replace("@DATA@", &extra.data.to_string())
+        .replace("@TABLE@", &program.tasks.len().to_string())
+        .replace("@SITES@", &extra.sites)
+        .replace("@TASKS@", &extra.tasks)
         .replace("@RUNTIME@", &base64(RUNTIME))
         .replace("@PROGRAM@", &base64(&module)))
 }
 
-/// The program module, and how many bytes of static data it needs.
-fn module(program: &Program, source: &Source) -> Result<(Vec<u8>, usize), Vec<Diagnostic>> {
+/// The length of `n` in LEB128, as a section or body size is written.
+fn leb_len(n: usize) -> usize {
+    (usize::BITS - n.leading_zeros()).max(1).div_ceil(7) as usize
+}
+
+/// The program module, and what the loader needs with it.
+fn module(program: &Program, source: &Source) -> Result<(Vec<u8>, Loaded), Vec<Diagnostic>> {
     let lines = Lines::new(source);
     let mut shared = Shared {
         types: TypeSection::new(),
@@ -173,6 +214,15 @@ fn module(program: &Program, source: &Source) -> Result<(Vec<u8>, usize), Vec<Di
     imports.import("rt", "memory", memory);
     let base = GlobalType { val_type: ValType::I32, mutable: false, shared: false };
     imports.import("env", "memory_base", base);
+    let table = TableType {
+        element_type: RefType::FUNCREF,
+        table64: false,
+        minimum: 0,
+        maximum: None,
+        shared: false,
+    };
+    imports.import("rt", "__indirect_function_table", table);
+    imports.import("env", "table_base", base);
     for (name, params, result) in IMPORTS {
         let params: Vec<ValType> = params.iter().map(|&abi| abi_type(abi)).collect();
         let results: Vec<ValType> = result.iter().map(|&abi| abi_type(abi)).collect();
@@ -181,22 +231,37 @@ fn module(program: &Program, source: &Source) -> Result<(Vec<u8>, usize), Vec<Di
     }
 
     let mut functions = FunctionSection::new();
-    let mut code = CodeSection::new();
+    let mut bodies = Vec::new();
+    let mut places = Vec::new();
     for task in program.tasks.iter().chain([&program.main]) {
-        let params = task.locals[..task.params].iter().map(|&ty| val(ty)).collect();
-        let ty = shared.type_id(params, vec![val(task.returns)]);
-        functions.function(ty);
-        code.function(&Lower::task(&mut shared, task));
+        let (params, results) = signature(task);
+        functions.function(shared.type_id(params, results));
+        bodies.push(Lower::task(&mut shared, task));
+        let (file, line, column) = lines.place(task.span.start);
+        places.push(format!(
+            "{}: {:?}",
+            IMPORTS.len() + places.len(),
+            format!("{file}:{line}:{column}")
+        ));
     }
     if let Some(span) = shared.missing {
-        let note = "M6 builds the rest of the web target, see docs/roadmap.md";
-        let message = "this parses, but cannot run on the web yet";
+        let note = "decision 162 plans an error code of its own, see docs/decisions.md";
+        let message = "this cannot run on the web";
         return Err(vec![Diagnostic::new("E0901", message, span).note(note)]);
     }
 
     let mut exports = ExportSection::new();
     let main = (IMPORTS.len() + program.tasks.len()) as u32;
     exports.export("main", ExportKind::Func, main);
+    // Every task, so a key task or task value has a place in the table.
+    let mut elements = ElementSection::new();
+    let tasks: Vec<u32> =
+        (0..program.tasks.len()).map(|task| (IMPORTS.len() + task) as u32).collect();
+    elements.active(
+        None,
+        &ConstExpr::global_get(TABLE_BASE),
+        Elements::Functions(Cow::Owned(tasks)),
+    );
     let mut data = DataSection::new();
     let offset = ConstExpr::global_get(MEMORY_BASE);
     data.active(0, &offset, shared.data.iter().copied());
@@ -206,9 +271,33 @@ fn module(program: &Program, source: &Source) -> Result<(Vec<u8>, usize), Vec<Di
     module.section(&imports);
     module.section(&functions);
     module.section(&exports);
+    module.section(&elements);
+
+    // Each call's offset in the module, as an engine gives it in a trace: the
+    // code section's header, then each body's size and local declarations.
+    let sizes: Vec<usize> = bodies.iter().map(|(function, ..)| function.byte_len()).collect();
+    let count = bodies.len();
+    let section = leb_len(count) + sizes.iter().map(|&size| leb_len(size) + size).sum::<usize>();
+    let mut at = module.as_slice().len() + 1 + leb_len(section) + leb_len(count);
+    let mut sites = Vec::new();
+    let mut code = CodeSection::new();
+    for (index, (function, len, calls)) in bodies.iter().enumerate() {
+        let size = function.byte_len();
+        let start = at + leb_len(size) + size - len;
+        for (offset, text) in calls {
+            sites.push(format!("\"{}:{}\": {text:?}", IMPORTS.len() + index, start + offset));
+        }
+        at += leb_len(size) + size;
+        code.function(function);
+    }
     module.section(&code);
     module.section(&data);
-    Ok((module.finish(), shared.data.len()))
+    let extra = Loaded {
+        data: shared.data.len(),
+        sites: format!("{{{}}}", sites.join(", ")),
+        tasks: format!("{{{}}}", places.join(", ")),
+    };
+    Ok((module.finish(), extra))
 }
 
 /// Standard base64, with padding, as `atob` and Node's `Buffer` read it.
@@ -274,6 +363,8 @@ struct Lower<'a, 'b> {
     code: Vec<u8>,
     /// The type of each local of the function, which starts with the task's.
     locals: Vec<ValType>,
+    /// The MIR type of each of the task's locals.
+    types: &'a [Ty],
     /// Counted locals that are not parameters or borrows, released on return.
     owned: Vec<Local>,
     /// How many blocks are open. A block's label is the depth inside it.
@@ -282,29 +373,33 @@ struct Lower<'a, 'b> {
     loops: Vec<(u32, u32)>,
     /// What a return stores, before it leaves the block whose label is 1.
     result: u32,
+    /// What a trace calls this task, or empty to leave it out.
+    name: String,
+    /// The offset in `code` of each call to a task, with what a trace shows.
+    sites: Vec<(usize, String)>,
 }
 
 impl<'a, 'b> Lower<'a, 'b> {
-    fn task(shared: &'a mut Shared<'b>, task: &'a Task) -> Function {
+    /// The function, the length of its code, and its calls to tasks.
+    fn task(shared: &'a mut Shared<'b>, task: &'a Task) -> (Function, usize, Vec<(usize, String)>) {
         let locals = task.locals.iter().map(|&ty| val(ty)).collect();
         let mut lower = Lower {
             shared,
             code: Vec::new(),
             locals,
+            types: &task.locals,
             owned: Vec::new(),
             depth: 0,
             loops: Vec::new(),
             result: 0,
+            name: crate::diag::plain(task.name),
+            sites: Vec::new(),
         };
         lower.result = lower.scratch(val(task.returns));
-        if task.change.is_empty() {
-            for local in task.params..task.locals.len() {
-                if task.locals[local].is_counted() && task.borrowed.binary_search(&local).is_err() {
-                    lower.owned.push(local);
-                }
+        for local in task.params..task.locals.len() {
+            if task.locals[local].is_counted() && task.borrowed.binary_search(&local).is_err() {
+                lower.owned.push(local);
             }
-        } else {
-            lower.missing(task.span);
         }
         lower.open();
         lower.ins().block(BlockType::Empty);
@@ -323,11 +418,27 @@ impl<'a, 'b> Lower<'a, 'b> {
             lower.release();
         }
         let result = lower.result;
-        lower.ins().local_get(result).end();
+        lower.ins().local_get(result);
+        for &local in &task.change {
+            lower.ins().local_get(local as u32);
+        }
+        lower.ins().end();
         let extra = lower.locals[task.params..].iter().copied();
         let mut function = Function::new_with_locals_types(extra);
+        let len = lower.code.len();
         function.raw(lower.code);
-        function
+        (function, len, lower.sites)
+    }
+
+    /// Records a call to a task, about to be written, for traces.
+    fn site(&mut self, span: Span) {
+        let text = if self.name.is_empty() {
+            String::new()
+        } else {
+            let (file, line, column) = self.shared.lines.place(span.start);
+            format!("{file}:{line}:{column} in {}", self.name)
+        };
+        self.sites.push((self.code.len(), text));
     }
 
     fn ins(&mut self) -> InstructionSink<'_> {
@@ -536,10 +647,7 @@ impl<'a, 'b> Lower<'a, 'b> {
                 self.expr(value);
                 self.ins().drop();
             }
-            Stmt::Update { span, .. } => {
-                self.missing(*span);
-                return true;
-            }
+            Stmt::Update { local, op, args, span } => self.update(*local, *op, args, *span),
         }
         false
     }
@@ -628,14 +736,171 @@ impl<'a, 'b> Lower<'a, 'b> {
             ExprKind::Local(local) => {
                 self.ins().local_get(*local as u32);
             }
+            // A `change` argument comes back as an extra result, by decision 167.
             ExprKind::Call(task, _, args) => {
+                let mut changed = Vec::new();
                 for arg in args {
-                    if matches!(arg.kind, ExprKind::Change(_)) {
-                        return self.missing(arg.span);
+                    if let ExprKind::Change(local) = arg.kind {
+                        self.ins().local_get(local as u32);
+                        changed.push(local as u32);
+                    } else {
+                        self.expr(arg);
                     }
-                    self.expr(arg);
                 }
+                self.site(expr.span);
                 self.ins().call((IMPORTS.len() + task) as u32);
+                for local in changed.into_iter().rev() {
+                    self.ins().local_set(local);
+                }
+            }
+            ExprKind::CallValue(callee, args) => self.call_value(callee, args, expr.span),
+            ExprKind::Closure { task, counted, fields, .. } => {
+                let task = *task;
+                self.new_record(
+                    |lower| {
+                        lower.table_index(task);
+                        lower.ins().i64_extend_i32_u();
+                    },
+                    *counted,
+                    fields,
+                );
+            }
+            ExprKind::New { tag, fields, .. } if fields.is_empty() => {
+                self.static_value(lucid_rt::static_record(*tag));
+            }
+            ExprKind::New { tag, counted, fields } => {
+                let tag = *tag as i64;
+                self.new_record(
+                    |lower| {
+                        lower.ins().i64_const(tag);
+                    },
+                    *counted,
+                    fields,
+                );
+            }
+            ExprKind::Foreign(name, args) => self.foreign(name, args, expr.span),
+            ExprKind::ListPointer(_) => self.missing(expr.span),
+            ExprKind::ListSlice(list, start, end) => {
+                self.ptr(list);
+                self.expr(start);
+                self.expr(end);
+                self.call_runtime("lucid_list_slice");
+                self.nonnull("list slice out of bounds", expr.span);
+            }
+            ExprKind::TextBytes(value) => self.runtime_of("lucid_text_bytes", value),
+            ExprKind::ListOf(items) => {
+                let Ty::List(item) = expr.ty else { unreachable!("it has a list type") };
+                self.ins().i32_const(items.len() as i32);
+                self.ins().i32_const(i32::from(item.is_counted()));
+                self.ins().i32_const(i32::from(*item == Ty::Byte));
+                self.call_runtime("lucid_list_new");
+                for item in items {
+                    self.wrap_ptr();
+                    self.slot(item);
+                    self.call_runtime("lucid_list_push");
+                }
+            }
+            ExprKind::MapOf(entries, tasks) => {
+                let Ty::Map(key, value) = expr.ty else { unreachable!("it has a map type") };
+                self.ins().i32_const(i32::from(key.is_counted()));
+                self.ins().i32_const(i32::from(value.is_counted()));
+                self.key_tasks(*tasks);
+                self.call_runtime("lucid_map_new");
+                for (key, value) in entries {
+                    self.wrap_ptr();
+                    self.slot(key);
+                    self.slot(value);
+                    self.call_runtime("lucid_map_set");
+                }
+            }
+            ExprKind::SetOf(list, tasks) => {
+                self.ptr(list);
+                self.key_tasks(*tasks);
+                self.call_runtime("lucid_set_from");
+            }
+            ExprKind::Hash(op, state, value) => {
+                self.expr(state);
+                let task = match op {
+                    HashOp::Int => {
+                        self.slot(value);
+                        "lucid_hash_int"
+                    }
+                    HashOp::Text => {
+                        self.ptr(value);
+                        "lucid_hash_text"
+                    }
+                    HashOp::Sum => {
+                        self.expr(value);
+                        "lucid_hash_sum"
+                    }
+                };
+                self.call_runtime(task);
+            }
+            ExprKind::Len(value) => {
+                self.ptr(value);
+                self.ins().i64_load(mem(LEN_OFFSET, 3));
+            }
+            ExprKind::ListGet(list, index) => self.list_get(list, index, expr.ty, expr.span),
+            ExprKind::ListHas(value, list) => {
+                let held = self.scratch(ValType::I64);
+                self.slot(value);
+                self.ins().local_set(held);
+                self.ptr(list);
+                self.ins().local_get(held);
+                self.call_runtime("lucid_list_has");
+            }
+            ExprKind::MapGet(map, key) => {
+                self.ptr(map);
+                self.slot(key);
+                self.call_runtime("lucid_map_find");
+                self.nonnull("map key not found", expr.span);
+                self.wrap_ptr();
+                self.load(expr.ty, 0);
+            }
+            ExprKind::MapHas(key, map) => {
+                let held = self.scratch(ValType::I64);
+                self.slot(key);
+                self.ins().local_set(held);
+                self.ptr(map);
+                self.ins().local_get(held);
+                self.call_runtime("lucid_map_find");
+                self.ins().i64_const(0).i64_ne();
+            }
+            ExprKind::MapNext(map, position) => {
+                self.ptr(map);
+                self.expr(position);
+                self.call_runtime("lucid_map_next");
+            }
+            ExprKind::MapKey(map, position) | ExprKind::MapValue(map, position) => {
+                self.ptr(map);
+                self.expr(position);
+                let task = match expr.kind {
+                    ExprKind::MapKey(..) => "lucid_map_key",
+                    _ => "lucid_map_value",
+                };
+                self.call_runtime(task);
+                self.read_slot(expr.ty);
+            }
+            ExprKind::MapFind(map, key) => {
+                self.ptr(map);
+                self.slot(key);
+                self.call_runtime("lucid_map_position");
+            }
+            ExprKind::Field(value, slot) => {
+                self.ptr(value);
+                self.load(expr.ty, slot_offset(*slot));
+            }
+            ExprKind::Tag(value) => {
+                self.ptr(value);
+                self.ins().i64_load(mem(TAG_OFFSET, 3));
+            }
+            ExprKind::TagIn(value, tags) => {
+                let tag = self.scratch(ValType::I64);
+                self.ptr(value);
+                self.ins().i64_load(mem(TAG_OFFSET, 3)).local_set(tag).i32_const(0);
+                for &wanted in tags {
+                    self.ins().local_get(tag).i64_const(wanted as i64).i64_eq().i32_or();
+                }
             }
             ExprKind::Neg(value) => {
                 self.expr(value);
@@ -691,10 +956,7 @@ impl<'a, 'b> Lower<'a, 'b> {
                 self.expr(start);
                 self.expr(end);
                 self.call_runtime("lucid_text_slice");
-                let slice = self.scratch(ValType::I64);
-                self.ins().local_tee(slice).i64_eqz();
-                self.trap_if("text slice out of bounds", expr.span);
-                self.ins().local_get(slice);
+                self.nonnull("text slice out of bounds", expr.span);
             }
             ExprKind::Seq(setup, value) => {
                 self.stmts(setup);
@@ -724,7 +986,6 @@ impl<'a, 'b> Lower<'a, 'b> {
             | ExprKind::Holds(..)
             | ExprKind::Capture(_)
             | ExprKind::Method(..) => unreachable!("`mono.rs` replaces these"),
-            _ => self.missing(expr.span),
         }
     }
 
@@ -732,6 +993,328 @@ impl<'a, 'b> Lower<'a, 'b> {
     fn runtime_of(&mut self, task: &str, value: &Expr) {
         self.ptr(value);
         self.call_runtime(task);
+    }
+
+    /// Traps at `span` if the address on the stack is null, and keeps it.
+    fn nonnull(&mut self, message: &str, span: Span) {
+        let value = self.scratch(ValType::I64);
+        self.ins().local_tee(value).i64_eqz();
+        self.trap_if(message, span);
+        self.ins().local_get(value);
+    }
+
+    /// A value in the 8-byte form that every runtime slot has.
+    fn slot(&mut self, expr: &Expr) {
+        self.expr(expr);
+        let mut ins = self.ins();
+        match expr.ty {
+            Ty::Float => ins.i64_reinterpret_f64(),
+            Ty::F32 => ins.i32_reinterpret_f32().i64_extend_i32_u(),
+            Ty::Bool | Ty::None => ins.i64_extend_i32_u(),
+            _ => return,
+        };
+    }
+
+    /// The reverse of `slot`, for the slot on the stack.
+    fn read_slot(&mut self, ty: Ty) {
+        let mut ins = self.ins();
+        match ty {
+            Ty::Float => ins.f64_reinterpret_i64(),
+            Ty::F32 => ins.i32_wrap_i64().f32_reinterpret_i32(),
+            Ty::Bool | Ty::None => ins.i32_wrap_i64(),
+            _ => return,
+        };
+    }
+
+    /// Reads a slot at `offset` from the address on the stack, in the form
+    /// that `val` gives its type. A slot is little-endian, so its low bytes
+    /// are a `bool` or an `f32`.
+    fn load(&mut self, ty: Ty, offset: i32) {
+        let mut ins = self.ins();
+        match val(ty) {
+            ValType::F64 => ins.f64_load(mem(offset, 3)),
+            ValType::F32 => ins.f32_load(mem(offset, 2)),
+            ValType::I32 => ins.i32_load(mem(offset, 2)),
+            _ => ins.i64_load(mem(offset, 3)),
+        };
+    }
+
+    /// True if the value in `local` has one count.
+    fn is_unique(&mut self, local: Local) {
+        self.ins().local_get(local as u32);
+        self.wrap_ptr();
+        self.ins().i64_load(mem(COUNT_OFFSET, 3)).i64_const(1).i64_eq();
+    }
+
+    /// Unless the `i32` on the stack is true, replaces the value in `local`
+    /// with what the runtime `task` gives for it, which takes its count.
+    fn make_room(&mut self, local: Local, task: &str) {
+        self.open();
+        self.ins().i32_eqz().if_(BlockType::Empty).local_get(local as u32);
+        self.wrap_ptr();
+        self.call_runtime(task);
+        self.ins().local_set(local as u32);
+        self.close();
+    }
+
+    /// The address on the stack plus the offset of slot `index`, a `i64`
+    /// under it, of a list with elements of this type, less `SLOTS_OFFSET`.
+    fn list_slot(&mut self, item: Ty) {
+        self.wrap_ptr();
+        if item != Ty::Byte {
+            self.ins().i32_const(3).i32_shl();
+        }
+        self.ins().i32_add();
+    }
+
+    /// Stores the slot in `value` at the address on the stack, a list slot
+    /// from `list_slot`.
+    fn store_item(&mut self, value: u32, item: Ty) {
+        self.ins().local_get(value);
+        if item == Ty::Byte {
+            self.ins().i64_store8(mem(SLOTS_OFFSET, 0));
+        } else {
+            self.ins().i64_store(mem(SLOTS_OFFSET, 3));
+        }
+    }
+
+    /// Stores the slot in `value` at `offset` from the address on the stack,
+    /// in a value that this code alone holds, and gives up what was there if
+    /// it holds a count.
+    fn replace(&mut self, value: u32, offset: i32, counted: bool) {
+        let at = mem(offset, 3);
+        if !counted {
+            self.ins().local_get(value).i64_store(at);
+            return;
+        }
+        let (address, old) = (self.scratch(ValType::I32), self.scratch(ValType::I64));
+        self.ins().local_tee(address).i64_load(at).local_set(old);
+        self.ins().local_get(address).local_get(value).i64_store(at).local_get(old);
+        self.release();
+    }
+
+    fn item_of(&self, local: Local) -> Ty {
+        let Ty::List(item) = self.types[local] else { unreachable!("it has a list type") };
+        *item
+    }
+
+    /// The bounds check is inline: the unsigned compare also rejects a negative.
+    fn list_get(&mut self, list: &Expr, index: &Expr, ty: Ty, span: Span) {
+        let (held, at) = (self.scratch(ValType::I64), self.scratch(ValType::I64));
+        self.expr(list);
+        self.ins().local_set(held);
+        self.expr(index);
+        self.ins().local_tee(at).local_get(held);
+        self.wrap_ptr();
+        self.ins().i64_load(mem(LEN_OFFSET, 3)).i64_ge_u();
+        self.trap_if(OUT_OF_BOUNDS, span);
+        self.ins().local_get(held);
+        self.wrap_ptr();
+        self.ins().local_get(at);
+        self.list_slot(ty);
+        if ty == Ty::Byte {
+            self.ins().i64_load8_u(mem(SLOTS_OFFSET, 0));
+        } else {
+            self.load(ty, SLOTS_OFFSET);
+        }
+    }
+
+    /// The `i32` index of a task in the shared table.
+    fn table_index(&mut self, task: usize) {
+        self.ins().global_get(TABLE_BASE).i32_const(task as i32).i32_add();
+    }
+
+    /// The table indexes of the tasks that a map keeps, or 0 for each, which
+    /// the runtime reads as none.
+    fn key_tasks(&mut self, tasks: KeyTasks) {
+        match tasks {
+            Some((hash, equal)) => {
+                self.table_index(hash);
+                self.table_index(equal);
+            }
+            None => {
+                self.ins().i32_const(0).i32_const(0);
+            }
+        }
+    }
+
+    /// Every value runs before the record exists, so that no field sees it.
+    /// `tag` pushes the record's tag.
+    fn new_record(&mut self, tag: impl Fn(&mut Self), counted: usize, fields: &[(usize, Expr)]) {
+        let mut values = Vec::with_capacity(fields.len());
+        for (slot, value) in fields {
+            let held = self.scratch(ValType::I64);
+            self.slot(value);
+            self.ins().local_set(held);
+            values.push((*slot, held));
+        }
+        tag(self);
+        self.ins().i32_const(fields.len() as i32).i32_const(counted as i32);
+        self.call_runtime("lucid_record_new");
+        let record = self.scratch(ValType::I64);
+        self.ins().local_set(record);
+        for (slot, held) in values {
+            self.ins().local_get(record);
+            self.wrap_ptr();
+            self.ins().local_get(held).i64_store(mem(slot_offset(slot), 3));
+        }
+        self.ins().local_get(record);
+    }
+
+    /// The record comes first in the call, so that the task finds its
+    /// captures. Its tag is the task's index in the table.
+    fn call_value(&mut self, callee: &Expr, args: &[Expr], span: Span) {
+        let Ty::Task(params, returns) = callee.ty else { unreachable!("it has a task type") };
+        let params = [ValType::I64].into_iter().chain(params.iter().map(|&ty| val(ty))).collect();
+        let ty = self.shared.type_id(params, vec![val(*returns)]);
+        let record = self.scratch(ValType::I64);
+        self.expr(callee);
+        self.ins().local_tee(record);
+        for arg in args {
+            self.expr(arg);
+        }
+        self.ins().local_get(record);
+        self.wrap_ptr();
+        self.ins().i64_load(mem(TAG_OFFSET, 3));
+        self.wrap_ptr();
+        self.site(span);
+        self.ins().call_indirect(0, ty);
+    }
+
+    /// A foreign call is a runtime task here: `std` and the prelude name only
+    /// those. A user `extern` cannot run on the web.
+    fn foreign(&mut self, name: &str, args: &[Expr], span: Span) {
+        let Some((_, params, result)) = IMPORTS.iter().find(|(known, ..)| *known == name) else {
+            return self.missing(span);
+        };
+        for (arg, &abi) in args.iter().zip(*params) {
+            self.expr(arg);
+            if matches!(abi, Ptr | Small) && val(arg.ty) == ValType::I64 {
+                self.wrap_ptr();
+            }
+        }
+        self.call_runtime(name);
+        if result.is_none() {
+            self.ins().i32_const(0);
+        }
+    }
+
+    fn update(&mut self, local: Local, op: Update, args: &[Expr], span: Span) {
+        let value = self.scratch(ValType::I64);
+        match op {
+            Update::ListSet => {
+                let index = self.scratch(ValType::I64);
+                self.expr(&args[0]);
+                self.ins().local_set(index);
+                self.slot(&args[1]);
+                self.ins().local_set(value).local_get(index).local_get(local as u32);
+                self.wrap_ptr();
+                self.ins().i64_load(mem(LEN_OFFSET, 3)).i64_ge_u();
+                self.trap_if(OUT_OF_BOUNDS, span);
+                self.is_unique(local);
+                self.make_room(local, "lucid_list_unique");
+                let item = self.item_of(local);
+                self.ins().local_get(local as u32);
+                self.wrap_ptr();
+                self.ins().local_get(index);
+                self.list_slot(item);
+                if item.is_counted() {
+                    self.replace(value, SLOTS_OFFSET, true);
+                } else {
+                    self.store_item(value, item);
+                }
+            }
+            Update::ListPush => {
+                let len = self.scratch(ValType::I64);
+                self.slot(&args[0]);
+                self.ins().local_set(value).local_get(local as u32);
+                self.wrap_ptr();
+                self.ins().i64_load(mem(LEN_OFFSET, 3)).local_tee(len).local_get(local as u32);
+                self.wrap_ptr();
+                self.ins().i64_load(mem(CAP_OFFSET, 3)).i64_lt_u();
+                self.is_unique(local);
+                self.ins().i32_and();
+                self.make_room(local, "lucid_list_room");
+                let item = self.item_of(local);
+                self.ins().local_get(local as u32);
+                self.wrap_ptr();
+                self.ins().local_get(len);
+                self.list_slot(item);
+                self.store_item(value, item);
+                self.ins().local_get(local as u32);
+                self.wrap_ptr();
+                self.ins().local_get(len).i64_const(1).i64_add().i64_store(mem(LEN_OFFSET, 3));
+            }
+            // A plain `none` may empty a slot of a union, whose type does not
+            // show if that slot holds a count, so the runtime looks.
+            Update::FieldSet if matches!(args[1].kind, ExprKind::None) => {
+                let ExprKind::Int(slot) = args[0].kind else { unreachable!("a slot") };
+                self.ins().local_get(local as u32);
+                self.wrap_ptr();
+                self.ins().i32_const(slot as i32);
+                self.slot(&args[1]);
+                self.call_runtime("lucid_record_set");
+                self.ins().local_set(local as u32);
+            }
+            Update::FieldSet => {
+                let ExprKind::Int(slot) = args[0].kind else { unreachable!("a slot") };
+                self.slot(&args[1]);
+                self.ins().local_set(value);
+                self.is_unique(local);
+                self.make_room(local, "lucid_record_unique");
+                self.ins().local_get(local as u32);
+                self.wrap_ptr();
+                self.replace(value, slot_offset(slot as usize), args[1].ty.is_counted());
+            }
+            Update::Take => {
+                self.is_unique(local);
+                let task = match self.types[local] {
+                    Ty::List(_) => "lucid_list_unique",
+                    _ => "lucid_record_unique",
+                };
+                self.make_room(local, task);
+                self.store_slot(local, &args[0], value);
+            }
+            Update::Put => {
+                self.slot(&args[1]);
+                self.ins().local_set(value);
+                self.store_slot(local, &args[0], value);
+            }
+            Update::ListSwap | Update::MapSet | Update::MapRemove | Update::ListPop => {
+                self.ins().local_get(local as u32);
+                self.wrap_ptr();
+                for arg in args {
+                    self.slot(arg);
+                }
+                let task = match op {
+                    Update::ListSwap => "lucid_list_swap",
+                    Update::MapSet => "lucid_map_set",
+                    Update::MapRemove => "lucid_map_remove",
+                    _ => "lucid_list_pop",
+                };
+                self.call_runtime(task);
+                if op == Update::ListSwap {
+                    self.nonnull(OUT_OF_BOUNDS, span);
+                }
+                self.ins().local_set(local as u32);
+            }
+            Update::UnionSet => unreachable!("`mono.rs` replaces these"),
+        }
+    }
+
+    /// Stores the slot in `value` in a slot of the list or record in `local`.
+    fn store_slot(&mut self, local: Local, key: &Expr, value: u32) {
+        self.ins().local_get(local as u32);
+        if let (ExprKind::Int(slot), Ty::Data(..) | Ty::Union(_)) = (&key.kind, self.types[local]) {
+            self.wrap_ptr();
+            self.ins().local_get(value).i64_store(mem(slot_offset(*slot as usize), 3));
+        } else {
+            let item = self.item_of(local);
+            self.wrap_ptr();
+            self.expr(key);
+            self.list_slot(item);
+            self.store_item(value, item);
+        }
     }
 
     fn text_of(&mut self, value: &Expr) {
