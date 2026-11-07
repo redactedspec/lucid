@@ -235,6 +235,9 @@ fn jit(
     builder.symbol("lucid_text_char_at", lucid_rt::lucid_text_char_at as *const u8);
     builder.symbol("lucid_text_bytes", lucid_rt::lucid_text_bytes as *const u8);
     builder.symbol("lucid_text_quote", lucid_rt::lucid_text_quote as *const u8);
+    builder.symbol("lucid_text_split", lucid_rt::lucid_text_split as *const u8);
+    builder.symbol("lucid_text_upper", lucid_rt::lucid_text_upper as *const u8);
+    builder.symbol("lucid_text_lower", lucid_rt::lucid_text_lower as *const u8);
     builder.symbol("lucid_list_new", lucid_rt::lucid_list_new as *const u8);
     builder.symbol("lucid_list_push", lucid_rt::lucid_list_push as *const u8);
     builder.symbol("lucid_list_unique", lucid_rt::lucid_list_unique as *const u8);

@@ -1,0 +1,63 @@
+# Text split, integer parsing, case change, and list sort.
+
+print "a,b,,c".split(",")
+print "one::two".split("::")
+print "".split(",")
+print "no separator".split(",")
+let line = "x y"
+for word in line.split(" ")
+    print word
+
+print "Héllo ß".upper()
+print "ÀBC".lower()
+print "MiXeD".lower().upper()
+
+print "42".to_int()
+print "-7".to_int()
+print "+3".to_int()
+print "4x".to_int()
+print " 4".to_int()
+print "".to_int()
+print "9223372036854775807".to_int()
+print "9223372036854775808".to_int()
+let n = "12".to_int() else 0
+print n + 1
+
+var numbers = [5, 3, 9, 1, 3, 7, 2, 8, 6, 4, 0]
+numbers.sort()
+print numbers
+var words = ["pear", "Apple", "fig", "apple"]
+words.sort()
+print words
+var nothing: list[float] = []
+nothing.sort()
+print nothing
+var one = [1.5]
+one.sort()
+print one
+var grid = [[2, 1], [1, 9], [1, 2]]
+grid.sort()
+print grid
+grid[2].sort()
+print grid
+
+type Card
+    rank: int
+    name: text
+
+# Order by rank alone, so equal ranks keep their order: the sort is stable.
+task compare(self: Card, other: Card) -> int
+    return self.rank - other.rank
+
+var cards = [Card(rank: 2, name: "b"), Card(rank: 1, name: "c"), Card(rank: 2, name: "a")]
+cards.sort()
+print cards
+
+task sorted(items: list[int]) -> list[int]
+    var out = items
+    out.sort()
+    return out
+
+let fixed = [3, 2, 1]
+print sorted(fixed)
+print fixed

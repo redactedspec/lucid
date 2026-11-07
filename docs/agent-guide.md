@@ -60,6 +60,9 @@ print word.is_empty()  # false
 for letter in word     # each one is a one-character text
     print letter
 print word.bytes()     # list[byte], the UTF-8 bytes
+print "a,b".split(",") # ["a", "b"]; an empty separator traps
+print word.upper()     # HÉLLO, and lower() too
+let n = "42".to_int()  # int?, none unless the whole text is an integer
 ```
 
 - `{...}` interpolates any value. A literal `{` is `{{`, and a literal `}` is `}}`. Interpolation is the only way to join text. `+` does not work on text: write `"{a}{b}"`.
@@ -105,11 +108,14 @@ print seen                    # set([2, 3])
 print 2 not in seen
 print seen.len()
 
+var ranks = [3, 1, 2]
+ranks.sort()                  # [1, 2, 3], stable, elements need Order
+
 var empty_map: map[text, int] = {}
 empty_map["a"] = 1
 ```
 
-These are all the built-in tasks on collections: `len`, `is_empty`, `get`, `push`, `pop`, `swap`, `add`, `remove`. Text has `len`, `is_empty`, `bytes`. A `float` has `sqrt`. Write anything else yourself.
+These are all the built-in tasks on collections: `len`, `is_empty`, `get`, `push`, `pop`, `swap`, `add`, `remove`, and `sort` on a list. Text has `len`, `is_empty`, `bytes`, `split`, `upper`, `lower`, `to_int`. A `float` has `sqrt`. Write anything else yourself.
 
 - An index is an `int` from 0, and a negative one traps. `.get` gives `none` for any index out of range, negative included. Sized numbers need `.to_int()` to be an index.
 - A key can be an integer, `bool`, `text`, or a value made of those. A `float` cannot be a key.

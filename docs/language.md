@@ -122,6 +122,20 @@ A slice scans and copies, so its cost grows with the length of `x`. A `for` is l
 
 `x.bytes()` gives the UTF-8 bytes as a `list[byte]`.
 
+```lucid
+print "a,b,,c".split(",")    # ["a", "b", "", "c"]
+print "Straße".upper()       # STRASSE
+print "ÀB".lower()           # àb
+let n = "-42".to_int()       # int?, here -42
+let bad = "4x".to_int()      # none
+```
+
+`x.split(separator)` gives a `list[text]` of the parts between each `separator`, so it has one more part than there are separators, and a text with none gives `[x]`. An empty separator traps: use `for` to visit characters.
+
+`x.upper()` and `x.lower()` change case by Unicode's default rules, which do not depend on a language. So the length can change, as `"ß".upper()` is `"SS"`.
+
+`x.to_int()` gives the `int` that the whole text spells, or `none`. It takes an optional `+` or `-`, then ASCII digits, and nothing else: no space, `_`, or base prefix. A number that does not fit in `int` gives `none`.
+
 ## Collections
 
 ```lucid
@@ -178,6 +192,8 @@ while top is int
 ```
 
 `x[a..b]` on a list is a new list with the elements from `a` up to but not including `b`, and `x[a..=b]` means `x[a..b + 1]`. Both ends are required, and a range out of bounds traps, by the same rules as text. A slice copies, so it cannot be written to.
+
+`x.sort()` puts a list in order, smallest first, by `<` on its elements, so they need `Order`. It changes its receiver, which follows the rules for a `change` argument. The sort is stable: equal elements keep their order. It is a merge sort, so it takes time `n log n` and a second list of `n` elements. In a derived order a NaN counts as a tie, so a list that holds one may not end in order. `sort` is a task of the prelude, written in Lucid, so a program cannot define another `sort` on lists.
 
 `print` shows a list as `[1, 2]`, a map as `{"a": 1}`, and a set as `set([1, 2])`. Text inside a value has quotes and escapes, so what prints reads back as a literal. `==` and `!=` compare two values of one type. Lists compare in order. Maps and sets compare what they hold, whatever its order. `<` and the like work on a list if they work on its elements: the first difference decides, and a shorter list comes first.
 

@@ -20,6 +20,38 @@ use std::path::{Component, Path, PathBuf};
 /// What every file sees. The checker treats these like the file's own.
 const PRELUDE: &str = "trait Error
     task error_message(self) -> text
+
+public task sort[T: Order](change self: list[T])
+    let count = self.len()
+    var width = 1
+    while width < count
+        var merged: list[T] = []
+        var start = 0
+        while start < count
+            var middle = start + width
+            if middle > count
+                middle = count
+            var end = middle + width
+            if end > count
+                end = count
+            var a = start
+            var b = middle
+            while a < middle and b < end
+                if self[b] < self[a]
+                    merged.push(self[b])
+                    b += 1
+                else
+                    merged.push(self[a])
+                    a += 1
+            while a < middle
+                merged.push(self[a])
+                a += 1
+            while b < end
+                merged.push(self[b])
+                b += 1
+            start = end
+        self = merged
+        width *= 2
 ";
 
 /// The standard library, inside the compiler, so that a program needs no files
@@ -209,7 +241,7 @@ pub fn load(path: &str, run: bool) -> (Source, Option<ast::File>, Vec<Diagnostic
         let message = format!("`{entry}` is a library, so it cannot run");
         loader.diags.push(Diagnostic::new("E0339", message, start));
     }
-    let Loader { source, mut diags, mut modules, .. } = loader;
+    let Loader { mut source, mut diags, mut modules, .. } = loader;
     if found.is_none() || !diags.is_empty() {
         return (source, None, diags);
     }
@@ -221,7 +253,9 @@ pub fn load(path: &str, run: bool) -> (Source, Option<ast::File>, Vec<Diagnostic
     {
         last.key = vec![stem.display().to_string()];
     }
-    let file = join(modules, library, &mut diags);
+    // The prelude is a file of its own, so that a trap in its code has a place.
+    let base = source.add("@std/prelude.lcd", PRELUDE);
+    let file = join(modules, base, library, &mut diags);
     (source, Some(file), diags)
 }
 
@@ -724,8 +758,15 @@ fn check_library(stmts: &[Stmt], diags: &mut Vec<Diagnostic>) {
 /// Renames every module, then puts their statements in one file. An entry file
 /// that is a library follows the rules of an imported module, so `lucid check`
 /// reports what would fail in a program that imports it.
-fn join(modules: Vec<Module>, library_entry: bool, diags: &mut Vec<Diagnostic>) -> ast::File {
-    let (prelude, _) = parser::parse(lexer::lex(PRELUDE).0);
+fn join(
+    modules: Vec<Module>,
+    prelude_base: usize,
+    library_entry: bool,
+    diags: &mut Vec<Diagnostic>,
+) -> ast::File {
+    let mut tokens = lexer::lex(PRELUDE).0;
+    shift(&mut tokens, prelude_base);
+    let (prelude, _) = parser::parse(tokens);
     let mut stmts = prelude.stmts;
     let mut exports: Vec<Names> = Vec::with_capacity(modules.len());
     let count = modules.len();

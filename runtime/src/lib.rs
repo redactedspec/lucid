@@ -685,6 +685,40 @@ pub unsafe extern "C" fn lucid_text_bytes(text: *const Text) -> *mut List {
     byte_list(unsafe { bytes(text) })
 }
 
+/// A new list of the parts of `text` between each `separator`.
+///
+/// # Safety
+///
+/// Both must point to live texts, and `separator` must not be empty.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_split(text: *const Text, separator: *const Text) -> *mut List {
+    // SAFETY: the caller guarantees live texts.
+    let (text, separator) = unsafe { (system_text(text), system_text(separator)) };
+    text_list(text.split(separator))
+}
+
+/// A new text in upper case, by Unicode's default rules.
+///
+/// # Safety
+///
+/// `text` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_upper(text: *const Text) -> *mut Text {
+    // SAFETY: the caller guarantees a live text.
+    text_from(unsafe { system_text(text) }.to_uppercase().as_bytes())
+}
+
+/// A new text in lower case, by Unicode's default rules.
+///
+/// # Safety
+///
+/// `text` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_lower(text: *const Text) -> *mut Text {
+    // SAFETY: the caller guarantees a live text.
+    text_from(unsafe { system_text(text) }.to_lowercase().as_bytes())
+}
+
 fn list_alloc(cap: usize, counted: bool, small: bool) -> *mut List {
     let head = Head { count: 1, kind: Kind::List { counted, small } };
     object(list_size(cap, small), List { head, len: 0, cap })

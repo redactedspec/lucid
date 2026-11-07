@@ -91,7 +91,7 @@ Build a thin end-to-end path first. Depth comes later.
 
 Designed by decisions 156 to 164, see "WebAssembly" in `compiler.md`. Build in this order:
 
-- [ ] Prelude: text split, integer parsing, case change, list sort, by decision 155
+- [x] Prelude: text split, integer parsing, case change, list sort, by decisions 155 and 165
 - [ ] Runtime on `wasm32`, with the fixed-width layout of decision 156
 - [ ] WebAssembly backend from MIR: numbers, control flow, calls, `print`, the loader, `--target web`
 - [ ] WebAssembly backend: heap values, task values, `change`, `std`, traces. All run and trap tests pass under Node

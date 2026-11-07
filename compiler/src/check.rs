@@ -367,7 +367,9 @@ fn builtin_method(ty: Ty, name: &str) -> bool {
     match ty {
         ty if ty.is_float() && name == "sqrt" => true,
         ty if ty.is_number() => conversion(ty, name).is_some() || wrapping_op(ty, name).is_some(),
-        Ty::Text => matches!(name, "len" | "is_empty" | "bytes"),
+        Ty::Text => {
+            matches!(name, "len" | "is_empty" | "bytes" | "split" | "upper" | "lower" | "to_int")
+        }
         Ty::List(Ty::Byte) if name == "pointer" => true,
         Ty::List(_) => matches!(name, "len" | "is_empty" | "get" | "push" | "pop" | "swap"),
         Ty::Map(..) => matches!(name, "len" | "is_empty" | "get" | "remove"),
@@ -4491,6 +4493,50 @@ impl<'a> Checker<'a> {
         Expr { kind: ExprKind::Seq(setup, read.into()), ty, span }
     }
 
+    /// `x.split(separator)` on a text, which traps on an empty separator.
+    fn text_split(&mut self, value: Expr, args: &'a [ast::Arg], span: Span) -> Expr {
+        let [ast::Arg { name: None, change: false, value: separator }] = args else {
+            self.poison_args(args, span);
+            return self.fail("E0307", "`split` takes 1 positional argument".into(), span);
+        };
+        let separator = self.expected(separator, Some(Ty::Text));
+        self.expect(&separator, Ty::Text, "this argument");
+        if separator.ty != Ty::Text {
+            return poisoned(span);
+        }
+        let mut setup = Vec::new();
+        let value = self.repeated(value, &mut setup);
+        let separator = self.repeated(separator, &mut setup);
+        let empty = ExprKind::TextIsEmpty(separator.clone().into());
+        setup.push(Stmt::If {
+            branches: vec![(
+                Expr { kind: empty, ty: Ty::Bool, span },
+                vec![Stmt::Trap("split by empty text", span)],
+            )],
+            otherwise: Vec::new(),
+        });
+        let kind = ExprKind::Foreign("lucid_text_split", vec![value, separator]);
+        let ty = Ty::List(&Ty::Text);
+        Expr { kind: ExprKind::Seq(setup, Expr { kind, ty, span }.into()), ty, span }
+    }
+
+    /// `x.to_int()` on a text: the `int` it spells, or `none`.
+    fn text_to_int(&mut self, value: Expr, span: Span) -> Expr {
+        let ty = self.union([Ty::Int, Ty::None]);
+        let mut setup = Vec::new();
+        let value = self.repeated(value, &mut setup);
+        let kind = ExprKind::Foreign("lucid_text_is_int", vec![value.clone()]);
+        let test = Expr { kind, ty: Ty::Bool, span };
+        let kind = ExprKind::Foreign("lucid_text_int", vec![value]);
+        let found = self.widen(Expr { kind, ty: Ty::Int, span }, ty);
+        let missing = self.widen(Expr { kind: ExprKind::None, ty: Ty::None, span }, ty);
+        let read = Expr { kind: ExprKind::If(test.into(), found.into(), missing.into()), ty, span };
+        if setup.is_empty() {
+            return read;
+        }
+        Expr { kind: ExprKind::Seq(setup, read.into()), ty, span }
+    }
+
     /// Makes a value safe to read twice. A plain read stays as it is: a hidden
     /// local keeps a count until it is overwritten, so the next write to that
     /// list would copy.
@@ -5216,6 +5262,9 @@ impl<'a> Checker<'a> {
         if text == "get" {
             return self.get(value, args, span);
         }
+        if text == "split" {
+            return self.text_split(value, args, span);
+        }
         if let Some(op) = wrapping_op(ty, text) {
             let [ast::Arg { name: None, change: false, value: other }] = args else {
                 return self.fail("E0307", format!("`{text}` takes 1 positional argument"), span);
@@ -5239,6 +5288,13 @@ impl<'a> Checker<'a> {
             (Ty::Text, "bytes") => {
                 Expr { kind: ExprKind::TextBytes(boxed), ty: Ty::List(&Ty::Byte), span }
             }
+            (Ty::Text, "upper") => {
+                Expr { kind: ExprKind::Foreign("lucid_text_upper", vec![value]), ty, span }
+            }
+            (Ty::Text, "lower") => {
+                Expr { kind: ExprKind::Foreign("lucid_text_lower", vec![value]), ty, span }
+            }
+            (Ty::Text, "to_int") => self.text_to_int(value, span),
             (_, "len") => int(ExprKind::Len(boxed)),
             (_, "pointer") => {
                 self.need_unsafe("`.pointer()`", span);

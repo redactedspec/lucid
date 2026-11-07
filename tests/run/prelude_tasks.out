@@ -1,0 +1,27 @@
+["a", "b", "", "c"]
+["one", "two"]
+[""]
+["no separator"]
+x
+y
+HÉLLO SS
+àbc
+MIXED
+42
+-7
+3
+none
+none
+none
+9223372036854775807
+none
+13
+[0, 1, 2, 3, 3, 4, 5, 6, 7, 8, 9]
+["Apple", "apple", "fig", "pear"]
+[]
+[1.5]
+[[1, 2], [1, 9], [2, 1]]
+[[1, 2], [1, 9], [1, 2]]
+[Card(rank: 1, name: "c"), Card(rank: 2, name: "b"), Card(rank: 2, name: "a")]
+[1, 2, 3]
+[3, 2, 1]

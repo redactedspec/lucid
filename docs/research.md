@@ -22,6 +22,7 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | Indentation syntax helps agents | No evidence | None | Owner preference. Measure |
 | No `async`, lightweight tasks in browser | Now feasible through JSPI | Snippet | Decide at M7 |
 | WebAssembly as two modules with shared memory, Elm-style UI | Follows the tool conventions and Elm. No measurement yet | Read | Build at M6, decisions 156 to 164 |
+| Prelude task names and forms | Follow Python, with Rust and Go strictness for `to_int` | None | Watch the next agent trial |
 | ASCII names, text escapes | Judgment call from existing practice | None | Revisit before 1.0 |
 | Division, argument order | Judgment call from existing practice | None | No failure in the M3 trial or the M5 benchmark |
 | Type arguments in brackets, read in one pass | Follows Go. Form also proposed for Python | Read, parser Snippet | No failure in the M3 trial or the M5 benchmark |
@@ -306,7 +307,7 @@ Without the pilot block, first-attempt passes are 37 of 40 for Lucid, 33 for the
 
 **Other arms.** Python failed task 04 once: `sum` over floats gave a different last digit from the reference's loop, since `sum` compensates for rounding from Python 3.12. The task now says to add in list order. TypeScript failed four tasks once each, by declaring fields in constructor parameters. `tsc --strict` accepts that form, and Node's type stripping rejects it at run time.
 
-**Guide gaps.** Subjects guessed, correctly each time: methods on a generic type, `}}`, the form of `"""` text, that built-in trait names are taken, matching variants of `fs.FileError` from another module, that a literal in sized arithmetic takes the other side's type, the base of a `lucid.toml` dependency path and which sections may be left out, and that the `else` of `if x is none` narrows. Bare-guide subjects also wrote their own text split, number parsing, case change, and list sort. Those are missing from the standard library, not only from the guide. Decision 155 plans them for M6.
+**Guide gaps.** Subjects guessed, correctly each time: methods on a generic type, `}}`, the form of `"""` text, that built-in trait names are taken, matching variants of `fs.FileError` from another module, that a literal in sized arithmetic takes the other side's type, the base of a `lucid.toml` dependency path and which sections may be left out, and that the `else` of `if x is none` narrows. Bare-guide subjects also wrote their own text split, number parsing, case change, and list sort. Those were missing from the standard library, not only from the guide. Decision 155 planned them for M6, and decision 165 added them.
 
 **What it shows.** Lucid passes on the first attempt less often than Python or TypeScript, at 88% against 98% and 92%, but every task passed in the end, mostly after one repair turn. Most failures came from diagnostics that do not name the fix, or from rules the guide does not state. The bare guide cost 4 first-attempt passes, mostly on rules it removes, and the diagnostics repaired each one in one or two turns. That supports keeping the guide's warnings, and it shows that the diagnostics alone can carry a subject through. 50 tasks per arm cannot separate 44 from 46 with confidence. Limits of the M3 trial still hold: one run per arm, one model family, and one author for the language, the tasks, and the guide.
 
@@ -593,6 +594,21 @@ Level: **Read** for each source below, 2026-11-07, except where marked.
 - **Weak ground.** No measurement yet. The cost of a call between the two modules, and of counting through runtime calls in place of inline code, is unknown until the backend exists. That `Error.stack` holds a function index and code offset for each WebAssembly frame is from memory of V8 and Node, and step 4 of M6 must check it.
 
 Sources: [Dynamic linking conventions](https://github.com/WebAssembly/tool-conventions/blob/main/DynamicLinking.md), [constant expressions](https://webassembly.github.io/spec/core/valid/instructions.html#constant-expressions), [wasm-ld](https://lld.llvm.org/WebAssembly.html), [wasm32-unknown-unknown](https://doc.rust-lang.org/rustc/platform-support/wasm32-unknown-unknown.html), [SipHasher](https://doc.rust-lang.org/std/hash/struct.SipHasher.html), [Modules on the web](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules/Modules_on_the_web), [The Elm Architecture](https://guide.elm-lang.org/architecture/).
+
+## Prelude tasks
+
+Decision 165. Level: **Low**. The forms below are named from memory, and the pages were not read for this project. No trial has tested the chosen names.
+
+| Job | Python | JavaScript | Rust | Go |
+| --- | --- | --- | --- | --- |
+| Split | `s.split(sep)`, empty `sep` raises `ValueError` | `s.split(sep)`, empty `sep` gives characters | `s.split(sep)` | `strings.Split(s, sep)` |
+| Case | `s.upper()`, `s.lower()`, full Unicode mapping | `toUpperCase`, `toLowerCase` | `to_uppercase`, `to_lowercase` | `strings.ToUpper`, `strings.ToLower` |
+| Integer | `int(s)` allows spaces and `_` | `parseInt` stops at the first bad character | `s.parse::<i64>()`, sign and digits only | `strconv.Atoi`, sign and digits only |
+| Sort | `list.sort()`, stable | `Array.prototype.sort`, stable since ES2019 | `slice::sort`, stable | `sort.Slice` is not stable, `sort.SliceStable` is |
+
+Python's names are the shortest, and Python is the language models have seen most, by "The biggest risk" above. `to_int` reuses the name of Lucid's number conversion.
+
+Sources: [Python str](https://docs.python.org/3/library/stdtypes.html#string-methods), [MDN String](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String), [Rust str](https://doc.rust-lang.org/std/primitive.str.html), [Rust slice::sort](https://doc.rust-lang.org/std/primitive.slice.html#method.sort), [Go strings](https://pkg.go.dev/strings), [Go strconv](https://pkg.go.dev/strconv), [Go sort](https://pkg.go.dev/sort).
 
 ## Open research
 

@@ -1,0 +1,4 @@
+let parts = "a,b".split(",")
+print parts
+let separator = ""
+print "a,b".split(separator)

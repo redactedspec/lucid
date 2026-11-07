@@ -67,7 +67,7 @@ Planned for M6, by decisions 156 to 164. Nothing below is built yet.
 
 ## Early exits
 
-`main.rs` puts a small Lucid prelude before each file, which today only declares `trait Error`. So nothing in the checker treats that trait as special, and an error type is one that satisfies it.
+`resolve.rs` puts a small Lucid prelude before each file. It declares `trait Error`, so nothing in the checker treats that trait as special, and an error type is one that satisfies it. It also holds `sort` on lists, a generic task in Lucid, since the runtime cannot call a hand-written `compare`. The prelude is a source file of its own, `@std/prelude.lcd`, so a trap site in it has a place. The text tasks `split`, `upper`, `lower`, and `to_int` lower in `check.rs` to `ExprKind::Foreign` calls into the runtime, so they need no MIR node or backend code of their own.
 
 `try x` lowers to a `Seq`: a hidden local takes the value, an `if` tests `Holds`, and its branch is `Stmt::Return`, or `Stmt::Exit` at top level. `x else y` uses the same hidden local with `ExprKind::If`. `Frame::held` lists these locals, and `Checker::stmt` clears them after the statement, as does a `break` or `continue` inside it, since a count left there would make the next write copy. So a `Return` can sit inside an expression, and a statement can stop half done, which needs care in three places:
 
