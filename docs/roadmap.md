@@ -92,6 +92,7 @@ Build a thin end-to-end path first. Depth comes later.
 - [ ] WebAssembly backend from MIR
 - [ ] Runtime on `wasm32`
 - [ ] `std.dom`, JavaScript loader
+- [ ] Prelude: text split, integer parsing, case change, list sort, by decision 155
 
 **Exit:** an interactive page written only in Lucid runs in a browser.
 

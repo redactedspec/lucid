@@ -8,7 +8,7 @@ Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/
 
 | Module | Contents | Milestone |
 | --- | --- | --- |
-| prelude | `text`, `list`, `map`, `set`, math, core traits | M3 |
+| prelude | `text`, `list`, `map`, `set`, math, core traits. Planned: text split, integer parsing, case change, list sort | M3, M6 |
 | `std.fs` | Files and paths | M5 |
 | `std.json` | Parse and write, typed through the `Json` trait | M5 |
 | `std.env`, `std.args` | Environment and command-line input | M5 |
