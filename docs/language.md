@@ -571,7 +571,9 @@ use ./models.User
 use ./models.load as read_models
 ```
 
-`use ./a.b` is relative to the file that holds it, and reads `a/b.lcd`. If that file does not exist, it takes the name `b` from `a.lcd`. A `./` path cannot go up a directory. A file that cannot be found is error E0334, and the spelling must match the file's name exactly, on every system. `std` has no `./`, and reports E0901 until it exists.
+`use ./a.b` is relative to the file that holds it, and reads `a/b.lcd`. If that file does not exist, it takes the name `b` from `a.lcd`. A `./` path cannot go up a directory. A file that cannot be found is error E0334, and the spelling must match the file's name exactly, on every system.
+
+`use std.a` is a module of the standard library, and `use std.a.b` takes the name `b` from it. `std` has no `./`, and needs no manifest entry. A module not built yet reports E0901. The modules are in [stdlib-and-web.md](stdlib-and-web.md).
 
 A whole module goes by its last name, or by the name after `as`, and its names need that prefix: `models.load()`, `x: models.User`. A taken name has no prefix. The name a `use` takes must be new in the file, and not a built-in type or trait, or else error E0304. A local in a block may hide it, as with any top-level name. A `use` works in its own file only, and a module passes nothing on from its imports.
 
@@ -663,7 +665,7 @@ unsafe
     print strlen(raw.pointer())
 ```
 
-An `extern` task is a C function, found by its name in the C runtime or `kernel32`, or else error E0904. It takes and gives numbers, `bool`, and `pointer[byte]`, and may give nothing. It sits at top level, and it has no `change`, `take`, `self`, defaults, or type parameters. A C type must match the declared width: a C `int` is `i32`. A name that starts with `lucid_` is kept for the runtime.
+An `extern` task is a C function, found by its name in the C runtime or `kernel32`, or else error E0904. It takes and gives numbers, `bool`, and `pointer[byte]`, and may give nothing. It sits at top level, and it has no `change`, `take`, `self`, defaults, or type parameters. A C type must match the declared width: a C `int` is `i32`. A name that starts with `lucid_` is kept for the runtime, which only `std` can call.
 
 Only an `unsafe` block can call an `extern` task or `.pointer()`, or else error E0330. An `extern` task is not a value, since a task type says nothing of `unsafe`. A lambda or nested task inside the block is outside it. The block is a block like the body of an `if`, with its own scope. It needs a `#` comment on the line above, or at the end of its line, or else error E0332, and the comment says why it is sound.
 

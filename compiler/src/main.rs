@@ -19,7 +19,7 @@ use resolve::{load, package_files};
 use std::io::Write;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: lucid run [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\nPATH is a file or a package directory, by default the current directory.";
+const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\nPATH is a file or a package directory, by default the current directory.";
 
 /// Set for the child process of `lucid test`, to the place of its first test.
 const TEST_FROM: &str = "LUCID_TEST_FROM";
@@ -41,7 +41,12 @@ fn main() -> ExitCode {
 
 fn cli(args: &[String]) -> ExitCode {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let Some((&command, rest)) = args.split_first() else { return usage() };
+    let Some((&command, mut rest)) = args.split_first() else { return usage() };
+    // What follows the path of `lucid run` belongs to the program.
+    if command == "run" && rest.first().is_some_and(|path| !path.starts_with('-')) {
+        lucid_rt::set_args(rest[1..].iter().map(|arg| (*arg).to_string()).collect());
+        rest = &rest[..1];
+    }
     let (rest, path) = match rest.split_last() {
         Some((path, flags)) if !path.starts_with('-') => (flags, *path),
         _ => (rest, "."),
@@ -115,6 +120,8 @@ fn unsafe_sites(path: &str, json: bool) -> ExitCode {
     }
     sites.sort_by_key(|(_, span)| span.start);
     let lines = diag::Lines::new(&source);
+    // `std` ships with the compiler, so its sites are not the program's to audit.
+    sites.retain(|(_, span)| !lines.place(span.start).0.starts_with("@std/"));
     let items = sites.iter().map(|(kind, span)| {
         let (file, line, column) = lines.place(span.start);
         if json {

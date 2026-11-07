@@ -25,7 +25,7 @@ Every tool has a stable `--json` output.
 | `lucid test --json` | Per-test results of a file, or of every file in a package's `src`, with values on failure: `name`, `passed`, `file`, `line`, `column`, and `output`, which holds what the test printed and, on failure, the trap message and trace |
 | `lucid context <module>` | Compact public API of a module or package: signatures and doc comments only |
 | `lucid doc --json` | Full docs as data |
-| `lucid check --unsafe` | `unsafe` blocks and `extern` tasks: `file:line:column: unsafe: kind` on stdout, or `kind`, `file`, `line`, and `column` with `--json`. `kind` is `block` or `extern` |
+| `lucid check --unsafe` | `unsafe` blocks and `extern` tasks: `file:line:column: unsafe: kind` on stdout, or `kind`, `file`, `line`, and `column` with `--json`. `kind` is `block` or `extern`. `std` stays out |
 | `lucid check --costs` | Copy and reference count sites: `file:line:column: kind: message` on stdout, or `kind`, `type`, `file`, `line`, and `column` with `--json`. A `copy` is a value held twice that a later write changes, which costs O(n) if both holders stay. A `count` costs one count operation. Exit code 0. A program with an error or an unbuilt feature reports that instead, with exit code 1 |
 
 ## Diagnostics format

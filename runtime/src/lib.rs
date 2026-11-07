@@ -1537,6 +1537,70 @@ fn trap(message: &[u8]) -> ! {
     std::process::exit(101)
 }
 
+/// What `std.args` gives, when something other than the process's own command
+/// line starts the program. `lucid run` calls this, since the command line then
+/// names the compiler.
+pub fn set_args(args: Vec<String>) {
+    let _ = ARGS.set(args);
+}
+
+static ARGS: OnceLock<Vec<String>> = OnceLock::new();
+
+/// A new list of each argument of the program. An argument that is not Unicode
+/// has its bad parts replaced.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_args() -> *mut List {
+    let args = ARGS.get_or_init(|| {
+        std::env::args_os().skip(1).map(|arg| arg.to_string_lossy().into_owned()).collect()
+    });
+    text_list(args.iter().map(String::as_str))
+}
+
+/// A new list of new texts.
+fn text_list<'a>(items: impl Iterator<Item = &'a str>) -> *mut List {
+    let mut list = list_alloc(0, true, false);
+    for item in items {
+        // SAFETY: the list is new, and keeps the count of each new text.
+        list = unsafe { lucid_list_push(list, text_from(item.as_bytes()) as i64) };
+    }
+    list
+}
+
+/// A text as a name for the system. Text is always UTF-8.
+///
+/// # Safety
+///
+/// `text` must point to a live text.
+unsafe fn system_text<'a>(text: *const Text) -> &'a str {
+    // SAFETY: the caller guarantees a live text, and every way to make a text
+    // gives valid UTF-8.
+    unsafe { std::str::from_utf8_unchecked(bytes(text)) }
+}
+
+/// True if a variable is set. A name that the system cannot hold is not set.
+///
+/// # Safety
+///
+/// `name` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_env_has(name: *const Text) -> bool {
+    // SAFETY: the caller guarantees a live text.
+    std::env::var_os(unsafe { system_text(name) }).is_some()
+}
+
+/// The value of a variable, empty if it is not set. A value that is not
+/// Unicode has its bad parts replaced.
+///
+/// # Safety
+///
+/// `name` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_env_get(name: *const Text) -> *mut Text {
+    // SAFETY: the caller guarantees a live text.
+    let value = std::env::var_os(unsafe { system_text(name) }).unwrap_or_default();
+    text_from(value.to_string_lossy().as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

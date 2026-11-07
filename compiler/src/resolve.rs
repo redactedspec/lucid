@@ -22,6 +22,11 @@ const PRELUDE: &str = "trait Error
     task error_message(self) -> text
 ";
 
+/// The standard library, inside the compiler, so that a program needs no files
+/// beside it. Each module sits at `@std/name.lcd`, a path that no `use` can write.
+const STD_MODULES: [(&str, &str); 2] =
+    [("args", include_str!("../../std/args.lcd")), ("env", include_str!("../../std/env.lcd"))];
+
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     Task,
@@ -180,6 +185,10 @@ pub fn load(path: &str, run: bool) -> (Source, Option<ast::File>, Vec<Diagnostic
     (source, Some(file), diags)
 }
 
+fn is_std_module(name: &str) -> bool {
+    STD_MODULES.iter().any(|(module, _)| *module == name)
+}
+
 /// True if a file is the `src/lib.lcd` of its package, by any spelling.
 fn is_library(file: &str) -> bool {
     let real = |path: &str| std::fs::canonicalize(path).ok();
@@ -206,6 +215,10 @@ impl Loader {
     /// Reads a file into `source`, and returns where it starts and its text.
     fn read(&mut self, path: &str, used_at: Span) -> Option<(usize, String)> {
         let shown: &'static str = path.to_string().leak();
+        let module = path.strip_prefix("@std/").and_then(|file| file.strip_suffix(".lcd"));
+        if let Some(&(_, text)) = STD_MODULES.iter().find(|(name, _)| Some(*name) == module) {
+            return Some((self.source.add(shown, text), text.to_string()));
+        }
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
             Err(e) => {
@@ -402,9 +415,8 @@ impl Loader {
         span: Span,
     ) -> Option<Import> {
         let (first, rest) = written.split_first().expect("a path has a name");
-        // `std` stays in the tree, and reports E0901 until it exists.
         if first.text == "std" {
-            return None;
+            return self.import_std(written, alias, span);
         }
         let Some(dir) = package_above(from) else {
             let message = format!("`{}` is not a dependency", first.text);
@@ -453,6 +465,34 @@ impl Loader {
         let key = std::iter::once(root).chain(module_parts.iter().map(|&s| s.into())).collect();
         let binding = alias.map_or(&last.text, |alias| &alias.text).clone();
         self.bind(&found, key, binding, item, span)
+    }
+
+    /// `use std.a` is a module of the standard library, and `use std.a.b` takes
+    /// the name `b` from it. A module not built yet stays in the tree, and
+    /// reports E0901.
+    fn import_std(&mut self, written: &[Name], alias: Option<&Name>, span: Span) -> Option<Import> {
+        let [_, module, rest @ ..] = written else {
+            let message = "`std` is not a module";
+            let note = "name one of its modules, as in `use std.fs`";
+            self.diags.push(Diagnostic::new("E0334", message, span).note(note));
+            return None;
+        };
+        if !is_std_module(&module.text) {
+            return None;
+        }
+        let (item, last) = match rest {
+            [] => (None, module),
+            [item] => (Some(Name { text: item.text.clone(), span: item.span }), item),
+            _ => {
+                let message = format!("`std.{}` has no modules inside it", module.text);
+                self.diags.push(Diagnostic::new("E0334", message, span));
+                return None;
+            }
+        };
+        let file = format!("@std/{}.lcd", module.text);
+        let key = vec!["@std".to_string(), module.text.clone()];
+        let binding = alias.map_or(&last.text, |alias| &alias.text).clone();
+        self.bind(&file, key, binding, item, span)
     }
 
     /// Loads an imported file, unless that would close a cycle.
@@ -625,9 +665,13 @@ fn join(modules: Vec<Module>, library_entry: bool, diags: &mut Vec<Diagnostic>) 
         let mut renamer =
             Renamer { names, aliases, exports: &exports, keys: &keys, scopes: Vec::new(), diags };
         renamer.stmts(&mut module.stmts);
-        // A `use` of `std` stays, and reports E0901 until `std` exists.
+        // A `use` of a `std` module not built yet stays, and reports E0901.
         module.stmts.retain(|stmt| match &stmt.kind {
-            StmtKind::Use { relative, path, .. } => !relative && path[0].text == "std",
+            StmtKind::Use { relative, path, .. } => {
+                !relative
+                    && path[0].text == "std"
+                    && path.get(1).is_some_and(|module| !is_std_module(&module.text))
+            }
             _ => true,
         });
         stmts.append(&mut module.stmts);

@@ -241,6 +241,9 @@ fn compile(
     builder.symbol("lucid_float_text", lucid_rt::lucid_float_text as *const u8);
     builder.symbol("lucid_f32_text", lucid_rt::lucid_f32_text as *const u8);
     builder.symbol("lucid_bool_text", lucid_rt::lucid_bool_text as *const u8);
+    builder.symbol("lucid_args", lucid_rt::lucid_args as *const u8);
+    builder.symbol("lucid_env_has", lucid_rt::lucid_env_has as *const u8);
+    builder.symbol("lucid_env_get", lucid_rt::lucid_env_get as *const u8);
     let mut module = JITModule::new(builder);
 
     let pointer = module.target_config().pointer_type();

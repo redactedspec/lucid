@@ -414,6 +414,25 @@ fn long_alias_chain_is_rejected() {
     assert!(text(&output.stderr).contains("error E0205: aliases are nested too deep"));
 }
 
+/// What follows the path of `lucid run` goes to the program, unread.
+#[test]
+fn run_passes_arguments() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    fs::write(dir.join("args.lcd"), "use std.args\nprint args.all()\n").expect("cannot write");
+    let output = lucid(dir, &["run", "args.lcd", "add", "--json", "a b"]);
+    assert_eq!(text(&output.stdout), "[\"add\", \"--json\", \"a b\"]\n");
+}
+
+/// A standard module's sites are not the program's to audit or fix.
+#[test]
+fn reports_leave_out_std() {
+    let dir = repo().join("tests").join("run");
+    let output = lucid(&dir, &["check", "--unsafe", "std_args_env.lcd"]);
+    assert_eq!(text(&output.stdout), "");
+    let output = lucid(&dir, &["check", "--costs", "std_args_env.lcd"]);
+    assert!(!text(&output.stdout).contains("@std"), "{}", text(&output.stdout));
+}
+
 #[test]
 fn bad_usage_exits_2() {
     assert_eq!(lucid(&repo(), &[]).status.code(), Some(2));

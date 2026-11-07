@@ -442,6 +442,13 @@ Decisions 121 to 127.
 
 Sources: [Cargo, specifying dependencies](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html), [Cargo, package layout](https://doc.rust-lang.org/cargo/guide/project-layout.html), [Go modules reference](https://go.dev/ref/mod), [go.mod reference](https://go.dev/doc/modules/gomod-ref), [TOML 1.0](https://toml.io/en/v1.0.0), [TOML 1.1](https://toml.io/en/v1.1.0).
 
+## Standard library
+
+Decisions 128 to 130.
+
+- **Go and Rust.** Both ship their standard library with the toolchain, and both pin it to the compiler version. This is from memory of their install layouts, not read for this entry.
+- **Weak ground.** These are judgment calls with no study behind them. The test is M5's exit, a standalone `.exe`.
+
 ## Open research
 
 | Topic | Needed by |

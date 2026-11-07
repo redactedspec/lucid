@@ -1768,8 +1768,12 @@ impl<'a> Checker<'a> {
     fn check_foreign(&mut self, def: &'a ast::TaskDef, signature: &Signature) {
         let span = def.sig.name.span;
         let name = ast::short_name(&def.sig.name.text);
-        let plain = |ty: Ty| ty.is_number() || matches!(ty, Ty::Bool | Ty::Pointer);
-        let problem = if name.starts_with("lucid_") {
+        // `std` alone reaches the runtime, and passes it counted values.
+        let std = def.sig.name.text.starts_with("@std.");
+        let plain = |ty: Ty| {
+            ty.is_number() || matches!(ty, Ty::Bool | Ty::Pointer) || (std && ty.is_counted())
+        };
+        let problem = if name.starts_with("lucid_") && !std {
             Some("the runtime keeps names that start with `lucid_`")
         } else if !signature.type_params.is_empty() {
             Some("it cannot be generic")
@@ -1791,7 +1795,7 @@ impl<'a> Checker<'a> {
         } else {
             let params = signature.params.iter().map(|p| p.ty).collect();
             self.symbols.insert(name, (params, signature.returns));
-            if find_symbol(name).is_none() {
+            if !std && find_symbol(name).is_none() {
                 let message = format!("cannot find the foreign task `{name}`");
                 let note = "it must be in the C runtime or `kernel32`";
                 self.report(Diagnostic::new("E0904", message, span).note(note));

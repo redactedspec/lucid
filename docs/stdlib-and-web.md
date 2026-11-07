@@ -4,7 +4,7 @@
 
 The standard library covers what most programs need, so that small projects need no dependencies. It is written in Lucid. Only low-level parts use `unsafe` and the runtime.
 
-Modules arrive in stages. See [roadmap.md](roadmap.md).
+Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/`, and the compiler holds a copy of them, so a program needs no files beside it. `std` alone can call the runtime, through `extern` tasks that start with `lucid_`. Built today: `std.args` and `std.env`.
 
 | Module | Contents | Milestone |
 | --- | --- | --- |
@@ -21,6 +21,16 @@ Modules arrive in stages. See [roadmap.md](roadmap.md).
 | `std.crypto` | Hashes, random, and vetted primitives | M8 |
 
 Never hand-roll cryptography primitives. Wrap a vetted implementation.
+
+## Built modules
+
+| Task | Gives |
+| --- | --- |
+| `args.all()` | `list[text]`: what follows the program in its command |
+| `args.get(index)` | `text?`: one of them |
+| `env.get(name)` | `text?`: a variable, if set |
+
+Text from the system that is not valid Unicode has its bad parts replaced.
 
 ## Websites
 

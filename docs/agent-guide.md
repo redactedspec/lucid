@@ -586,7 +586,22 @@ print models.greet(User(name: "Ada"))
 - A name is private unless marked `public`, and so is a task with `self`. A public `type` shows its fields, and a public `choice` its variants.
 - Build a variant with `models.Red`. A pattern is just `Red`, with no prefix.
 - Only the entry file runs code. An imported module holds declarations and `let` with a literal value.
-- `use std.x` reports E0901: there is no standard library yet.
+
+## Standard library
+
+`use std.x` needs no manifest entry. A module not built yet reports E0901.
+
+```lucid
+use std.args
+use std.env
+
+let name = args.get(0) else "world"    # the first word after the program, as `text?`
+print "Hello, {name}!"
+print args.all().len()
+print env.get("LUCID_NOT_SET") else "unset"
+```
+
+- Pass arguments after the path: `lucid run file.lcd add "buy milk"`.
 
 ## Packages
 
@@ -614,7 +629,7 @@ markdown = { path = "../markdown" }
 
 Some keywords parse but do not run yet, and report E0901: `spawn`, `shared`, `weak`.
 
-There is no file or console input, and no standard library. These do not exist, so write your own: `sort`, `split`, `join`, `trim`, `contains`, `replace`, `abs`, `min`, `max`, `sum`, `range`, `enumerate`, `zip`, `.map`, `.filter`, `.keys`, `.values`, `.insert`, `.clear`, text to number, and number to text other than interpolation. There is no way to turn a number into a character. To map characters to numbers, search a text such as `"abcdefghijklmnopqrstuvwxyz"`.
+There is no console input. These do not exist, so write your own: `sort`, `split`, `join`, `trim`, `contains`, `replace`, `abs`, `min`, `max`, `sum`, `range`, `enumerate`, `zip`, `.map`, `.filter`, `.keys`, `.values`, `.insert`, `.clear`, text to number, and number to text other than interpolation. There is no way to turn a number into a character. To map characters to numbers, search a text such as `"abcdefghijklmnopqrstuvwxyz"`.
 
 `print` is the only output, and it ends each value with a line break.
 

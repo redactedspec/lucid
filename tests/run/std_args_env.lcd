@@ -1,0 +1,10 @@
+use std.args
+use std.env
+use std.env.get as variable
+
+print args.all()
+print args.get(0)
+print args.get(-1)
+print env.get("LUCID_NO_SUCH_VARIABLE")
+print variable("=")
+print env.get("PATH") is none

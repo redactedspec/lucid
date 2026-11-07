@@ -105,7 +105,9 @@ pub fn costs(program: &mut Program) -> BTreeSet<Cost> {
 /// Renders `costs` the way `lucid check` renders errors.
 pub fn render_costs(source: &Source, costs: &BTreeSet<Cost>, json: bool) -> String {
     let lines = Lines::new(source);
-    let items = costs.iter().map(|cost| {
+    // `std` ships with the compiler, so its sites are not the program's to fix.
+    let own = costs.iter().filter(|cost| !lines.place(cost.start).0.starts_with("@std/"));
+    let items = own.map(|cost| {
         let (file, line, column) = lines.place(cost.start);
         let meaning = match cost.kind {
             "copy" => "is held twice, so the next write copies it",
@@ -453,6 +455,7 @@ fn is_new(value: &Expr) -> bool {
             | ExprKind::Join(_)
             | ExprKind::Call(..)
             | ExprKind::CallValue(..)
+            | ExprKind::Foreign(..)
             | ExprKind::Closure { .. }
             | ExprKind::TextSlice(..)
             | ExprKind::ListSlice(..)
