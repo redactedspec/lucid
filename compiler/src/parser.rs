@@ -600,7 +600,14 @@ impl Parser {
 
     fn arm(&mut self, as_value: bool) -> Parsed<Arm> {
         let pattern = self.pattern()?;
-        self.expect("->")?;
+        if !self.at("->") {
+            let token = self.token();
+            let message = format!("expected `->`, found {}", token.kind.describe());
+            let note = "an arm is `pattern -> value`, or `pattern ->` then an indented block";
+            self.diags.push(Diagnostic::new("E0201", message, token.span).note(note));
+            return Err(());
+        }
+        self.advance();
         let start = self.start();
         let body = if *self.kind() == TokenKind::Newline {
             if as_value {
@@ -622,6 +629,12 @@ impl Parser {
         } else if self.at("return") {
             let kind = self.return_stmt()?;
             ArmBody::Stmt(Box::new(Stmt { kind, span: self.since(start) }))
+        } else if self.at("match") {
+            let span = self.token().span;
+            let note = "put a nested `match` in an indented block under `pattern ->`";
+            let message = "expected an expression, found `match`";
+            self.diags.push(Diagnostic::new("E0201", message, span).note(note));
+            return Err(());
         } else {
             let value = self.expression()?;
             self.newline()?;
@@ -1108,10 +1121,17 @@ impl Parser {
     fn interpolated(&mut self, tokens: Vec<Token>) -> Parsed<Expr> {
         let outer = std::mem::replace(&mut self.tokens, tokens);
         let pos = std::mem::replace(&mut self.pos, 0);
+        let before = self.diags.len();
         let result = self.expression().and_then(|expr| {
             self.expect("}")?;
             Ok(expr)
         });
+        if let Some(diag) = self.diags.get_mut(before)
+            && diag.code == "E0201"
+        {
+            diag.notes
+                .push("`{` in text starts an interpolation; write `{{` for a literal brace".into());
+        }
         self.tokens = outer;
         self.pos = pos;
         result

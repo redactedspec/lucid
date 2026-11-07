@@ -1,1 +1,2 @@
-error_names.lcd:1:7: error E0304: `Error` is already defined
+error_names.lcd:1:7: error E0304: `Error` is already defined as a built-in trait
+  note: pick another name

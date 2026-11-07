@@ -29,5 +29,6 @@ sized_numbers.lcd:24:7: error E0303: `to_string` does not work on `i32`
 sized_numbers.lcd:25:8: error E0303: `f32` cannot be a key
 sized_numbers.lcd:27:12: error E0303: this `return` needs `byte`, found `f32`
   note: conversions are explicit: use `.to_byte()`
-sized_numbers.lcd:28:6: error E0304: `u16` is already defined
+sized_numbers.lcd:28:6: error E0304: `u16` is already defined as a built-in type
+  note: pick another name
 sized_numbers.lcd:30:10: error E0304: `i32` is already defined

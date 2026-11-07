@@ -1,0 +1,4 @@
+arm_shape.lcd:3:6: error E0201: expected `->`, found end of line
+  note: an arm is `pattern -> value`, or `pattern ->` then an indented block
+arm_shape.lcd:7:10: error E0201: expected an expression, found `match`
+  note: put a nested `match` in an indented block under `pattern ->`

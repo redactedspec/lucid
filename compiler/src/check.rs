@@ -1039,7 +1039,12 @@ impl<'a> Checker<'a> {
             || self.traits.contains_key(text)
             || (text != short && PRELUDE_TRAITS.contains(&short));
         if reserved {
-            self.fail("E0304", format!("`{text}` is already defined"), name.span);
+            let trait_name = BUILT_IN_TRAITS.contains(&short)
+                || LATER_TRAITS.contains(&short)
+                || PRELUDE_TRAITS.contains(&short);
+            let what = if trait_name { "trait" } else { "type" };
+            let message = format!("`{text}` is already defined as a built-in {what}");
+            self.report(Diagnostic::new("E0304", message, name.span).note("pick another name"));
             return false;
         }
         self.define(name)
@@ -1711,7 +1716,11 @@ impl<'a> Checker<'a> {
             _ => false,
         };
         if !is_literal(value) && !empty {
-            return self.fail("E0313", "a default must be a literal, or an empty `[]` or `{}`".into(), value.span);
+            return self.fail(
+                "E0313",
+                "a default must be a literal, or an empty `[]` or `{}`".into(),
+                value.span,
+            );
         }
         let value = self.expected(value, Some(ty));
         self.expect(&value, ty, "this default");

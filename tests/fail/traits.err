@@ -33,5 +33,7 @@ traits.lcd:79:7: error E0303: `to_int` does not work on `Dog`
 traits.lcd:80:7: error E0303: `size` does not work on `int`
 traits.lcd:81:7: error E0320: `Dog` does not have `Add`
 traits.lcd:82:7: error E0320: `Tree` does not have `Order`
-traits.lcd:84:7: error E0304: `Show` is already defined
-traits.lcd:87:6: error E0304: `Equal` is already defined
+traits.lcd:84:7: error E0304: `Show` is already defined as a built-in trait
+  note: pick another name
+traits.lcd:87:6: error E0304: `Equal` is already defined as a built-in trait
+  note: pick another name

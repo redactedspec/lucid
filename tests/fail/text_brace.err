@@ -1,0 +1,2 @@
+text_brace.lcd:1:12: error E0201: expected `}`, found `:`
+  note: `{` in text starts an interpolation; write `{{` for a literal brace

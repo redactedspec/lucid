@@ -1,0 +1,9 @@
+let x = 1
+match x
+    1
+        print "a"
+    _ -> print "b"
+match x
+    1 -> match x
+        _ -> print "a"
+    _ -> print "b"

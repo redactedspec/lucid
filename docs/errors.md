@@ -104,6 +104,8 @@ let = 1
 
 Fix: write what the message expects at that place.
 
+A note names the usual cause in three places: a `{` in text that starts an interpolation, where `{{` gives a literal brace; a match arm with no `->`; and a nested `match` written after `->` on the same line, which needs its own indented block.
+
 ## E0202: Invalid assignment target
 
 Only a name, a field, or an index can take a new value.
@@ -195,6 +197,8 @@ let a = 2
 ```
 
 Fix: rename one of them, or use `var` and assign the new value.
+
+A type named like a built-in type or trait, such as `Order` or `int`, also gets this error. The message names the built-in it clashes with.
 
 ## E0305: Name cannot change
 
