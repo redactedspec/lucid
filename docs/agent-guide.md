@@ -9,6 +9,7 @@ Every `lucid` block below runs. Run a file with `lucid run file.lcd`, or a packa
 - A block is an indent of exactly 4 spaces. Tabs are an error.
 - A statement ends at the end of its line. To continue a line, wrap it in `()`, `[]`, or `{}`. A trailing comma is allowed.
 - `#` starts a comment.
+- Keywords cannot be names: `and`, `any`, `as`, `break`, `change`, `choice`, `continue`, `else`, `empty`, `expect`, `extern`, `false`, `for`, `if`, `in`, `is`, `let`, `match`, `none`, `not`, `or`, `print`, `public`, `return`, `self`, `shared`, `spawn`, `take`, `task`, `test`, `then`, `trait`, `true`, `try`, `type`, `unsafe`, `use`, `var`, `weak`, `while`.
 - There are no colons after `if` or `task`, no semicolons, and no braces around blocks.
 - Statements can sit at top level, and they run in order.
 
@@ -48,7 +49,7 @@ let name = "Ada"
 let age = 36
 let line = "Hi {name}, next year {age + 1}"
 print line
-print "a literal brace: {{"
+print "literal braces: {{ and }}"
 
 let word = "héllo"
 print word.len()       # 5, counts characters
@@ -61,7 +62,7 @@ for letter in word     # each one is a one-character text
 print word.bytes()     # list[byte], the UTF-8 bytes
 ```
 
-- `{...}` interpolates any value. Interpolation is the only way to join text. `+` does not work on text: write `"{a}{b}"`.
+- `{...}` interpolates any value. A literal `{` is `{{`, and a literal `}` is `}}`. Interpolation is the only way to join text. `+` does not work on text: write `"{a}{b}"`.
 - There is no `x[0]` on text, and no character type. Write `x[0..1]`.
 - Slice ends are both required, and can be any `int` expression, as in `x[i..i + 1]`. A slice out of range traps. There is no negative index.
 - `==`, `<`, and the like compare text by code point.
@@ -97,11 +98,12 @@ print "Ada" in ages
 for key in ages               # keys, in insertion order
     print "{key}: {ages[key]}"
 
-var seen = set([1, 2, 2])     # an empty set is set([]) with a type
+var seen = set([1, 2, 2])     # type set[int]. An empty one: `var s: set[int] = set([])`
 seen.add(3)
 seen.remove(1)
 print seen                    # set([2, 3])
 print 2 not in seen
+print seen.len()
 
 var empty_map: map[text, int] = {}
 empty_map["a"] = 1
@@ -109,7 +111,7 @@ empty_map["a"] = 1
 
 These are all the built-in tasks on collections: `len`, `is_empty`, `get`, `push`, `pop`, `swap`, `add`, `remove`. Text has `len`, `is_empty`, `bytes`. A `float` has `sqrt`. Write anything else yourself.
 
-- An index is an `int` from 0, and a negative one traps. `.get` with one gives `none`. Sized numbers need `.to_int()` to be an index.
+- An index is an `int` from 0, and a negative one traps. `.get` gives `none` for any index out of range, negative included. Sized numbers need `.to_int()` to be an index.
 - A key can be an integer, `bool`, `text`, or a value made of those. A `float` cannot be a key.
 - `.pop()` must be a whole statement, or all of the value of `let`, `var`, `return`, or `name =`. `f(x.pop())` is an error.
 - A `for` body cannot change what it visits. To remove or add while looping, loop over a copy: `let copy = items`, then `for x in copy`.
@@ -306,6 +308,9 @@ for shape in shapes
 
 match shapes[0]
     Circle(r) -> print r
+    Rect(w, h) ->              # a block arm: `->`, then an indented block
+        let size = w * h
+        print size
     _ -> print "other"
 ```
 
@@ -313,7 +318,7 @@ match shapes[0]
 - A pattern binds every field by position, whatever the names. `_` skips one, so `Rect(_, _)` tests only the variant.
 - `match` must cover every case. `_` matches anything.
 - Types, choices, variants, and tasks share one namespace, so two choices cannot use one variant name. Field access such as `shape.radius` does not work on a choice: use `match`.
-- Patterns do not nest, and there are no guards.
+- Patterns do not nest, and there are no guards. A nested `match` goes in a block arm.
 - Other patterns: an `int`, `float`, `text`, or `bool` literal, and a name that binds anything left. On those types, end with `_` or a name.
 - As a statement, an arm is an expression, `print`, `return`, or an indented block. As a value, each arm is one expression or a `return`.
 
@@ -438,6 +443,20 @@ let a = nothing[text]()    # brackets name a type that the values do not show
 print a
 ```
 
+A method on a generic type takes the type parameters too:
+
+```lucid
+type Stack[T]
+    items: list[T]
+
+task push_one[T](change self: Stack[T], x: T)
+    self.items.push(x)
+
+var stack = Stack[int](items: [])
+stack.push_one(3)
+print stack.items
+```
+
 Type arguments come only from the values, left to right, never from the expected type. Only a constructor takes them from its context.
 
 ## Traits
@@ -477,6 +496,8 @@ print count_of(numbers, 2)
 | `Hash` | being a key | integers, `bool`, `text`, and lists, types made of those |
 | `Add`, `Sub`, `Mul` | `+`, `-`, `*` | numbers |
 | `Div` | `/` that gives `T` | `float`, `f32` |
+
+A bound gives only what its row says: `Order` does not give `==`, so write `[T: Order and Equal]` for both. Built-in trait names, such as `Order`, cannot name a type.
 
 `Show`, `Equal`, `Order`, and `Hash` are derived for a `type` or `choice`, in field order. Write these tasks to replace a derived one or to give an operator, in exactly this form:
 
@@ -672,7 +693,7 @@ markdown = { path = "../markdown", allow = [] }
 
 Some keywords parse but do not run yet, and report E0901: `spawn`, `shared`, `weak`.
 
-There is no console input. These do not exist, so write your own: `sort`, `split`, `join`, `trim`, `contains`, `replace`, `abs`, `min`, `max`, `sum`, `range`, `enumerate`, `zip`, `.map`, `.filter`, `.keys`, `.values`, `.insert`, `.clear`, text to number, and number to text other than interpolation. There is no way to turn a number into a character. To map characters to numbers, search a text such as `"abcdefghijklmnopqrstuvwxyz"`.
+There is no console input, and no tuples: use a `type`. These do not exist, so write your own: `sort`, `split`, `join`, `trim`, `contains`, `replace`, `abs`, `min`, `max`, `sum`, `range`, `enumerate`, `zip`, `.map`, `.filter`, `.keys`, `.values`, `.insert`, `.clear`, text to number, and number to text other than interpolation. There is no way to turn a number into a character. To map characters to numbers, search a text such as `"abcdefghijklmnopqrstuvwxyz"`.
 
 `print` is the only output, and it ends each value with a line break.
 
