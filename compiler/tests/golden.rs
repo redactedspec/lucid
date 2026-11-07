@@ -671,6 +671,18 @@ fn fix_applies_fixes() {
         "let total = 1\r\nprint total\r\nprint \"a}}b\"\r\nif true\r\n    print total\r\n"
     );
     assert_eq!(text(&lucid(&dir, &["fix", "f.lcd"]).stdout), "");
+    // In a package the manifest comes first, so `main.lcd` does not start
+    // at offset 0, and its fixes must still land in it.
+    let package = dir.join("package");
+    fs::create_dir_all(package.join("src")).expect("cannot make directory");
+    let manifest = "[package]\nname = \"package\"\nversion = \"1.0.0\"\n";
+    fs::write(package.join("lucid.toml"), manifest).expect("cannot write");
+    fs::write(package.join("src/main.lcd"), "if true\n\tprint \"a}b\"\n").expect("cannot write");
+    let output = lucid(&dir, &["fix", "package"]);
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    let read = |path: &str| fs::read_to_string(package.join(path)).expect("cannot read");
+    assert_eq!(read("lucid.toml"), manifest);
+    assert_eq!(read("src/main.lcd"), "if true\n    print \"a}}b\"\n");
 }
 
 #[test]

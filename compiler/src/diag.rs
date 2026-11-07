@@ -47,6 +47,15 @@ impl Diagnostic {
         self
     }
 
+    /// The same diagnostic, fixes too, in a file that starts at `base`.
+    pub fn shifted(mut self, base: usize) -> Self {
+        self.span = self.span.shifted(base);
+        for edit in self.fixes.iter_mut().flat_map(|fix| &mut fix.edits) {
+            edit.0 = edit.0.shifted(base);
+        }
+        self
+    }
+
     pub fn note(mut self, note: impl Into<String>) -> Self {
         self.notes.push(note.into());
         self

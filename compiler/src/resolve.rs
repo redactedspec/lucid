@@ -302,10 +302,7 @@ impl Loader {
     fn read_package(&mut self, dir: &str, used_at: Span) -> Option<usize> {
         let (base, text) = self.read(&format!("{dir}lucid.toml"), used_at)?;
         let (found, diags) = manifest::parse(&text);
-        self.diags.extend(diags.into_iter().map(|mut d| {
-            d.span = d.span.shifted(base);
-            d
-        }));
+        self.diags.extend(diags.into_iter().map(|d| d.shifted(base)));
         let found = found?;
         let at = Span { start: base, end: base };
         let src = format!("{dir}src/");
@@ -442,11 +439,9 @@ impl Loader {
         {
             self.source.no_unsafe.push((base, format!("{}lucid.toml", self.packages[holder].dir)));
         }
-        let (mut tokens, mut diags) = lexer::lex(&text);
+        let (mut tokens, diags) = lexer::lex(&text);
         shift(&mut tokens, base);
-        for d in &mut diags {
-            d.span = d.span.shifted(base);
-        }
+        let mut diags: Vec<_> = diags.into_iter().map(|d| d.shifted(base)).collect();
         let (file, parse_diags) = parser::parse(tokens);
         diag::add_unless_same_line(&self.source, &mut diags, parse_diags);
         self.diags.append(&mut diags);
