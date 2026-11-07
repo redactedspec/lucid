@@ -1,0 +1,10 @@
+python task 11 attempt 1 compiled yes exit 0 pass
+python task 12 attempt 1 compiled yes exit 0 pass
+python task 13 attempt 1 compiled yes exit 0 pass
+python task 14 attempt 1 compiled yes exit 0 pass
+python task 15 attempt 1 compiled yes exit 0 pass
+python task 16 attempt 1 compiled yes exit 0 pass
+python task 17 attempt 1 compiled yes exit 0 pass
+python task 18 attempt 1 compiled yes exit 0 pass
+python task 19 attempt 1 compiled yes exit 0 pass
+python task 20 attempt 1 compiled yes exit 0 pass

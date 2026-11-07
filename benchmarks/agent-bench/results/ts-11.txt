@@ -1,0 +1,10 @@
+ts task 11 attempt 1 compiled yes exit 0 pass
+ts task 12 attempt 1 compiled yes exit 0 pass
+ts task 13 attempt 1 compiled yes exit 0 pass
+ts task 14 attempt 1 compiled yes exit 0 pass
+ts task 15 attempt 1 compiled yes exit 0 pass
+ts task 16 attempt 1 compiled yes exit 0 pass
+ts task 17 attempt 1 compiled yes exit 0 pass
+ts task 18 attempt 1 compiled yes exit 0 pass
+ts task 19 attempt 1 compiled yes exit 0 pass
+ts task 20 attempt 1 compiled yes exit 0 pass

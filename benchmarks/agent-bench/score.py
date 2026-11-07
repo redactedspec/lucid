@@ -1,12 +1,19 @@
-# Usage: python score.py LOG... Sums up attempts/log.txt files from try.sh.
+# Usage: python score.py LOG... Sums up try.sh logs. A log is
+# WORKSPACE/attempts/log.txt or a copy named WORKSPACE.txt, as in results/.
+# A workspace is named ARM-BLOCK, such as bare-11, and the scores group by ARM.
 import collections
+import os
 import sys
 
 tries = collections.defaultdict(list)
 for path in sys.argv[1:]:
+    name = os.path.basename(path)[:-4]
+    if name == "log":
+        name = os.path.basename(os.path.dirname(os.path.dirname(os.path.abspath(path))))
+    arm = name.split("-")[0]
     for line in open(path, encoding="utf8"):
         f = line.split()
-        tries[f[0], int(f[2])].append((int(f[4]), f[6] == "yes", f[-1] == "pass"))
+        tries[arm, int(f[2])].append((int(f[4]), f[6] == "yes", f[-1] == "pass"))
 
 arms = collections.defaultdict(list)
 for (arm, task), t in tries.items():

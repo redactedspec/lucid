@@ -18,7 +18,7 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | Cranelift for speed | Partly supported. 2x target is at risk | Read | Keep LLVM option open |
 | Overflow traps in release | Measured: 1.17x to 1.78x in Lucid, 1.56x to 1.92x in Rust | Read | Keep. Revisit with M4 benchmarks |
 | Permissions | Supported, but first design had holes | Snippet | `security.md` fixed |
-| Agent-friendliness | Weak. A small M3 trial passed 10 of 10, with limits stated below | Snippet, trial | Agent benchmark at M5 |
+| Agent-friendliness | Weak. A small M3 trial passed 10 of 10, and an M5 pilot 7 of 10 on the first attempt against 10 of 10 for Python and TypeScript, with limits stated below | Snippet, trial | Agent benchmark at M5 |
 | Indentation syntax helps agents | No evidence | None | Owner preference. Measure |
 | No `async`, lightweight tasks in browser | Now feasible through JSPI | Snippet | Decide at M7 |
 | ASCII names, text escapes | Judgment call from existing practice | None | Revisit before 1.0 |
@@ -253,6 +253,31 @@ The tasks covered text, maps, unions, `choice`, `change`, `for change`, recursiv
 - The credit cannot be split between the guide and the language, which is why decision 90 adds an arm to the M5 benchmark.
 
 **Guide gaps.** The subjects listed what they had to guess. Each guess worked, and these went into the guide after the trial: `%` sign, unary `-`, trailing commas, expressions in slices, `.get` with a negative index, `is empty` on text, and `_` for every field of a variant. They called task 03 and task 10 hardest, for `.pop` with narrowing, and for hex with no bit operations. The second supports the open question on bit operations.
+
+### M5 agent benchmark pilot
+
+Run on 2026-11-07, before the full benchmark, to find bad tasks and runner faults. Method as in decision 148, with one block, tasks 11 to 20, per arm: four Claude Code subagents on Opus 5.5. Logs are in `benchmarks/agent-bench/results/`, and `score.py` reads them.
+
+| Arm | Compiled on the first attempt | Passed on the first attempt | Passed in the end | Repair turns |
+| --- | --- | --- | --- | --- |
+| Lucid | 7 of 10 | 7 of 10 | 10 of 10 | 5, on 3 tasks |
+| Lucid, bare guide | 7 of 10 | 7 of 10 | 10 of 10 | 3, on 3 tasks |
+| Python | 10 of 10 | 10 of 10 | 10 of 10 | 0 |
+| TypeScript | 10 of 10 | 10 of 10 | 10 of 10 | 0 |
+
+Every Lucid failure was a compile error, and every program that compiled gave the right output. No task spec or runner fault showed.
+
+**Failures, by cause.**
+
+- **`empty` as a name**, both arms, task 20. `empty` is a keyword, and E0201 says only `expected a name, found empty`.
+- **`{}` as a field default**, both arms, task 17. E0313 says `a default must be a literal`, and the guide calls `{}` an empty literal.
+- **Variants matched on a union**, Lucid arm, task 11, 3 repair turns. `match` on `int or ParseError` cannot name `Empty`: it needs an arm `e: ParseError`, then a second `match`. E0318 adds a note on nesting that misled. A `match` as an arm's value, and a block after a typed arm, also cost turns.
+- **`==` on `text?` and `text`**, bare arm, task 19. E0303 points to `is`, which does not compare values.
+
+**Guide gaps.** Both arms guessed that `
+` and `\"` work in text, which the guide never shows.
+
+**What it does not show.** The bare arm did no worse than the full one, but 10 tasks cannot tell the arms apart, and none of the guide's stripped warnings fired. Limits of the M3 trial still hold: one author, one model family.
 
 ### The biggest risk
 
