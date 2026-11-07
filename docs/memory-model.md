@@ -78,7 +78,7 @@ The checks are stricter than the law, for two reasons. A counted value that a st
 - **Creation:** `shared value` allocates a cell. `weak cell` makes a weak reference to it.
 - **Mutation:** each write takes a short dynamic borrow. Conflicting access traps, like `RefCell` in Rust.
 - **Cycles:** use `weak T` for back-references. Reading a `weak T` gives `(shared T)?`. Strong cycles leak memory, and the debug runtime reports them at exit.
-- **Threads:** `shared` values cannot be sent to another task. Use `lock[T]` or `channel[T]`.
+- **Threads:** `shared` values cannot be sent to another thread. Use a `lock` or a `channel`.
 
 ## Task values
 
@@ -91,7 +91,7 @@ Values are destroyed deterministically when their last owner ends. Destroying ne
 ## Reference count performance
 
 - Counts are non-atomic by default.
-- A value crossing a task boundary is either moved, or marked thread-shared so its counts turn atomic. Lean 4 uses this technique.
+- Planned for M7, by decision 170: the sign of a count tells who holds it, as in Lean 4. A positive count belongs to one thread, and changes with plain instructions. A negative count is shared by threads, and changes atomically. A count of 0 is static data. A value that goes to another thread, through `spawn`, `send`, or a lock, is marked negative with everything it reaches, which costs its size once. A marked value with one count turns positive again before a write, so a list in a lock is written in place.
 - Reuse analysis could recycle a dying allocation of matching size for a new value. It is not built, see decision 100.
 - Borrow elision removes count pairs around read-only uses of a read parameter.
 

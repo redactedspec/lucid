@@ -198,11 +198,19 @@ Sources: [V8 blog](https://v8.dev/blog/jspi), [caniuse](https://caniuse.com/wf-w
 
 ## Concurrency
 
-Level: **Snippet**.
+Decisions 169 to 180. Level: **Snippet** for web sources, read through search summaries on 2026-11-07, except where marked. Check each page before relying on an exact quote.
 
-Structured concurrency is widely adopted, for example Java `StructuredTaskScope`. Rust removed green threads before 1.0, partly because of per-thread stack memory. Java virtual threads need no function coloring, but pinning can block a carrier thread. Foreign calls are the main unresolved cost, and this search did not cover them. Study this before M7.
+- **Structured concurrency.** Java `StructuredTaskScope` and Rust `std::thread::scope` both end every child before the scope returns. Rust removed green threads before 1.0, partly because of per-thread stack memory.
+- **Foreign calls under a scheduler.** On the OpenJDK loom-dev list, a JDK engineer writes that a virtual thread can never unmount with native frames on its stack. JEP 491 removes pinning for `synchronized`, and keeps it for native code that calls back into Java and blocks. So lightweight tasks pin when foreign code runs, which decision 169 avoids with OS threads.
+- **Counts across threads.** Lean 4's `lean.h`, read through the bindings of the `lean-rs-sys` crate: a positive `m_rc` is a single-threaded object, changed in place, a negative one is multi-threaded, changed with an atomic `fetch_sub`, and 0 is persistent. `lean_mark_mt` marks an object and all it reaches. Whether `lean_is_exclusive` is false for every marked object, as recalled, was not confirmed. Rust's `Arc::get_mut` gives a mutable reference only when the count is one, and `make_mut` copies otherwise.
+- **Thread locals in the JIT.** **Checked** in the `cranelift-jit` 0.137.1 source on 2026-11-07: declaring thread-local data asserts "JIT doesn't yet support TLS". `cranelift-object` emits COFF thread locals, so only `lucid run` lacks them.
+- **Traps in servers.** The `net/http` documentation says a panic in `ServeHTTP` is recovered, and the connection closed. On golang-nuts, Ian Lance Taylor writes that the Go team considers that recovery a historical mistake. Go issue 76763 asks the docs to say so.
+- **Deadlock.** Go's `checkdead` reports "all goroutines are asleep" when no thread runs and no goroutine can wake. Go turns it off for programs linked with C, since C code may still make progress.
+- **HTTP framing.** RFC 9112, section 6.1, lets a server reject a request with both `Transfer-Encoding` and `Content-Length`, or else use `Transfer-Encoding` and close the connection after. Crystal's 2026 post-mortem and an http4s advisory report request smuggling from parsers that read `Content-Length` first. The RFC text itself was not read.
+- **TLS.** `rustls` 0.23 made `aws-lc-rs` the default provider, whose build needs `cmake`, and NASM on Windows. `ring` stays available with default features off.
+- **Weak ground.** The cost of the extra compare on retain, and of the hidden stack limit parameter, is not measured. Both are build steps with a benchmark check.
 
-Sources: [Why async Rust?](https://without.boats/blog/why-async-rust/).
+Sources: [Why async Rust?](https://without.boats/blog/why-async-rust/), [loom-dev, native methods and virtual threads](https://mail.openjdk.org/pipermail/loom-dev/2023-July/005934.html), [JEP 491](https://openjdk.org/jeps/491), [lean-rs-sys refcount.rs](https://docs.rs/crate/lean-rs-sys/latest/source/src/refcount.rs), [Rust Arc](https://doc.rust-lang.org/nightly/alloc/sync/struct.Arc.html), [golang-nuts on recovery](https://groups.google.com/g/golang-nuts/c/zzUfBynUVV8), [Go issue 76763](https://github.com/golang/go/issues/76763), [Go under the hood: deadlock](https://golang.design/under-the-hood/en/part5toolchain/ch16tools/deadlock/), [Go issue 46260](https://golang.org/issue/46260), [Crystal post-mortem](https://crystal-lang.org/2026/05/26/http-request-smuggling-vulnerability-in-http-server/), [http4s advisory](https://corgea.com/advisories/vulnerabilities/CVE-2026-69204), [rustls issue 1913](https://www.github.com/rustls/rustls/issues/1913), [rustls docs](https://docs.rs/rustls/).
 
 ## Security
 
@@ -630,5 +638,3 @@ Sources: [Python str](https://docs.python.org/3/library/stdtypes.html#string-met
 | Topic | Needed by |
 | --- | --- |
 | Reference counting cost in imperative code | Measured at M4, see "M4 benchmarks". Five programs only |
-| Foreign calls with lightweight tasks | M7 |
-| Status of WebAssembly stack switching | M7 |

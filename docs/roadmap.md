@@ -102,10 +102,17 @@ Designed by decisions 156 to 164, see "WebAssembly" in `compiler.md`. Build in t
 
 ## M7: Concurrency and servers
 
-- [ ] `spawn`, structured waiting, `channel`, `lock`
-- [ ] Decide scheduler: OS threads or lightweight tasks
-- [ ] `std.net`, `std.http`, TLS, `std.html`
+Designed by decisions 169 to 180, see "Threads" in `compiler.md`. OS threads, by decision 169. Build in this order:
+
 - [ ] Bit operators, by decision 153
+- [ ] Counts safe across threads, by decision 170. The benchmarks of "M4 benchmarks" must not slow by more than 2%
+- [ ] Stack limit as a hidden parameter, by decision 175, with the same benchmark check
+- [ ] `spawn`, `spawned`, and waiting at the end of a task, by decisions 171 and 172, and E0907, by decision 176
+- [ ] `channel`, `lock`, and the deadlock trap, by decisions 173 and 174. A write through `update` to a value with one count is in place
+- [ ] `std.net`, by decision 177
+- [ ] `std.html` and the `std.http` server, by decisions 178 and 180, and `examples/website.lcd`
+- [ ] Load test: a Rust test that sends requests from 64 threads at once, and holds one slow connection open, to the built example
+- [ ] `std.http` client with TLS, by decision 179
 
 **Exit:** `examples/website.lcd` serves pages under a load test.
 

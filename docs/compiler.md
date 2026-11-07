@@ -208,7 +208,7 @@ benchmarks/        Lucid and Rust versions of each program
 
 ## Runtime
 
-`lucid_rt` is small and has a C ABI. Showing, comparing, and hashing a compound value use no runtime type information: each is a derived task. Today it provides printing, trap reporting, allocation, reference counting, and text, list, map, and record primitives. Task scheduling is planned.
+`lucid_rt` is small and has a C ABI. Showing, comparing, and hashing a compound value use no runtime type information: each is a derived task. Today it provides printing, trap reporting, allocation, reference counting, and text, list, map, and record primitives. Threads, channels, locks, and sockets are planned for M7, see "Threads" below.
 
 A task with counted locals has one exit block, which releases them, so code size does not grow with returns times locals. Every other task returns directly. Compiled code changes a count inline, and calls `lucid_release` only for the last one. A debug build calls the runtime for every count, so that its checks run, which means that `cargo test --release` is what tests the inline form.
 
@@ -244,7 +244,18 @@ A union value is a record with one slot, and its tag is a type id: a position in
 
 In a debug build of `lucid_rt`, which is what `cargo test` runs, a released value keeps its memory and is marked dead. So a double free, or a retain of a dead value, traps with `runtime bug`. `lucid run` also traps at exit if any value is still live.
 
-A trap site is a cold block that passes `lucid_trap` a message holding its source position, and its frame pointer. Every task keeps frame pointers (`preserve_frame_pointers`), so a trace walks saved pointers and return addresses. `native.rs` hands the runtime a table from each call's return address to its task, line, and column, built from Cranelift's call sites and source locations, and text is made only on a trap. A task with no name, which `derive.rs` wrote, has a row with no text, so the walk goes through it and prints nothing. An address that is not in the table is a Rust frame, whose saved pointer cannot be trusted, so the walk stops. Every task checks the stack pointer on entry, after its prologue, so its frame must fit in the 1 MiB margin. E0902 reads the compiled frame size, and rejects a task over half the margin. Under `lucid run` the limit is a constant in the code, because it has one thread with a known stack. A built program reads it from `lucid_stack_limit`, which its start sets. `spawn` needs a limit per thread.
+A trap site is a cold block that passes `lucid_trap` a message holding its source position, and its frame pointer. Every task keeps frame pointers (`preserve_frame_pointers`), so a trace walks saved pointers and return addresses. `native.rs` hands the runtime a table from each call's return address to its task, line, and column, built from Cranelift's call sites and source locations, and text is made only on a trap. A task with no name, which `derive.rs` wrote, has a row with no text, so the walk goes through it and prints nothing. An address that is not in the table is a Rust frame, whose saved pointer cannot be trusted, so the walk stops. Every task checks the stack pointer on entry, after its prologue, so its frame must fit in the 1 MiB margin. E0902 reads the compiled frame size, and rejects a task over half the margin. Under `lucid run` the limit is a constant in the code, because it has one thread with a known stack. A built program reads it from `lucid_stack_limit`, which its start sets. `spawn` needs a limit per thread, so decision 175 moves it to a hidden parameter.
+
+### Threads
+
+Planned for M7, by decisions 169 to 176. Not built.
+
+- **Counts.** A count's sign tells who holds the value. Inline `retain` adds 1 only to a positive count, and calls `lucid_retain` otherwise. Inline `release` subtracts 1 only from a count above 1, as now. `lucid_retain` and `lucid_release` do nothing for 0, which replaces `IMMORTAL`, and use atomic operations on a negative count, with a release ordering on each decrement and an acquire fence before the free, as Rust's `Arc` does. `is_unique` stays `count == 1`, so a marked value takes the runtime path, where an acquire load of -1 turns it back to 1 and allows the write. `lucid_mark` walks a value and all it reaches with no recursion, as `lucid_release` does, and negates each positive count. The WebAssembly backend uses the same layout and never marks.
+- **Stack limit.** Every compiled task takes the limit as hidden parameter 0, and passes it on. `main` in `exe.rs` and the JIT entry pass the main thread's limit. A runtime task that calls compiled code, such as a key's `hash`, reads the limit from a Rust thread local. The task value record moves to parameter 1.
+- **`spawn`.** `lucid_spawn` takes a task value record, marked, and starts `std::thread::Builder` with a 64 MiB stack. It gives a counted `spawned` value that holds the join handle and later the result. Each task that spawns has a hidden local holding the list of its spawns, and its exit block joins them. The runtime drops a finished thread from that list when no value holds its handle.
+- **Waiting.** `wait`, `send`, `receive`, and a lock wait through `std::sync::Mutex` and `Condvar`. Two atomic counters, threads and waiting threads, find a deadlock: the last thread to start waiting traps.
+- **Traps.** `lucid_trap` takes a lock on stderr, prints the message and the trace of its own thread, and ends the process. Frame pointers work the same in every thread.
+- **Sockets.** A `Listener` and a `Connection` are a new kind of value that holds a `std::net` socket, and `lucid_release` closes it. A blocking call does not count as waiting.
 
 - `lucid run` links it directly, since the JIT runs inside the compiler process.
 - `lucid build` embeds a prebuilt `lucid_rt` static library in the compiler and passes it to the system linker.
@@ -262,6 +273,8 @@ A trap site is a cold block that passes `lucid_trap` a message holding its sourc
 | `wasm-encoder` | WebAssembly output for `--target web`, at 0.255 |
 
 Cranelift crates are at 0.137, the latest stable release at M1. No parser generators and no CLI framework.
+
+Planned for M7, by decision 179, in `lucid_rt` on native targets only: `rustls` with default features off and the `ring` feature on, and `webpki-roots`, for TLS in the HTTP client.
 
 ## Commands
 

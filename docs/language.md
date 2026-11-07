@@ -645,18 +645,33 @@ Each package is one copy in a program, however many packages depend on it. Two p
 
 ## Concurrency
 
-`spawn` starts a task. Every spawn is owned by the enclosing block, which waits for it before exiting. Nothing outlives its parent, so no task leaks.
+Planned for M7, by decisions 169 to 176. Today `spawn` reports E0901.
+
+`spawn f(x)` runs the call `f(x)` on a new thread, and gives a `spawned[T]`, where `T` is what `f` returns. Its arguments run first, in the current thread. `.wait()` blocks until the thread ends, and gives its result. Every spawn ends before the task, lambda, or top level that ran it returns: that one waits for each spawn it did not wait for. Nothing outlives its parent, so no thread leaks. Spawns in a loop run at once.
 
 ```lucid
-let a = spawn fetch(url_a)
-let b = spawn fetch(url_b)
-print a.wait()
-print b.wait()
+var jobs: list[spawned[text]] = []
+for url in urls
+    jobs.push(spawn fetch(url))
+for job in jobs
+    print job.wait()
 ```
 
-Arguments move or copy into the new task. Safe code cannot share mutable data, so it cannot have data races. To communicate, use `channel[T]`, or `lock[T]` for shared mutable state.
+A value that goes to another thread is a value like any other: changing it there never changes it here. So safe code cannot have data races. To communicate, use a channel, or a lock for state that threads share. Copying a channel or a lock shares it.
 
-There is no `async` or `await`. Tasks do not have colors: any task can block and any task can be spawned.
+```lucid
+let results = channel[int](16)     # holds at most 16 values
+let total = lock(0)
+spawn worker(results, total)
+results.send(1)                    # blocks while full
+results.close()
+total.update(n => n + 1)           # runs while it holds the lock
+print total.read()                 # a copy
+```
+
+`receive()` gives `T?`: the next value, or `none` once the channel is closed and empty. Like `.pop`, it must be a whole statement, or all of the value of `let`, `var`, `return`, or an assignment to a name. `send` after `close` traps. A capacity below 1 traps. `update(f)` takes a `task(T) -> T`, and keeps what it gives. A thread that takes a lock it already holds traps. When every thread waits in `wait`, `send`, `receive`, or a lock, the program traps with a deadlock. A trap in any thread ends the program.
+
+There is no `async` or `await`. Tasks do not have colors: any task can block and any task can be spawned. Under `--target web`, `spawn` is error E0907, and a channel and a lock work with one thread.
 
 ## Shared references
 

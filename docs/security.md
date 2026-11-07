@@ -16,7 +16,7 @@ Safe Lucid code cannot produce:
 | Ignored errors | Unused errors do not compile |
 | Unchecked casts | No unchecked casts. The compiler proves each narrowing, and a tag test made it true: assignment and loops end what a test proved. A call on an `any` reads the value only after a test of its tag |
 
-A trap ends the program. It is a controlled stop, not undefined behavior. A trap can still be a denial-of-service risk, so servers need a containment design (see open questions in `decisions.md`).
+A trap ends the program. It is a controlled stop, not undefined behavior. A trap in any thread ends the whole process, by decision 172, so a request that traps can stop a server. Run a server under a process supervisor that restarts it. A trap is not contained because it can stop a write through a lock halfway.
 
 Safe code has **no undefined behavior**. A compiler or runtime bug that breaks this is a release blocker.
 
@@ -89,9 +89,10 @@ Permissions are not a sandbox. They limit what dependencies can do by accident o
 
 ## Standard library defaults
 
-- HTML building escapes by default.
+- HTML building escapes by default. Planned for M7: `std.html` escapes every text and attribute value, and traps on what `std.dom` traps on, by decision 180.
 - `std.dom` never reads text as HTML: `dom.Text` makes a text node, and an attribute is set with `setAttribute`. It traps on a `script` element, an attribute whose name starts with `on`, `formaction`, `srcdoc`, and a `javascript:` or `data:text/html` value, by decision 168, so a page runs only code that the program wrote, even when an attribute's value comes from a user. Handlers go through `dom.On`. A trap in a handler stops the page from taking events.
 - SQL APIs take parameters, and they reject plain interpolated text through a distinct `sql` type.
-- TLS verification is on, and turning it off is an explicit, named option.
+- TLS verification is on, and turning it off is an explicit, named option. Planned for M7, by decision 179: the client checks certificates against the roots that `webpki-roots` holds.
+- Planned for M7, by decision 178: the `std.http` server rejects a request with both `Content-Length` and `Transfer-Encoding`, two `Content-Length` values, a coding other than `chunked`, or a folded header, and closes the connection, so a proxy in front cannot read one request where the server reads two. A request head over 16 KiB, a body over 1 MiB, and a connection silent for 30 seconds are refused, and at most 256 connections run at once.
 - Secrets use a `secret` type that prints as `***`.
 - Random values default to a cryptographic source.

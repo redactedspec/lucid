@@ -8,14 +8,13 @@ Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/
 
 | Module | Contents | Milestone |
 | --- | --- | --- |
-| prelude | `text`, `list`, `map`, `set`, math, core traits, text split, integer parsing, case change, list sort | M3, M6 |
+| prelude | `text`, `list`, `map`, `set`, math, core traits, text split, integer parsing, case change, list sort, `channel`, `lock`, `spawned` | M3, M6, M7 |
 | `std.fs` | Files and paths | M5 |
 | `std.json` | Parse and write, typed through the `Json` trait | M5 |
 | `std.env`, `std.args` | Environment and command-line input | M5 |
 | `std.time` | Clocks, durations, dates | M5 |
 | `std.dom` | Browser pages in the Elm architecture | M6 |
-| `std.task` | `channel`, `lock` | M7 |
-| `std.net`, `std.http` | Sockets, HTTP server and client, TLS | M7 |
+| `std.net`, `std.http` | Sockets, HTTP/1.1 server and client, TLS for the client | M7 |
 | `std.html` | Escaped HTML building | M7 |
 | `std.sql` | SQLite first, parameterized queries only | M8 |
 | `std.crypto` | Hashes, random, and vetted primitives | M8 |
@@ -61,7 +60,13 @@ Text from the system that is not valid Unicode has its bad parts replaced, excep
 
 Lucid covers both sides of a website.
 
-**Server side** compiles to a native binary. See [examples/website.lcd](../examples/website.lcd).
+**Server side** compiles to a native binary. See [examples/website.lcd](../examples/website.lcd), which is the target of M7 and does not run yet. Planned, by decisions 177 to 180:
+
+- `std.net`: `net.listen(port)` gives a `Listener`, whose `accept()` gives a `Connection`, as `net.connect(host, port)` does. A connection has `read(max)`, `write(bytes)`, and `set_timeout(length)`. Each fails with a `NetError`. A socket closes when no value holds it.
+- `std.http`: `http.App()`, with `app.get(path, handler)` and `app.post(path, handler)`, routes by method and exact path, and `app.serve(port:)` serves HTTP/1.1, one thread per connection. A handler is a `task(http.Request) -> http.Response`. `http.page(node)`, `http.json(value)`, and `http.text(content)` build a response. `http.get(url)` and `http.post(url, body)` are the client, with TLS for `https`. Limits are in [security.md](security.md).
+- `std.html`: `html.Element`, `html.Text`, `html.Attribute`, a task for each common tag such as `html.h1(text)`, and `html.render(node)`, which escapes every text and attribute value.
+
+Under `--target web`, `std.net` and `std.http` are error E0907.
 
 **Browser side** compiles to WebAssembly with `lucid build --target web`. The output is one JavaScript file, `NAME.js`, which holds a small loader and both WebAssembly modules, so a page needs only `<script src="NAME.js">`. Every built feature works, except a user `extern` and `.pointer()`, which are E0905. On the web, `std.fs` gives `Failed`, `env.get` gives none, `args.all()` gives `[]`, and `time.sleep` traps. Browser access goes through `std.dom`, because WebAssembly cannot touch the DOM directly. `std.dom` works only with `--target web`, and elsewhere it is E0906.
 
