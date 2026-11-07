@@ -2,8 +2,7 @@
 //! that imports the runtime's memory and tasks, and wraps both modules in a
 //! JavaScript loader. See "WebAssembly" in docs/compiler.md.
 //!
-//! A user `extern` and `.pointer()` are E0901 here, until decision 162 gives
-//! them a code of their own.
+//! A user `extern` and `.pointer()` are E0905 here, by decision 162.
 
 use crate::ast::BinaryOp;
 use crate::diag::{Diagnostic, Lines, Source, Span};
@@ -119,6 +118,17 @@ const IMPORTS: &[(&str, &[Abi], Option<Abi>)] = &[
     ("lucid_fs_detail", &[], Some(Ptr)),
     ("lucid_bytes_valid", &[Ptr], Some(Small)),
     ("lucid_bytes_text", &[Ptr], Some(Ptr)),
+    ("lucid_dom_create", &[Ptr], Some(I64)),
+    ("lucid_dom_text", &[Ptr], Some(I64)),
+    ("lucid_dom_set_text", &[I64, Ptr], None),
+    ("lucid_dom_set", &[I64, Ptr, Ptr], None),
+    ("lucid_dom_unset", &[I64, Ptr], None),
+    ("lucid_dom_on", &[I64, Ptr, I64], None),
+    ("lucid_dom_off", &[I64, Ptr], None),
+    ("lucid_dom_append", &[I64, I64], None),
+    ("lucid_dom_replace", &[I64, I64], None),
+    ("lucid_dom_remove", &[I64], None),
+    ("lucid_dom_step", &[Ptr], None),
 ];
 
 /// A load or store at `offset`, aligned to `2^align` bytes.
@@ -245,9 +255,9 @@ fn module(program: &Program, source: &Source) -> Result<(Vec<u8>, Loaded), Vec<D
         ));
     }
     if let Some(span) = shared.missing {
-        let note = "decision 162 plans an error code of its own, see docs/decisions.md";
-        let message = "this cannot run on the web";
-        return Err(vec![Diagnostic::new("E0901", message, span).note(note)]);
+        let message = "a user `extern` or `.pointer()` cannot run on the web";
+        let note = "WebAssembly reaches no C library, so build this program without `--target web`";
+        return Err(vec![Diagnostic::new("E0905", message, span).note(note)]);
     }
 
     let mut exports = ExportSection::new();

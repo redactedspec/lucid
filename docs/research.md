@@ -600,6 +600,16 @@ Level: **Read** for each source below, 2026-11-07, except where marked.
 
 Sources: [Dynamic linking conventions](https://github.com/WebAssembly/tool-conventions/blob/main/DynamicLinking.md), [constant expressions](https://webassembly.github.io/spec/core/valid/instructions.html#constant-expressions), [wasm-ld](https://lld.llvm.org/WebAssembly.html), [wasm32-unknown-unknown](https://doc.rust-lang.org/rustc/platform-support/wasm32-unknown-unknown.html), [SipHasher](https://doc.rust-lang.org/std/hash/struct.SipHasher.html), [Modules on the web](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules/Modules_on_the_web), [The Elm Architecture](https://guide.elm-lang.org/architecture/), [web-features: multi-value](https://web-platform-dx.github.io/web-features-explorer/features/wasm-multi-value), [MDN compatibility data](https://chromium.googlesource.com/external/github.com/mdn/browser-compat-data/+/HEAD/webassembly/multi-value.json), [caniuse](https://caniuse.com/wasm-multi-value).
 
+## Browser pages
+
+For decision 168. Read 2026-11-07.
+
+- **Update gives the model.** The Elm guide's `update` takes a message and the model, and gives the new model. Lucid's spec says that a task with a `change` parameter has no value form, so `dom.app` cannot take one.
+- **Guards.** Elm's virtual DOM, `src/Elm/Kernel/VirtualDom.js`, has `_VirtualDom_noScript`, which turns a `script` tag into `p`, `_VirtualDom_noOnOrFormAction`, which turns a name that starts with `on`, or `formAction`, into `data-` and the name, and `_VirtualDom_noJavaScriptOrHtmlUri`, which empties a value that starts with `javascript:` or `data:text/html`, with spaces allowed between the letters. Those builders in that file do not call the guards, so Elm applies them elsewhere, which was not read. That `srcdoc` holds a whole HTML document, whose scripts run, is from memory.
+- **An input's value.** The HTML standard says that the `value` content attribute "gives the default value of the `input` element", and changes what shows only while the dirty value flag is false. Setting the `value` property sets that flag, and moves the cursor to the end only if the value "is different from oldValue". So `std.dom` sets both, and setting an unchanged value keeps the cursor. Elm sets the `value` property only when it differs from the node's.
+
+Sources: [The Elm Architecture](https://guide.elm-lang.org/architecture/), [elm/virtual-dom VirtualDom.js](https://github.com/elm/virtual-dom/blob/master/src/Elm/Kernel/VirtualDom.js), [HTML: the input element, value mode](https://html.spec.whatwg.org/multipage/input.html#dom-input-value-value).
+
 ## Prelude tasks
 
 Decision 165. Level: **Low**. The forms below are named from memory, and the pages were not read for this project. No trial has tested the chosen names.

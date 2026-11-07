@@ -1,0 +1,42 @@
+use std.dom
+
+type Model
+    count: int
+    draft: text
+    items: list[text]
+
+choice Message
+    More
+    Less
+    Typed(value: text)
+    Save
+
+task update(model: Model, message: Message) -> Model
+    var next = model
+    match message
+        More ->
+            next.count += 1
+        Less ->
+            next.count -= 1
+        Typed(value) ->
+            next.draft = value
+        Save ->
+            next.items.push(next.draft)
+            next.draft = ""
+    return next
+
+task view(model: Model) -> dom.Node[Message]
+    var items: list[dom.Node[Message]] = []
+    for item in model.items
+        items.push(dom.Element(tag: "li", children: [dom.Text(content: item)]))
+    return dom.Element(tag: "main", children: [
+        dom.Element(tag: "button", attrs: [dom.Attribute(name: "id", value: "less"), dom.On(event: "click", message: _ => Less)], children: [dom.Text(content: "-")]),
+        dom.Text(content: "{model.count}"),
+        dom.Element(tag: "button", attrs: [dom.Attribute(name: "id", value: "more"), dom.On(event: "click", message: _ => More)], children: [dom.Text(content: "+")]),
+        dom.Element(tag: "input", attrs: [dom.Attribute(name: "id", value: "draft"), dom.Attribute(name: "value", value: model.draft), dom.On(event: "input", message: value => Typed(value: value))]),
+        dom.Element(tag: "button", attrs: [dom.Attribute(name: "id", value: "save"), dom.On(event: "click", message: _ => Save)], children: [dom.Text(content: "Save")]),
+        dom.Element(tag: "ul", children: items),
+    ])
+
+print "start"
+dom.app(Model(count: 0, draft: "", items: []), view, update)

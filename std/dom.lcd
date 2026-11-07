@@ -1,0 +1,203 @@
+# The page of a browser, in the Elm architecture of decision 163: a model, a
+# view of it, and an update for each message. Only `lucid build --target web`
+# builds a program that uses this module.
+
+## What a page shows: an element, or text. Each handler of an element gives a
+## `Msg`, which `app` passes to `update`.
+public choice Node[Msg]
+    Element(tag: text, attrs: list[Attr[Msg]] = [], children: list[Node[Msg]] = [])
+    Text(content: text)
+
+## What an element has: an attribute and its value, or a handler that gives a
+## message for an event. The handler gets the event's key for a key event,
+## and else the element's value, as an `<input>` has, or else "".
+public choice Attr[Msg]
+    Attribute(name: text, value: text)
+    On(event: text, message: task(text) -> Msg)
+
+## The nodes in the page, by the numbers that the runtime gave them.
+type Shown
+    id: int
+    children: list[Shown]
+
+## A running page: its model, what it shows, and its handlers by number.
+type Page[M, Msg]
+    model: M
+    tree: Node[Msg]
+    shown: Shown
+    handlers: list[task(text) -> Msg]
+    view: task(M) -> Node[Msg]
+    update: task(M, Msg) -> M
+
+unsafe extern task lucid_dom_create(tag: text) -> int
+unsafe extern task lucid_dom_text(content: text) -> int
+unsafe extern task lucid_dom_set_text(node: int, content: text)
+unsafe extern task lucid_dom_set(node: int, name: text, value: text)
+unsafe extern task lucid_dom_unset(node: int, name: text)
+unsafe extern task lucid_dom_on(node: int, event: text, handler: int)
+unsafe extern task lucid_dom_off(node: int, event: text)
+unsafe extern task lucid_dom_append(parent: int, child: int)
+unsafe extern task lucid_dom_replace(old: int, new: int)
+unsafe extern task lucid_dom_remove(node: int)
+unsafe extern task lucid_dom_step(step: task(int, text))
+
+## Shows `view(init)` in the page. Then each event gives a message to `update`,
+## and the page shows `view` of the new model, changing only the nodes that
+## differ. A node is kept when the new one has the same tag in the same place,
+## so an `<input>` keeps its focus.
+public task app[M, Msg](init: M, view: task(M) -> Node[Msg], update: task(M, Msg) -> M)
+    let tree = view(init)
+    var handlers: list[task(text) -> Msg] = []
+    let shown = create(tree, change handlers)
+    append(0, shown.id)
+    listen(Page(model: init, tree: tree, shown: shown, handlers: handlers, view: view, update: update))
+
+## Gives the runtime the task that handles the next event on `page`.
+task listen[M, Msg](page: Page[M, Msg])
+    task step(handler: int, value: text)
+        let pick = page.handlers[handler]
+        let update = page.update
+        let model = update(page.model, pick(value))
+        let view = page.view
+        let tree = view(model)
+        var handlers: list[task(text) -> Msg] = []
+        let shown = patch(page.tree, page.shown, tree, change handlers)
+        listen(Page(model: model, tree: tree, shown: shown, handlers: handlers, view: view, update: update))
+    # The runtime keeps a count of the task value, and calls it with a handler
+    # number that this page gave, and a text.
+    unsafe
+        lucid_dom_step(step)
+
+## Makes the nodes for `node`.
+task create[Msg](node: Node[Msg], change handlers: list[task(text) -> Msg]) -> Shown
+    var id = 0
+    var tag = ""
+    var attrs: list[Attr[Msg]] = []
+    var children: list[Node[Msg]] = []
+    match node
+        Text(content) ->
+            return Shown(id: new_text(content), children: [])
+        Element(t, a, c) ->
+            tag = t
+            attrs = a
+            children = c
+    id = new_element(tag)
+    let none_before: list[Attr[Msg]] = []
+    set_attrs(id, none_before, attrs, change handlers)
+    var shown: list[Shown] = []
+    for child in children
+        let made = create(child, change handlers)
+        append(id, made.id)
+        shown.push(made)
+    return Shown(id: id, children: shown)
+
+## Changes the nodes in `shown`, which show `old`, to show `new`.
+task patch[Msg](old: Node[Msg], shown: Shown, new: Node[Msg], change handlers: list[task(text) -> Msg]) -> Shown
+    var old_attrs: list[Attr[Msg]] = []
+    var old_children: list[Node[Msg]] = []
+    match old
+        Text(before) ->
+            match new
+                Text(after) ->
+                    if before != after
+                        set_text(shown.id, after)
+                    return shown
+                _ -> return replace(shown, new, change handlers)
+        Element(tag, attrs, children) ->
+            match new
+                Element(new_tag, _, _) ->
+                    if new_tag != tag
+                        return replace(shown, new, change handlers)
+                _ -> return replace(shown, new, change handlers)
+            old_attrs = attrs
+            old_children = children
+    var new_attrs: list[Attr[Msg]] = []
+    var new_children: list[Node[Msg]] = []
+    match new
+        Element(_, attrs, children) ->
+            new_attrs = attrs
+            new_children = children
+        Text(_) -> return shown
+    set_attrs(shown.id, old_attrs, new_attrs, change handlers)
+    var kept: list[Shown] = []
+    for i in 0..new_children.len()
+        if i < old_children.len()
+            kept.push(patch(old_children[i], shown.children[i], new_children[i], change handlers))
+        else
+            let made = create(new_children[i], change handlers)
+            append(shown.id, made.id)
+            kept.push(made)
+    for i in new_children.len()..old_children.len()
+        remove(shown.children[i].id)
+    return Shown(id: shown.id, children: kept)
+
+## Puts the nodes for `new` where `shown` was.
+task replace[Msg](shown: Shown, new: Node[Msg], change handlers: list[task(text) -> Msg]) -> Shown
+    let made = create(new, change handlers)
+    # The runtime takes two node numbers that it gave.
+    unsafe
+        lucid_dom_replace(shown.id, made.id)
+    return made
+
+## Changes the attributes and handlers of element `id` from `old` to `new`.
+## Every handler gets a new number, the place it takes in `handlers`.
+task set_attrs[Msg](id: int, old: list[Attr[Msg]], new: list[Attr[Msg]], change handlers: list[task(text) -> Msg])
+    var had: map[text, text] = {}
+    var heard: set[text] = set([])
+    for attr in old
+        match attr
+            Attribute(name, value) ->
+                had[name] = value
+            On(event, _) -> heard.add(event)
+    var names: set[text] = set([])
+    var events: set[text] = set([])
+    for attr in new
+        match attr
+            Attribute(name, value) ->
+                names.add(name)
+                let before = had.get(name)
+                if before is none or before != value
+                    # The runtime takes a node number that it gave, and text.
+                    unsafe
+                        lucid_dom_set(id, name, value)
+            On(event, message) ->
+                events.add(event)
+                # The runtime takes a node number that it gave, text, and a number.
+                unsafe
+                    lucid_dom_on(id, event, handlers.len())
+                handlers.push(message)
+    for name in had
+        if name not in names
+            # The runtime takes a node number that it gave, and text.
+            unsafe
+                lucid_dom_unset(id, name)
+    for event in heard
+        if event not in events
+            # The runtime takes a node number that it gave, and text.
+            unsafe
+                lucid_dom_off(id, event)
+
+task new_element(tag: text) -> int
+    # The runtime takes text, and gives a node number.
+    unsafe
+        return lucid_dom_create(tag)
+
+task new_text(content: text) -> int
+    # The runtime takes text, and gives a node number.
+    unsafe
+        return lucid_dom_text(content)
+
+task set_text(node: int, content: text)
+    # The runtime takes a node number that it gave, and text.
+    unsafe
+        lucid_dom_set_text(node, content)
+
+task append(parent: int, child: int)
+    # The runtime takes two node numbers that it gave, where 0 is the page.
+    unsafe
+        lucid_dom_append(parent, child)
+
+task remove(node: int)
+    # The runtime takes a node number that it gave.
+    unsafe
+        lucid_dom_remove(node)

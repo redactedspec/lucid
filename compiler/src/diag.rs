@@ -80,6 +80,8 @@ pub struct Source {
     /// The permissions of the root package, one for each of
     /// `manifest::PERMISSIONS`. `None` for a program with no `lucid.toml`.
     pub grants: Option<Vec<crate::manifest::Grant>>,
+    /// The first `use std.dom`, which only `lucid build --target web` can build.
+    pub web_only: Option<Span>,
 }
 
 impl Source {

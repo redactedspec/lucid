@@ -1,0 +1,6 @@
+<body><button id="grow"></button></body>
+> click grow
+update
+<body><button id="grow"></button></body> made 0
+> click grow
+<body><button id="grow"></button></body> made 0

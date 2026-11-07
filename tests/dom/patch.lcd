@@ -1,0 +1,48 @@
+use std.dom
+
+type Model
+    on: bool
+    items: list[int]
+
+choice Message
+    Toggle
+    Push
+    Pop
+    Key(name: text)
+    Left
+
+task update(model: Model, message: Message) -> Model
+    var next = model
+    match message
+        Toggle ->
+            next.on = not next.on
+        Push ->
+            next.items.push(next.items.len())
+        Pop ->
+            let _ = next.items.pop()
+        Key(name) -> print "key {name}"
+        Left -> print "left the note"
+    return next
+
+task view(model: Model) -> dom.Node[Message]
+    let state: dom.Node[Message] = if model.on then dom.Element(tag: "p", attrs: [dom.Attribute(name: "class", value: "on")], children: [dom.Text(content: "on")]) else dom.Element(tag: "span", children: [dom.Text(content: "off")])
+    var pop: list[dom.Attr[Message]] = [dom.Attribute(name: "id", value: "pop")]
+    if model.items is empty
+        pop.push(dom.Attribute(name: "disabled", value: ""))
+    else
+        pop.push(dom.On(event: "click", message: _ => Pop))
+    var items: list[dom.Node[Message]] = []
+    for item in model.items
+        items.push(dom.Element(tag: "li", children: [dom.Text(content: "{item}")]))
+    var children: list[dom.Node[Message]] = [
+        dom.Element(tag: "button", attrs: [dom.Attribute(name: "id", value: "toggle"), dom.On(event: "click", message: _ => Toggle), dom.On(event: "keydown", message: name => Key(name: name))]),
+        state,
+        dom.Element(tag: "button", attrs: pop),
+        dom.Element(tag: "button", attrs: [dom.Attribute(name: "id", value: "push"), dom.On(event: "click", message: _ => Push)]),
+        dom.Element(tag: "ul", children: items),
+    ]
+    if not model.on
+        children.push(dom.Element(tag: "input", attrs: [dom.Attribute(name: "id", value: "note"), dom.On(event: "blur", message: _ => Left)]))
+    return dom.Element(tag: "div", children: children)
+
+dom.app(Model(on: false, items: []), view, update)

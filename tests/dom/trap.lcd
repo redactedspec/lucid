@@ -1,0 +1,13 @@
+use std.dom
+
+choice Message
+    Grow
+
+task update(model: list[int], message: Message) -> list[int]
+    print "update"
+    return [model[model.len()]]
+
+task view(model: list[int]) -> dom.Node[Message]
+    return dom.Element(tag: "button", attrs: [dom.Attribute(name: "id", value: "grow"), dom.On(event: "click", message: _ => Grow)])
+
+dom.app([1], view, update)

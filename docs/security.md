@@ -90,6 +90,7 @@ Permissions are not a sandbox. They limit what dependencies can do by accident o
 ## Standard library defaults
 
 - HTML building escapes by default.
+- `std.dom` never reads text as HTML: `dom.Text` makes a text node, and an attribute is set with `setAttribute`. It traps on a `script` element, an attribute whose name starts with `on`, `formaction`, `srcdoc`, and a `javascript:` or `data:text/html` value, by decision 168, so a page runs only code that the program wrote, even when an attribute's value comes from a user. Handlers go through `dom.On`. A trap in a handler stops the page from taking events.
 - SQL APIs take parameters, and they reject plain interpolated text through a distinct `sql` type.
 - TLS verification is on, and turning it off is an explicit, named option.
 - Secrets use a `secret` type that prints as `***`.

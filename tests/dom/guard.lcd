@@ -1,0 +1,13 @@
+use std.dom
+
+choice Message
+    Go
+
+task view(model: int) -> dom.Node[Message]
+    let link = if model == 0 then "/home" else " Java\tScript:alert(1)"
+    return dom.Element(tag: "a", attrs: [dom.Attribute(name: "id", value: "go"), dom.Attribute(name: "href", value: link), dom.On(event: "click", message: _ => Go)])
+
+task update(model: int, message: Message) -> int
+    return model + 1
+
+dom.app(0, view, update)

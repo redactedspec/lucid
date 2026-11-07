@@ -47,7 +47,7 @@ The object file targets baseline x86-64, not the features of the machine that bu
 
 ## WebAssembly
 
-By decisions 156 to 164, 166, and 167. Built: the layout, the runtime on `wasm32`, `wasm.rs`, the loader, and `lucid build --target web`. Every run and trap test runs under Node, except the ones that need the host. `std.dom` is planned next.
+By decisions 156 to 164 and 166 to 168. Built: the layout, the runtime on `wasm32`, `wasm.rs`, the loader, `lucid build --target web`, and `std.dom`. Every run and trap test runs under Node, except the ones that need the host. Planned next: the M6 example page, checked in a browser.
 
 **Layout.** The header fields that compiled code reads are `u64` on every target, so `COUNT_OFFSET`, `LEN_OFFSET`, `SLOTS_OFFSET`, `TAG_OFFSET`, and the images from `static_text` and `static_record` hold for `wasm32` too. `web_runtime_loads` reads a text's and a record's header in the WebAssembly runtime at those offsets. `wasm.rs` uses the host's `lucid_rt::static_text` for text literals.
 
@@ -67,6 +67,13 @@ By decisions 156 to 164, 166, and 167. Built: the layout, the runtime on `wasm32
 | `now()` | `Date.now()`, in milliseconds |
 | `clock()` | `performance.now()`, in milliseconds |
 | `random(at, len)` | fills bytes from `crypto.getRandomValues` |
+| `dom_create(at, len)`, `dom_text(at, len)` | makes an element or a text node, and gives its number |
+| `dom_set_text`, `dom_set`, `dom_unset` | changes a text node, or sets or removes an attribute. `value` also sets the property |
+| `dom_on(node, at, len, handler)`, `dom_off` | sets or clears the handler number for an event of a node |
+| `dom_append`, `dom_replace`, `dom_remove` | moves nodes. Parent 0 is `document.body` |
+| `dom_value_len()`, `dom_value(at)` | the event's key or value, as UTF-8, for the handler running now |
+
+**Pages.** `std/dom.lcd` holds the node tree and the diff in Lucid, and reaches the page through the `lucid_dom_` tasks of `web.rs`, which pass text to the `dom_` imports. A node is a number that the loader gives, kept in a `Map`. `dom.app` keeps a `task(int, text)` with `lucid_dom_step`. The loader's listener for an event calls the runtime export `lucid_dom_fire` with the handler's number. That runs the kept task through the table, which updates the model, patches the page, and keeps the next task. An event that starts during a handler waits in a queue, and then reads its handler's number from the page that the handler left, so Lucid code never runs inside itself. A trap in a handler prints as at top level, and the page takes no more events. `lucid_dom_create` and `lucid_dom_set` trap on what decision 168 forbids. `resolve.rs` puts the place of the first `use std.dom` in `Source::web_only`, and `main.rs` reports E0906 there before native code is made.
 
 A Rust panic in the runtime is a WebAssembly `unreachable`, which the loader sees as a `RuntimeError`. The loader prints it as `trap: ` and the error, and exits with 101.
 
@@ -74,9 +81,9 @@ A Rust panic in the runtime is a WebAssembly `unreachable`, which the loader see
 
 **Traps.** A trap prints the message and trace that native prints. `wasm.rs` records each call to a task, by function index and offset in the module, with its file, line, column, and calling task, or an empty text for a derived task, which a trace leaves out. The offset counts from the start of the module, as V8 gives it in each `wasm-function[i]:0xOFF` frame of `Error.stack`. The loader sets `Error.stackTraceLimit` to at least 64. In `js.trap`, it reads the stack of a new `Error`, skips the runtime's frames, whose names hold `lucid_rt`, and the first program frame, which the message already places. It shows the calls under it, at most 16, and stops at a frame that is not a recorded call, as native stops at a frame of the runtime. An engine stack overflow is a `RangeError`. The loader then prints the place of the task in its innermost program frame, `trap: stack overflow`, and the same trace.
 
-**Errors.** A user `extern` and `.pointer()` are E0901 under `--target web`, at the first place found. Planned: under `--target web`, a user `extern` and `.pointer()` get one new code, and `use std.dom` without the target another.
+**Errors.** A user `extern` and `.pointer()` are E0905 under `--target web`, at the first place found. `use std.dom` is E0906 under `lucid run`, `lucid test`, and a native `lucid build`.
 
-**Tests.** `web_programs_match_run` builds every run and trap test with `--target web` and runs it under `node`, against the same golden files. A missing `node` fails. Only the tests in `HOST_ONLY` are left out, since they read files, arguments, or the environment, sleep, or call a user `extern`. On 2026-11-07, 96 tests ran. Planned: `std.dom` tests run under `node` with a fake `document`.
+**Tests.** `web_programs_match_run` builds every run and trap test with `--target web` and runs it under `node`, against the same golden files. A missing `node` fails. Only the tests in `HOST_ONLY` are left out, since they read files, arguments, or the environment, sleep, or call a user `extern`. On 2026-11-07, 96 tests ran. `dom_pages_match` builds each page in `tests/dom`, and runs it under `node tests/dom/page.js`, a small fake `document` that plays the events in `x.events` and prints the page after each, with the number of nodes made, so a test shows what a patch keeps.
 
 ## Early exits
 
@@ -281,7 +288,7 @@ sh try.sh lucid 07                            # in a benchmark workspace: one at
 | `lucid check [--json] --unsafe [PATH]` | List `unsafe` blocks and `extern` tasks | Works, for a program and all it imports, dependencies too |
 | `lucid check [--json] --costs [PATH]` | List copy and count sites | Works, from the MIR after `ownership.rs`. A task that `derive.rs` wrote stays out |
 | `lucid build [--json] [PATH]` | Produce a native executable | Works on Windows, for the features under "Status". Writes `NAME.exe` to the current directory |
-| `lucid build --target web [--json] [PATH]` | Produce WebAssembly and a loader | Works for every built feature but a user `extern` and `.pointer()`, which give E0901. Writes `NAME.js` to the current directory. See "WebAssembly" |
+| `lucid build --target web [--json] [PATH]` | Produce WebAssembly and a loader | Works for every built feature but a user `extern` and `.pointer()`, which give E0905. Writes `NAME.js` to the current directory. See "WebAssembly" |
 | `lucid test [--json] [PATH]` | Run `test` blocks | Works, for a file, or every file in a package's `src` |
 | `lucid fmt [--check] [PATH]` | Format in place, with no style options. `--check` lists files that would change, and exits with 1 if any would | Works, for a file, or every file in a package's `src`. See "`lucid fmt`" |
 | `lucid fix [--json] [PATH]` | Apply suggested fixes | Works. A `Diagnostic` holds `fixes`, each a set of edits. The command writes the edited text of each file back with its own line endings, from the text that `Source` holds |

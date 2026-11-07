@@ -628,3 +628,21 @@ unsafe extern task no_such_symbol_anywhere(x: int) -> int
 ```
 
 Fix: correct the name, or use a task that one of those libraries has.
+
+## E0905: Foreign code cannot run on the web
+
+A user `extern` task or `.pointer()` is in a program built with `lucid build --target web`. WebAssembly in a page reaches no C library, by decision 162. Only code generation for the web finds this, so `lucid check` and `lucid run` do not report it. The test is `web_rejects_foreign_code`.
+
+Fix: build the program without `--target web`, or move the foreign code out of what the page uses.
+
+## E0906: `std.dom` works only in a browser
+
+A program that uses `std.dom` ran with `lucid run` or `lucid test`, or was built without `--target web`. A page needs a browser, by decision 162. `lucid check` does not report this code.
+
+```lucid
+use std.dom
+
+print "page"
+```
+
+Fix: build it with `lucid build --target web`, and open the page that loads the `.js` file.

@@ -4,7 +4,7 @@
 
 The standard library covers what most programs need, so that small projects need no dependencies. It is written in Lucid. Only low-level parts use `unsafe` and the runtime.
 
-Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/`, and the compiler holds a copy of them, so a program needs no files beside it. `std` alone can call the runtime, through `extern` tasks that start with `lucid_`. All of the M5 modules are built.
+Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/`, and the compiler holds a copy of them, so a program needs no files beside it. `std` alone can call the runtime, through `extern` tasks that start with `lucid_`. All of the M5 modules are built, and `std.dom`.
 
 | Module | Contents | Milestone |
 | --- | --- | --- |
@@ -13,7 +13,7 @@ Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/
 | `std.json` | Parse and write, typed through the `Json` trait | M5 |
 | `std.env`, `std.args` | Environment and command-line input | M5 |
 | `std.time` | Clocks, durations, dates | M5 |
-| `std.dom` | Browser access through JavaScript calls | M6 |
+| `std.dom` | Browser pages in the Elm architecture | M6 |
 | `std.task` | `channel`, `lock` | M7 |
 | `std.net`, `std.http` | Sockets, HTTP server and client, TLS | M7 |
 | `std.html` | Escaped HTML building | M7 |
@@ -63,18 +63,23 @@ Lucid covers both sides of a website.
 
 **Server side** compiles to a native binary. See [examples/website.lcd](../examples/website.lcd).
 
-**Browser side** compiles to WebAssembly with `lucid build --target web`. The output is one JavaScript file, `NAME.js`, which holds a small loader and both WebAssembly modules, so a page needs only `<script src="NAME.js">`. Every built feature works, except a user `extern`. On the web, `std.fs` gives `Failed`, `env.get` gives none, `args.all()` gives `[]`, and `time.sleep` traps. Browser access goes through `std.dom`, because WebAssembly cannot touch the DOM directly.
+**Browser side** compiles to WebAssembly with `lucid build --target web`. The output is one JavaScript file, `NAME.js`, which holds a small loader and both WebAssembly modules, so a page needs only `<script src="NAME.js">`. Every built feature works, except a user `extern` and `.pointer()`, which are E0905. On the web, `std.fs` gives `Failed`, `env.get` gives none, `args.all()` gives `[]`, and `time.sleep` traps. Browser access goes through `std.dom`, because WebAssembly cannot touch the DOM directly. `std.dom` works only with `--target web`, and elsewhere it is E0906.
 
-The page is built in the Elm architecture, by decision 163. Planned for M6:
+A page is built in the Elm architecture, by decisions 163 and 168:
 
 - a model: any value that holds the page's state;
-- `view(model)`: gives a tree of nodes, where a handler names a message, not code;
-- `update(change model, message)`: changes the model in reply to one message;
-- `dom.app(init, view, update)`: shows `view(init)`, and after each event runs `update`, then `view`, and changes only the parts of the page that differ, matched by tag and position, so an `<input>` keeps its focus.
+- `view(model)`: gives a `dom.Node[Msg]`, a tree where each handler gives a message;
+- `update(model, message)`: gives the new model;
+- `dom.app(init, view, update)`: shows `view(init)` in the page's `<body>`, and after each event runs `update`, then `view`, and changes only the nodes that differ. A node is kept when the new one has the same tag in the same place, so an `<input>` keeps its focus.
 
-A handler cannot hold state itself, since a capture cannot change. The names of the tasks and nodes are settled by writing the M6 example page first. A keyed diff, for lists that reorder, waits for a program that needs it.
+| Constructor | Is |
+| --- | --- |
+| `dom.Element(tag:, attrs: [], children: [])` | an element |
+| `dom.Text(content:)` | text, never read as HTML |
+| `dom.Attribute(name:, value:)` | an attribute. `value` also sets an `<input>`'s value |
+| `dom.On(event:, message:)` | a handler. `message` is a `task(text) -> Msg`, given the event's key for a key event, else the element's value, as an `<input>` has, else `""` |
 
-On the web, `std.fs` gives `Failed`, `env.get` gives none, `args.all()` gives `[]`, and `time.sleep` traps. `std.dom` works only with `--target web`.
+Events run one at a time. An event that a change to the page starts, such as `blur` when a focused node goes, waits for the handler that runs now, and is dropped if its node has left the page. A handler cannot hold state itself, since a capture cannot change. A page traps on a `script` element, an attribute whose name starts with `on`, `formaction`, `srcdoc`, and a `javascript:` or `data:text/html` value, since each would run code that the program did not write. A keyed diff, for lists that reorder, waits for a program that needs it.
 
 ## Example: JSON
 

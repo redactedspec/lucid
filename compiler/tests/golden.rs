@@ -5,6 +5,9 @@
 //! `tests/trap/x.lcd` must start, then trap with `x.err`, and exit 101.
 //! `tests/test/x.lcd` must print `x.out` under `lucid test`, and exit 1 if a
 //! test failed.
+//! `tests/dom/x.lcd`, built with `--target web`, must print `x.out` under
+//! `node tests/dom/page.js` with the events in `x.events`. With `x.err`, it
+//! must also print that to stderr, and exit 101.
 //! `tests/package/x/` must print `expected.out` and exit 0, or `expected.err`
 //! and exit 1, under `lucid run x`. A directory with neither is a dependency.
 
@@ -591,9 +594,9 @@ fn failed_stdout_write_traps_without_a_position() {
 /// also have an entry in docs/errors.md.
 #[test]
 fn every_error_code_is_tested_and_documented() {
-    // missing_file_is_reported, huge_frame_is_rejected, and
-    // test_names_are_plain_and_new
-    let mut tested = String::from("E0001 E0902 E0329");
+    // missing_file_is_reported, huge_frame_is_rejected,
+    // test_names_are_plain_and_new, and web_rejects_foreign_code
+    let mut tested = String::from("E0001 E0902 E0329 E0905");
     for err in files(&repo().join("tests").join("fail"), "err") {
         tested += &text(&fs::read(err).expect("cannot read .err file"));
     }
@@ -804,6 +807,10 @@ fn web_runtime_loads() {
             clock: () => performance.now(),
             random: (at, n) => { random += n; crypto.getRandomValues(new Uint8Array(memory.buffer, at, n)); },
         };
+        // The page's tasks are tested in `dom_pages_match`.
+        for (const { name } of WebAssembly.Module.imports(module)) {
+            js[name] ??= () => 0;
+        }
         const run = new WebAssembly.Instance(module, { js }).exports;
         memory = run.memory;
         const words = at => new BigUint64Array(memory.buffer.slice(at, at + 8))[0];
@@ -834,7 +841,7 @@ fn web_runtime_loads() {
     let output = node.wait_with_output().expect("node failed");
     assert!(output.status.success(), "{}", text(&output.stderr));
     let expected = "\
-imports js.clock,js.exit,js.now,js.random,js.trap,js.write
+imports js.clock,js.dom_append,js.dom_create,js.dom_off,js.dom_on,js.dom_remove,js.dom_replace,js.dom_set,js.dom_set_text,js.dom_text,js.dom_unset,js.dom_value,js.dom_value_len,js.exit,js.now,js.random,js.trap,js.write
 table grows true
 text 4 1
 tag 7
@@ -916,4 +923,54 @@ stderr: {stderr}",
         )
     );
     assert!(ran > 90, "only {ran} web tests ran");
+}
+
+/// Runs each page in `tests/dom` on the fake `document` of `page.js`, by
+/// decision 164.
+#[test]
+fn dom_pages_match() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("dom");
+    let _ = fs::remove_dir_all(&dir);
+    copy_dir(&repo().join("tests").join("dom"), &dir);
+    let mut failures = Vec::new();
+    for source in files(&dir, "lcd") {
+        let name = file_name(&source);
+        let output = lucid(&dir, &["build", "--target", "web", name]);
+        if !output.status.success() {
+            failures.push(format!("{name}: build failed: {}", text(&output.stderr)));
+            continue;
+        }
+        let output = Command::new("node")
+            .args(["page.js", file_name(&source.with_extension("js"))])
+            .arg(file_name(&source.with_extension("events")))
+            .current_dir(&dir)
+            .output()
+            .expect("cannot start node, which web tests need");
+        let expected = text(&fs::read(source.with_extension("out")).expect("no .out file"));
+        let errors = fs::read(source.with_extension("err")).map(|e| text(&e)).unwrap_or_default();
+        let code = if errors.is_empty() { 0 } else { 101 };
+        let (got, got_errors) = (text(&output.stdout), text(&output.stderr));
+        if output.status.code() != Some(code) || got != expected || got_errors != errors {
+            failures.push(format!(
+                "{name}: exit {:?}
+got: {got}
+stderr: {got_errors}",
+                output.status.code()
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "
+{}", failures.join("
+"));
+}
+
+/// By decision 162, a user `extern` cannot run on the web.
+#[test]
+fn web_rejects_foreign_code() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("foreign");
+    fs::create_dir_all(&dir).expect("cannot make directory");
+    fs::copy(repo().join("tests/run/unsafe.lcd"), dir.join("unsafe.lcd")).expect("cannot copy");
+    let output = lucid(&dir, &["build", "--target", "web", "unsafe.lcd"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(text(&output.stderr).contains("error E0905"), "{}", text(&output.stderr));
 }

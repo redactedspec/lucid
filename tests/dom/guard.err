@@ -1,0 +1,4 @@
+trap: std.dom cannot set a `javascript:` or `data:text/html` value
+    at @std/dom.lcd:162:25 in std.dom.set_attrs
+    at @std/dom.lcd:121:5 in std.dom.patch
+    at @std/dom.lcd:64:21 in lambda

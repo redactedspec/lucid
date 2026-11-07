@@ -1,0 +1,2 @@
+trap.lcd:8:13: trap: list index out of bounds
+    at @std/dom.lcd:60:21 in lambda

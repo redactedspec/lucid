@@ -1,0 +1,18 @@
+start
+<body><main><button id="less">-</button>0<button id="more">+</button><input id="draft" value="" .value=""></input><button id="save">Save</button><ul></ul></main></body>
+> click more
+<body><main><button id="less">-</button>1<button id="more">+</button><input id="draft" value="" .value=""></input><button id="save">Save</button><ul></ul></main></body> made 0
+> click more
+<body><main><button id="less">-</button>2<button id="more">+</button><input id="draft" value="" .value=""></input><button id="save">Save</button><ul></ul></main></body> made 0
+> click less
+<body><main><button id="less">-</button>1<button id="more">+</button><input id="draft" value="" .value=""></input><button id="save">Save</button><ul></ul></main></body> made 0
+> input draft milk
+<body><main><button id="less">-</button>1<button id="more">+</button><input id="draft" value="milk" .value="milk"></input><button id="save">Save</button><ul></ul></main></body> made 0
+> input draft milk and eggs
+<body><main><button id="less">-</button>1<button id="more">+</button><input id="draft" value="milk and eggs" .value="milk and eggs"></input><button id="save">Save</button><ul></ul></main></body> made 0
+> click save
+<body><main><button id="less">-</button>1<button id="more">+</button><input id="draft" value="" .value=""></input><button id="save">Save</button><ul><li>milk and eggs</li></ul></main></body> made 2
+> input draft tea
+<body><main><button id="less">-</button>1<button id="more">+</button><input id="draft" value="tea" .value="tea"></input><button id="save">Save</button><ul><li>milk and eggs</li></ul></main></body> made 0
+> click save
+<body><main><button id="less">-</button>1<button id="more">+</button><input id="draft" value="" .value=""></input><button id="save">Save</button><ul><li>milk and eggs</li><li>tea</li></ul></main></body> made 2

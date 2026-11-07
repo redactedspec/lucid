@@ -1,0 +1,28 @@
+<body><div><button id="toggle"></button><span>off</span><button id="pop" disabled=""></button><button id="push"></button><ul></ul><input id="note" .value=""></input></div></body>
+> click pop
+<body><div><button id="toggle"></button><span>off</span><button id="pop" disabled=""></button><button id="push"></button><ul></ul><input id="note" .value=""></input></div></body> made 0
+> click toggle
+<body><div><button id="toggle"></button><p class="on">on</p><button id="pop" disabled=""></button><button id="push"></button><ul></ul></div></body> made 2
+> click toggle
+<body><div><button id="toggle"></button><span>off</span><button id="pop" disabled=""></button><button id="push"></button><ul></ul><input id="note" .value=""></input></div></body> made 3
+> click push
+<body><div><button id="toggle"></button><span>off</span><button id="pop"></button><button id="push"></button><ul><li>0</li></ul><input id="note" .value=""></input></div></body> made 2
+> click push
+<body><div><button id="toggle"></button><span>off</span><button id="pop"></button><button id="push"></button><ul><li>0</li><li>1</li></ul><input id="note" .value=""></input></div></body> made 2
+> click pop
+<body><div><button id="toggle"></button><span>off</span><button id="pop"></button><button id="push"></button><ul><li>0</li></ul><input id="note" .value=""></input></div></body> made 0
+> click pop
+<body><div><button id="toggle"></button><span>off</span><button id="pop" disabled=""></button><button id="push"></button><ul></ul><input id="note" .value=""></input></div></body> made 0
+> click pop
+<body><div><button id="toggle"></button><span>off</span><button id="pop" disabled=""></button><button id="push"></button><ul></ul><input id="note" .value=""></input></div></body> made 0
+> key toggle Enter
+key Enter
+<body><div><button id="toggle"></button><span>off</span><button id="pop" disabled=""></button><button id="push"></button><ul></ul><input id="note" .value=""></input></div></body> made 0
+> click missing
+no such element
+> focus note
+<body><div><button id="toggle"></button><span>off</span><button id="pop" disabled=""></button><button id="push"></button><ul></ul><input id="note" .value=""></input></div></body> made 0
+> click toggle
+<body><div><button id="toggle"></button><p class="on">on</p><button id="pop" disabled=""></button><button id="push"></button><ul></ul></div></body> made 2
+> click toggle
+<body><div><button id="toggle"></button><span>off</span><button id="pop" disabled=""></button><button id="push"></button><ul></ul><input id="note" .value=""></input></div></body> made 3

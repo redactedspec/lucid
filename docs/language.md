@@ -704,6 +704,8 @@ Only an `unsafe` block can call an `extern` task or `.pointer()`, or else error 
 
 `pointer[byte]` is a raw address. It has no traits, so it does not print or compare, and it holds no count. `items.pointer()` gives the address of the first element of a `list[byte]` held in a name. The address is valid while that name is in scope and until the list changes or moves. C code that writes through it changes every holder of the list. Text has no pointer: use `.bytes()`, and push a zero byte for a C string.
 
+Under `lucid build --target web`, a user `extern` task or `.pointer()` is error E0905, since a page reaches no C library.
+
 `unsafe` blocks and `extern` declarations in any module will need the `unsafe` package permission, once permission checks exist. See [security.md](security.md).
 
 ## Keywords

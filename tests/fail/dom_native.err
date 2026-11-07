@@ -1,0 +1,2 @@
+dom_native.lcd:1:1: error E0906: `std.dom` works only in a browser
+  note: build the program with `lucid build --target web`

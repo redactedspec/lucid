@@ -106,6 +106,9 @@ fn cli(args: &[String]) -> ExitCode {
             emit(std::io::stdout(), &ownership::render_costs(&source, &found, json));
             return ExitCode::SUCCESS;
         }
+        if run && !web && diags.is_empty() {
+            diags = web_only(&source);
+        }
         if web && diags.is_empty() {
             match wasm::script(&program, &source) {
                 Ok(script) => return write_script(&script, &out_name(path, "js")),
@@ -126,6 +129,14 @@ fn cli(args: &[String]) -> ExitCode {
     }
     report_errors(&source, &diags, json);
     if diags.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+}
+
+/// A program that uses `std.dom` runs only in a browser, by decision 162.
+fn web_only(source: &Source) -> Vec<Diagnostic> {
+    let message = "`std.dom` works only in a browser";
+    let note = "build the program with `lucid build --target web`";
+    let error = |span| Diagnostic::new("E0906", message, span).note(note);
+    source.web_only.map(error).into_iter().collect()
 }
 
 /// What `lucid build` writes to the current directory: named after the file,
@@ -625,6 +636,9 @@ fn compile_tests(path: &str, json: bool) -> Result<FileTests, ExitCode> {
         diags = errors;
         if diags.is_empty() {
             diags = mono::run(&mut program);
+        }
+        if diags.is_empty() {
+            diags = web_only(&source);
         }
         if diags.is_empty() {
             if let Ok(from) = std::env::var(TEST_FROM) {
