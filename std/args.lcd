@@ -2,12 +2,12 @@
 
 unsafe extern task lucid_args() -> list[text]
 
-# Every argument, in order.
+## Every argument, in order.
 public task all() -> list[text]
     # The runtime builds a new list from the process's arguments.
     unsafe
         return lucid_args()
 
-# The argument at `index`, from 0, if the command has one.
+## The argument at `index`, from 0, if the command has one.
 public task get(index: int) -> text?
     return all().get(index)

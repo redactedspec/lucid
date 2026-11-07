@@ -1,18 +1,19 @@
 # Clocks, durations, and dates. A date is in UTC: local time needs zone tables.
 
-# A length of time. It has `+`, `-`, and an order.
+## A length of time. It has `+`, `-`, and an order.
 public type Duration
     nanos: int
 
-# A moment on the wall clock, in nanoseconds from 1970 in UTC, which reaches
-# the years 1678 to 2262. This clock can jump, so use `clock` to measure.
+## A moment on the wall clock, in nanoseconds from 1970 in UTC, which reaches
+## the years 1678 to 2262. This clock can jump, so use `clock` to measure.
 public type Time
     nanos: int
 
-# A moment on a clock that only goes forward. It means nothing alone.
+## A moment on a clock that only goes forward. It means nothing alone.
 public type Instant
     nanos: int
 
+## A calendar date and time of day, in UTC.
 public type Date
     year: int
     month: int
@@ -28,49 +29,58 @@ unsafe extern task lucid_time_now() -> int
 unsafe extern task lucid_time_clock() -> int
 unsafe extern task lucid_time_sleep(nanos: int)
 
+## A length of `count` seconds.
 public task seconds(count: int) -> Duration
     return Duration(nanos: count * NANOS_PER_SECOND)
 
+## A length of `count` milliseconds.
 public task millis(count: int) -> Duration
     return Duration(nanos: count * 1000000)
 
+## The length in seconds, with a fraction.
 public task to_seconds(self: Duration) -> float
     return self.nanos.to_float() / NANOS_PER_SECOND.to_float()
 
+## The length in whole milliseconds, rounded down.
 public task to_millis(self: Duration) -> int
     return self.nanos // 1000000
 
+## The sum, which `+` gives.
 public task add(self: Duration, other: Duration) -> Duration
     return Duration(nanos: self.nanos + other.nanos)
 
+## The difference, which `-` gives.
 public task sub(self: Duration, other: Duration) -> Duration
     return Duration(nanos: self.nanos - other.nanos)
 
-# The moment now, on the wall clock.
+## The moment now, on the wall clock.
 public task now() -> Time
     # The runtime takes nothing, and gives a number.
     unsafe
         return Time(nanos: lucid_time_now())
 
-# The moment now, on the clock that only goes forward.
+## The moment now, on the clock that only goes forward.
 public task clock() -> Instant
     # The runtime takes nothing, and gives a number.
     unsafe
         return Instant(nanos: lucid_time_clock())
 
+## The time from `earlier` to this moment.
 public task since(self: Instant, earlier: Instant) -> Duration
     return Duration(nanos: self.nanos - earlier.nanos)
 
+## The time from `earlier` to this moment. The wall clock can jump, so this can be negative.
 public task since(self: Time, earlier: Time) -> Duration
     return Duration(nanos: self.nanos - earlier.nanos)
 
+## Waits for at least `length`.
 public task sleep(length: Duration)
     # The runtime takes a number, and only waits.
     unsafe
         lucid_time_sleep(length.nanos)
 
-# The date and time of a moment, in UTC. The next two tasks follow "chrono-
-# Compatible Low-Level Date Algorithms" by Howard Hinnant.
+## The date and time of a moment, in UTC. The next two tasks follow "chrono-
+## Compatible Low-Level Date Algorithms" by Howard Hinnant.
 public task date(self: Time) -> Date
     let total = self.nanos // NANOS_PER_SECOND
     let days = total // SECONDS_PER_DAY
@@ -93,7 +103,7 @@ public task date(self: Time) -> Date
         second: rest % 60,
     )
 
-# The moment of a date and time, in UTC.
+## The moment of a date and time, in UTC.
 public task time(self: Date) -> Time
     let year = if self.month <= 2 then self.year - 1 else self.year
     let era = year // 400
@@ -110,7 +120,7 @@ task padded(value: int, width: int) -> text
         out = "0{out}"
     return out
 
-# The ISO 8601 form, such as `2026-11-06T09:30:00Z`.
+## The ISO 8601 form, such as `2026-11-06T09:30:00Z`.
 public task show(self: Date) -> text
     let day = "{padded(self.year, 4)}-{padded(self.month, 2)}-{padded(self.day, 2)}"
     return "{day}T{padded(self.hour, 2)}:{padded(self.minute, 2)}:{padded(self.second, 2)}Z"

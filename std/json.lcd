@@ -2,10 +2,12 @@
 # the type asked for. `mono.rs` writes the part that depends on a type's fields,
 # and calls the tasks below by name. See "`std.json`" in docs/compiler.md.
 
+## Why a read failed, and where: `path` holds steps such as `[2].name`.
 public type JsonError
     message: text
     path: text = ""
 
+## The failure in words, with its path.
 public task error_message(self: JsonError) -> text
     if self.path is empty
         return "bad JSON: {self.message}"
@@ -28,11 +30,11 @@ task decode[T: Json](value: Value) -> T or JsonError
 task encode[T: Json](value: T) -> text
     ...
 
-# Reads a value of the type asked for. Fields that the type lacks are skipped.
+## Reads a value of the type asked for. Fields that the type lacks are skipped.
 public task parse[T: Json](raw: text) -> T or JsonError
     return decode[T](try read_value(raw))
 
-# The text of a value, with no spaces. A NaN or infinity is `null`.
+## The text of a value, with no spaces. A NaN or infinity is `null`.
 public task write[T: Json](value: T) -> text
     return encode(value)
 
