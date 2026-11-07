@@ -1,0 +1,6 @@
+[package]
+name = "perm_unsafe"
+version = "1.0.0"
+
+[permissions]
+unsafe = false

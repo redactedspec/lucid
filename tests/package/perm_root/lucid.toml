@@ -1,0 +1,9 @@
+[package]
+name = "perm_root"
+version = "1.0.0"
+
+[permissions]
+files = ["./data"]
+
+[dependencies]
+perm_lib = { path = "../perm_lib", allow = ["files", "env"] }

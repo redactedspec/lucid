@@ -1,0 +1,6 @@
+[package]
+name = "inner"
+version = "1.0.0"
+
+[permissions]
+unsafe = true

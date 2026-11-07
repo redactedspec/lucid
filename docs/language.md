@@ -588,7 +588,7 @@ use ./models.load as read_models
 
 `use ./a.b` is relative to the file that holds it, and reads `a/b.lcd`. If that file does not exist, it takes the name `b` from `a.lcd`. A `./` path cannot go up a directory. A file that cannot be found is error E0334, and the spelling must match the file's name exactly, on every system.
 
-`use std.a` is a module of the standard library, and `use std.a.b` takes the name `b` from it. `std` has no `./`, and needs no manifest entry. A module not built yet reports E0901. The modules are in [stdlib-and-web.md](stdlib-and-web.md).
+`use std.a` is a module of the standard library, and `use std.a.b` takes the name `b` from it. `std` has no `./`, and needs no dependency entry. In a package, `std.fs`, `std.env`, `std.net`, `std.http`, and `std.process` need a permission in `lucid.toml`, or else error E0340, see [security.md](security.md). A module not built yet reports E0901. The modules are in [stdlib-and-web.md](stdlib-and-web.md).
 
 A whole module goes by its last name, or by the name after `as`, and its names need that prefix: `models.load()`, `x: models.User`. A taken name has no prefix. The name a `use` takes must be new in the file, and not a built-in type or trait, or else error E0304. A local in a block may hide it, as with any top-level name. A `use` works in its own file only, and a module passes nothing on from its imports.
 

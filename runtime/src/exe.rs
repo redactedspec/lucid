@@ -2,7 +2,7 @@
 //! that the compiler embeds has this, since the compiler has its own `main`.
 //! See "`lucid build`" in docs/compiler.md.
 
-use crate::{CallSite, EXE_STACK_BYTES, SITE_WORDS, STACK_MARGIN, set_call_sites};
+use crate::{CallSite, EXE_STACK_BYTES, SITE_WORDS, STACK_MARGIN, set_call_sites, set_grants};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -19,6 +19,8 @@ unsafe extern "C" {
     static lucid_call_sites: usize;
     /// The text that rows of `lucid_call_sites` point into.
     static lucid_call_names: u8;
+    /// The text for `set_grants`, ended by a zero byte.
+    static lucid_grants: std::ffi::c_char;
 }
 
 #[unsafe(no_mangle)]
@@ -31,6 +33,10 @@ pub extern "C" fn main() -> i32 {
     // SAFETY: `native.rs` writes the table in the documented shape, and both
     // symbols live as long as the program.
     set_call_sites(unsafe { call_sites() });
+    // SAFETY: `native.rs` ends the text with a zero byte, and only lines of
+    // UTF-8 from `lucid.toml` come before it.
+    let grants = unsafe { std::ffi::CStr::from_ptr(&raw const lucid_grants) };
+    set_grants(&grants.to_string_lossy());
     // SAFETY: `lucid_main` takes nothing, and needs only the limit above.
     unsafe { lucid_main() };
     // Unlike a return from a C `main`, this flushes stdout.

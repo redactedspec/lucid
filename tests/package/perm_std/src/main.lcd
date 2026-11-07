@@ -1,0 +1,4 @@
+use std.env
+use std.fs
+
+print env.get("HOME") is none

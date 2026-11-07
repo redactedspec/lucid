@@ -12,7 +12,7 @@ use crate::ast::{
 use crate::check::{PRELUDE_TRAITS, is_built_in, is_literal};
 use crate::diag::{self, Diagnostic, Source, Span};
 use crate::lexer::{self, TextPart as RawPart, Token, TokenKind};
-use crate::manifest::{self, Dependency};
+use crate::manifest::{self, Dependency, Grant, PERMISSIONS};
 use crate::parser;
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -100,6 +100,26 @@ struct Package {
     /// `src/main.lcd` or `src/lib.lcd`.
     entry: String,
     library: bool,
+    /// One for each of `PERMISSIONS`.
+    permissions: Vec<Grant>,
+}
+
+impl Package {
+    fn grant(&self, permission: &str) -> &Grant {
+        let at = PERMISSIONS.iter().position(|&p| p == permission).expect("a permission");
+        &self.permissions[at]
+    }
+}
+
+/// The permission that a `std` module needs, if any.
+fn std_permission(module: &str) -> Option<&'static str> {
+    match module {
+        "fs" => Some("files"),
+        "env" => Some("env"),
+        "net" | "http" => Some("net"),
+        "process" => Some("process"),
+        _ => None,
+    }
 }
 
 /// `path` with a final `/`, or empty for the current directory.
@@ -179,6 +199,11 @@ pub fn load(path: &str, run: bool) -> (Source, Option<ast::File>, Vec<Diagnostic
     }
     let found = loader.module(&entry, Vec::new(), start);
     loader.check_dependencies();
+    if let Some(dir) = package_above(&entry)
+        && let Some(root) = loader.package(&dir, start)
+    {
+        loader.source.grants = Some(loader.packages[root].permissions.clone());
+    }
     let library = is_library(&entry);
     if run && library {
         let message = format!("`{entry}` is a library, so it cannot run");
@@ -306,6 +331,9 @@ impl Loader {
             }
             dependency.path = dir_prefix(&dependency.path);
             dependency.span = dependency.span.shifted(base);
+            for (_, span) in &mut dependency.allow {
+                *span = span.shifted(base);
+            }
             dependency
         });
         self.packages.push(Package {
@@ -314,6 +342,7 @@ impl Loader {
             dependencies: dependencies.collect(),
             entry: format!("{src}{}.lcd", if main { "main" } else { "lib" }),
             library: lib,
+            permissions: found.permissions,
         });
         Some(self.packages.len() - 1)
     }
@@ -355,10 +384,51 @@ impl Loader {
         let mut at = 0;
         while at < self.packages.len() {
             for dependency in self.packages[at].dependencies.clone() {
-                self.dependency(&dependency);
+                if let Some(id) = self.dependency(&dependency) {
+                    self.check_allow(at, id, &dependency);
+                }
             }
             at += 1;
         }
+    }
+
+    /// The rules of E0340 for one dependency: it holds only what its `allow`
+    /// entry names, the parent holds all of that, and the parent's lists
+    /// cover the dependency's lists.
+    fn check_allow(&mut self, parent: usize, child: usize, dependency: &Dependency) {
+        let (parent, child) = (&self.packages[parent], &self.packages[child]);
+        let mut found = Vec::new();
+        for &permission in PERMISSIONS {
+            let (own, theirs) = (parent.grant(permission), child.grant(permission));
+            let allowed = dependency.allow.iter().find(|(name, _)| name == permission);
+            if let Some((_, span)) = allowed
+                && !own.held()
+            {
+                let message = format!("`{}` cannot allow `{permission}`", parent.name);
+                let note = "a package can only pass on a permission that it holds";
+                found.push(Diagnostic::new("E0340", message, *span).note(note));
+            } else if theirs.held() && allowed.is_none() {
+                let message = format!("`{}` needs the `{permission}` permission", child.name);
+                let note = format!("name it in `allow`, if `{}` may have it", child.name);
+                found.push(Diagnostic::new("E0340", message, dependency.span).note(note));
+            } else if theirs.held() && !own.covers(theirs, permission) {
+                let message = format!(
+                    "`{}` lists more under `{permission}` than `{}` does",
+                    child.name, parent.name
+                );
+                let note = format!("add the rest to `{permission}` in `{}lucid.toml`", parent.dir);
+                found.push(Diagnostic::new("E0340", message, dependency.span).note(note));
+            }
+        }
+        self.diags.extend(found);
+    }
+
+    /// The package that holds a file, unless the file ships with the compiler.
+    fn holder(&mut self, file: &str, used_at: Span) -> Option<usize> {
+        if file.starts_with('@') {
+            return None;
+        }
+        self.package(&package_above(file)?, used_at)
     }
 
     /// Loads a file and all it imports. `None` if it cannot be read as text.
@@ -367,6 +437,11 @@ impl Loader {
             return Some(id);
         }
         let (base, text) = self.read(path, used_at)?;
+        if let Some(holder) = self.holder(path, used_at)
+            && !self.packages[holder].grant("unsafe").held()
+        {
+            self.source.no_unsafe.push((base, format!("{}lucid.toml", self.packages[holder].dir)));
+        }
         let (mut tokens, mut diags) = lexer::lex(&text);
         shift(&mut tokens, base);
         for d in &mut diags {
@@ -414,6 +489,13 @@ impl Loader {
             self.diags.push(Diagnostic::new("E0334", message, span).note(note));
             return None;
         };
+        // Its own `lucid.toml` would give the file other permissions.
+        if self.holder(&found, span) != self.holder(from, span) {
+            let message = format!("`./{}` is in another package", parts.join("."));
+            let note = "use it as a dependency, by its name, with no `./`";
+            self.diags.push(Diagnostic::new("E0339", message, span).note(note));
+            return None;
+        }
         let parent = &key[..key.len().saturating_sub(1)];
         let module_parts = &parts[..parts.len() - usize::from(item.is_some())];
         let new_key = parent.iter().cloned().chain(module_parts.iter().map(|&s| s.into()));
@@ -434,7 +516,7 @@ impl Loader {
     ) -> Option<Import> {
         let (first, rest) = written.split_first().expect("a path has a name");
         if first.text == "std" {
-            return self.import_std(written, alias, span);
+            return self.import_std(from, written, alias, span);
         }
         let Some(dir) = package_above(from) else {
             let message = format!("`{}` is not a dependency", first.text);
@@ -488,13 +570,29 @@ impl Loader {
     /// `use std.a` is a module of the standard library, and `use std.a.b` takes
     /// the name `b` from it. A module not built yet stays in the tree, and
     /// reports E0901.
-    fn import_std(&mut self, written: &[Name], alias: Option<&Name>, span: Span) -> Option<Import> {
+    fn import_std(
+        &mut self,
+        from: &str,
+        written: &[Name],
+        alias: Option<&Name>,
+        span: Span,
+    ) -> Option<Import> {
         let [_, module, rest @ ..] = written else {
             let message = "`std` is not a module";
             let note = "name one of its modules, as in `use std.fs`";
             self.diags.push(Diagnostic::new("E0334", message, span).note(note));
             return None;
         };
+        if let Some(permission) = std_permission(&module.text)
+            && let Some(holder) = self.holder(from, span)
+            && !self.packages[holder].grant(permission).held()
+        {
+            let package = &self.packages[holder];
+            let message = format!("`std.{}` needs the `{permission}` permission", module.text);
+            let note = format!("add it under `[permissions]` in `{}lucid.toml`", package.dir);
+            self.diags.push(Diagnostic::new("E0340", message, span).note(note));
+            return None;
+        }
         if !is_std_module(&module.text) {
             return None;
         }

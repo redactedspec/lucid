@@ -43,6 +43,8 @@ Never hand-roll cryptography primitives. Wrap a vetted implementation.
 
 `FileError` is a `choice`: `NotFound(path)`, `Denied(path)`, `NotText(path)`, or `Failed(path, detail)`. Paths are text, and `/` works on every system, so `"{dir}/{name}"` joins them.
 
+In a package, `std.fs` needs the `files` permission, and `std.env` needs `env`. A path outside the listed paths gives `Failed`, and `exists` gives `false`. `env.get` of a name that is not listed traps. See "Package permissions" in [security.md](security.md).
+
 | `time.now()` | `Time`: the wall clock, which can jump |
 | `time.clock()` | `Instant`: a clock that only goes forward, for measuring |
 | `later.since(earlier)` | `Duration`, for two `Time` or two `Instant` values |

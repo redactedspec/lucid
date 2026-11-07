@@ -3,6 +3,7 @@
 
 use crate::ast::BinaryOp;
 use crate::diag::{Diagnostic, Lines, Source, Span};
+use crate::manifest;
 use crate::mir::{Expr, ExprKind, HashOp, KeyTasks, Local, Program, Stmt, Task, Ty, Update};
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
@@ -294,6 +295,7 @@ fn jit(
     let address =
         |(id, offset, line)| (module.get_finalized_function(id) as usize + offset as usize, line);
     lucid_rt::set_call_sites(sites.into_iter().map(address).collect());
+    lucid_rt::set_grants(&manifest::runtime_grants(source.grants.as_deref()));
     // Leaked on purpose: `entry` points into memory that the module owns.
     std::mem::forget(module);
     Ok((entry, tests))
@@ -349,6 +351,12 @@ pub fn object(program: &Program, source: &Source) -> Result<Vec<u8>, Vec<Diagnos
     let mut description = DataDescription::new();
     description.define([names.as_bytes(), &[0]].concat().into_boxed_slice());
     let id = module.declare_data("lucid_call_names", Linkage::Export, false, false);
+    module.define_data(id.expect(CODEGEN), &description).expect(CODEGEN);
+    // As the call names: the trailing byte keeps the data non-empty.
+    let grants = manifest::runtime_grants(source.grants.as_deref());
+    let mut description = DataDescription::new();
+    description.define([grants.as_bytes(), &[0]].concat().into_boxed_slice());
+    let id = module.declare_data("lucid_grants", Linkage::Export, false, false);
     module.define_data(id.expect(CODEGEN), &description).expect(CODEGEN);
     Ok(module.finish().emit().expect(CODEGEN))
 }

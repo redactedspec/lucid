@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::hash::{BuildHasher, RandomState};
 use std::io::{ErrorKind, Write};
 use std::mem::offset_of;
+use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1588,7 +1589,80 @@ unsafe fn system_text<'a>(text: *const Text) -> &'a str {
     unsafe { std::str::from_utf8_unchecked(bytes(text)) }
 }
 
+/// The `files` and `env` permissions of the root package. `None` means all.
+/// See "Package permissions" in docs/security.md.
+struct Grants {
+    files: Option<Vec<String>>,
+    env: Option<Vec<String>>,
+    /// The working directory at start, which listed paths are relative to.
+    start: PathBuf,
+}
+
+/// Unset for a program with no `lucid.toml`, which has full trust.
+static GRANTS: OnceLock<Grants> = OnceLock::new();
+
+/// Limits `std.fs` and `std.env` to a package's permissions, before the
+/// program starts. Each line of `text` is `package`, `files`, `env`, or one of
+/// them and a space and a listed path or name. `files` alone means all files,
+/// and no `files` line means none. Empty text means full trust.
+pub fn set_grants(text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    let (mut files, mut env) = (Some(Vec::new()), Some(Vec::new()));
+    for line in text.lines() {
+        let (kind, item) = line.split_once(' ').unwrap_or((line, ""));
+        let list = match kind {
+            "files" => &mut files,
+            "env" => &mut env,
+            _ => continue,
+        };
+        match list {
+            Some(items) if !item.is_empty() => items.push(item.to_string()),
+            _ => *list = None,
+        }
+    }
+    let start = std::env::current_dir().unwrap_or_default();
+    let _ = GRANTS.set(Grants { files, env, start });
+}
+
+/// A path made absolute from `start`, with each link that exists followed.
+/// A `..` takes away the real directory before it.
+fn real_path(start: &Path, path: &str) -> PathBuf {
+    let mut real = PathBuf::new();
+    for part in start.join(path).components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                real.pop();
+            }
+            Component::Normal(_) => {
+                real.push(part);
+                if let Ok(found) = std::fs::canonicalize(&real) {
+                    real = found;
+                }
+            }
+            _ => real.push(part),
+        }
+    }
+    real
+}
+
+/// True if the `files` permission reaches `path`. If not, the next
+/// `lucid_fs_failure` says so.
+fn file_allowed(path: &str) -> bool {
+    let Some(Grants { files: Some(roots), start, .. }) = GRANTS.get() else { return true };
+    let real = real_path(start, path);
+    let allowed = roots.iter().any(|root| real.starts_with(real_path(start, root)));
+    if !allowed {
+        let detail = "outside the `files` permission in `lucid.toml`".to_string();
+        FILE_FAILURE.set((3, detail));
+    }
+    allowed
+}
+
 /// True if a variable is set. A name that the system cannot hold is not set.
+/// A name that the `env` permission does not list traps.
 ///
 /// # Safety
 ///
@@ -1596,7 +1670,14 @@ unsafe fn system_text<'a>(text: *const Text) -> &'a str {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lucid_env_has(name: *const Text) -> bool {
     // SAFETY: the caller guarantees a live text.
-    std::env::var_os(unsafe { system_text(name) }).is_some()
+    let name = unsafe { system_text(name) };
+    if let Some(Grants { env: Some(names), .. }) = GRANTS.get()
+        && !names.iter().any(|listed| listed == name)
+    {
+        let message = format!("trap: `env.get(\"{name}\")`: the `env` permission does not list it");
+        trap(message.as_bytes());
+    }
+    std::env::var_os(name).is_some()
 }
 
 /// The value of a variable, empty if it is not set. A value that is not
@@ -1661,7 +1742,8 @@ fn byte_list(bytes: &[u8]) -> *mut List {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lucid_fs_read(path: *const Text) -> *mut List {
     // SAFETY: the caller guarantees a live text.
-    let data = file_result(std::fs::read(unsafe { system_text(path) }));
+    let path = unsafe { system_text(path) };
+    let data = if file_allowed(path) { file_result(std::fs::read(path)) } else { None };
     byte_list(&data.unwrap_or_default())
 }
 
@@ -1674,6 +1756,9 @@ pub unsafe extern "C" fn lucid_fs_read(path: *const Text) -> *mut List {
 pub unsafe extern "C" fn lucid_fs_write(path: *const Text, data: *const List, append: bool) {
     // SAFETY: the caller guarantees both.
     let (path, data) = unsafe { (system_text(path), list_bytes(data)) };
+    if !file_allowed(path) {
+        return;
+    }
     let mut options = std::fs::OpenOptions::new();
     options.create(true).write(!append).truncate(!append).append(append);
     file_result(options.open(path).and_then(|mut file| file.write_all(data)));
@@ -1687,7 +1772,8 @@ pub unsafe extern "C" fn lucid_fs_write(path: *const Text, data: *const List, ap
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lucid_fs_exists(path: *const Text) -> bool {
     // SAFETY: the caller guarantees a live text.
-    std::path::Path::new(unsafe { system_text(path) }).exists()
+    let path = unsafe { system_text(path) };
+    file_allowed(path) && Path::new(path).exists()
 }
 
 /// The sorted names in a directory, or an empty list and the failure kept. A
@@ -1699,12 +1785,15 @@ pub unsafe extern "C" fn lucid_fs_exists(path: *const Text) -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lucid_fs_list(path: *const Text) -> *mut List {
     // SAFETY: the caller guarantees a live text.
-    let found = std::fs::read_dir(unsafe { system_text(path) });
-    let names = found.and_then(|entries| {
-        let names = entries.map(|e| Ok(e?.file_name().to_string_lossy().into_owned()));
-        names.collect::<std::io::Result<Vec<String>>>()
-    });
-    let mut names = file_result(names).unwrap_or_default();
+    let path = unsafe { system_text(path) };
+    let mut names = Vec::new();
+    if file_allowed(path) {
+        let names_in = std::fs::read_dir(path).and_then(|entries| {
+            let names = entries.map(|e| Ok(e?.file_name().to_string_lossy().into_owned()));
+            names.collect::<std::io::Result<Vec<String>>>()
+        });
+        names = file_result(names_in).unwrap_or_default();
+    }
     names.sort();
     text_list(names.iter().map(String::as_str))
 }
@@ -1717,7 +1806,10 @@ pub unsafe extern "C" fn lucid_fs_list(path: *const Text) -> *mut List {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lucid_fs_make_dir(path: *const Text) {
     // SAFETY: the caller guarantees a live text.
-    file_result(std::fs::create_dir_all(unsafe { system_text(path) }));
+    let path = unsafe { system_text(path) };
+    if file_allowed(path) {
+        file_result(std::fs::create_dir_all(path));
+    }
 }
 
 /// Removes a file or an empty directory.
@@ -1729,6 +1821,9 @@ pub unsafe extern "C" fn lucid_fs_make_dir(path: *const Text) {
 pub unsafe extern "C" fn lucid_fs_remove(path: *const Text) {
     // SAFETY: the caller guarantees a live text.
     let path = unsafe { system_text(path) };
+    if !file_allowed(path) {
+        return;
+    }
     let is_dir = std::fs::symlink_metadata(path).is_ok_and(|found| found.is_dir());
     file_result(if is_dir { std::fs::remove_dir(path) } else { std::fs::remove_file(path) });
 }
@@ -1741,7 +1836,10 @@ pub unsafe extern "C" fn lucid_fs_remove(path: *const Text) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lucid_fs_rename(from: *const Text, to: *const Text) {
     // SAFETY: the caller guarantees both.
-    file_result(std::fs::rename(unsafe { system_text(from) }, unsafe { system_text(to) }));
+    let (from, to) = unsafe { (system_text(from), system_text(to)) };
+    if file_allowed(from) && file_allowed(to) {
+        file_result(std::fs::rename(from, to));
+    }
 }
 
 /// The kind of the last failure on this thread. See `FILE_FAILURE`.

@@ -1,0 +1,2 @@
+perm_nested/src/main.lcd:1:1: error E0339: `./inner.raw` is in another package
+  note: use it as a dependency, by its name, with no `./`

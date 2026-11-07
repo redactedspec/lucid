@@ -589,7 +589,7 @@ print models.greet(User(name: "Ada"))
 
 ## Standard library
 
-`use std.x` needs no manifest entry. A module not built yet reports E0901.
+`use std.x` needs no dependency entry. In a package, `std.fs` and `std.env` need a permission, see "Packages". A module not built yet reports E0901.
 
 ```lucid
 use std.args
@@ -646,9 +646,16 @@ blog/
 name = "blog"
 version = "0.1.0"
 
+[permissions]
+files = ["./data"]        # or true. `env` is the same, with names
+unsafe = true
+
 [dependencies]
-markdown = { path = "../markdown" }
+markdown = { path = "../markdown", allow = [] }
 ```
+
+- A package has no permission it does not list, or else E0340. A dependency's permissions must be named in its `allow`, and its parent must hold them.
+- Outside `files`, `std.fs` gives `Failed`, and `env.get` of a name not in `env` traps. A file with no `lucid.toml` has every permission.
 
 - `lucid run`, `lucid build`, `lucid check`, and `lucid test` take a file or a package directory. With no path they use the package around the current directory.
 - `lucid build` writes a standalone program, `NAME.exe`, to the current directory.

@@ -1,0 +1,8 @@
+[package]
+name = "perm_lib"
+version = "1.0.0"
+
+[permissions]
+net = true
+files = ["data/sub/../x", "./other"]
+env = ["HOME"]

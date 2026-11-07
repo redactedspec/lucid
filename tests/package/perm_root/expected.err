@@ -1,0 +1,6 @@
+perm_root/lucid.toml:9:1: error E0340: `perm_lib` needs the `net` permission
+  note: name it in `allow`, if `perm_lib` may have it
+perm_root/lucid.toml:9:1: error E0340: `perm_lib` lists more under `files` than `perm_root` does
+  note: add the rest to `files` in `perm_root/lucid.toml`
+perm_root/lucid.toml:9:54: error E0340: `perm_root` cannot allow `env`
+  note: a package can only pass on a permission that it holds

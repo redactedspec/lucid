@@ -2,5 +2,8 @@
 name = "uses_unsafe"
 version = "1.0.0"
 
+[permissions]
+unsafe = true
+
 [dependencies]
-raw = { path = "../raw" }
+raw = { path = "../raw", allow = ["unsafe"] }

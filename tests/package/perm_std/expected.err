@@ -1,0 +1,2 @@
+perm_std/src/main.lcd:2:1: error E0340: `std.fs` needs the `files` permission
+  note: add it under `[permissions]` in `perm_std/lucid.toml`

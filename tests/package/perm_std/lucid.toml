@@ -1,0 +1,6 @@
+[package]
+name = "perm_std"
+version = "1.0.0"
+
+[permissions]
+env = ["HOME"]

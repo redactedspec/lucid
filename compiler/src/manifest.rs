@@ -6,15 +6,86 @@
 
 use crate::diag::{Diagnostic, Span};
 use crate::lexer::KEYWORDS;
+use std::path::{Component, Path, PathBuf};
 
 /// Deep enough for any manifest, and it keeps hostile input off the stack.
 const MAX_DEPTH: usize = 8;
 
-const PERMISSIONS: &[&str] = &["net", "files", "env", "process", "unsafe"];
+pub const PERMISSIONS: &[&str] = &["net", "files", "env", "process", "unsafe"];
 
 pub struct Manifest {
     pub name: String,
     pub dependencies: Vec<Dependency>,
+    /// One for each of `PERMISSIONS`, in that order.
+    pub permissions: Vec<Grant>,
+}
+
+/// What one permission gives: everything, or only the listed paths or names.
+/// `false` and an empty list give nothing.
+#[derive(Clone, PartialEq, Debug)]
+pub enum Grant {
+    All,
+    List(Vec<String>),
+}
+
+pub const NOTHING: Grant = Grant::List(Vec::new());
+
+impl Grant {
+    pub fn held(&self) -> bool {
+        *self != NOTHING
+    }
+
+    /// True if this grant gives all that `other` gives. `files` compares paths
+    /// after `.` and `..` are removed, and a path covers all below it.
+    pub fn covers(&self, other: &Grant, permission: &str) -> bool {
+        let (Grant::List(mine), Grant::List(theirs)) = (self, other) else {
+            return *self == Grant::All;
+        };
+        let covered = |item: &String| {
+            mine.iter().any(|own| match permission {
+                "files" => normal(item).starts_with(normal(own)),
+                _ => own == item,
+            })
+        };
+        theirs.iter().all(covered)
+    }
+}
+
+/// The text that `lucid_rt::set_grants` reads: the root package's `files`
+/// and `env` permissions, or nothing for a program with no `lucid.toml`.
+pub fn runtime_grants(grants: Option<&[Grant]>) -> String {
+    let Some(grants) = grants else { return String::new() };
+    let mut text = "package\n".to_string();
+    for (permission, grant) in PERMISSIONS.iter().zip(grants) {
+        match (*permission, grant) {
+            ("files" | "env", Grant::All) => text += &format!("{permission}\n"),
+            ("files" | "env", Grant::List(items)) => {
+                for item in items {
+                    text += &format!("{permission} {item}\n");
+                }
+            }
+            _ => {}
+        }
+    }
+    text
+}
+
+/// A path with `.` removed, and each `..` taken against the part before it.
+/// A `..` with no part before it stays.
+pub fn normal(path: &str) -> PathBuf {
+    let mut out = PathBuf::new();
+    for part in Path::new(path).components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir
+                if matches!(out.components().next_back(), Some(Component::Normal(_))) =>
+            {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 #[derive(Clone)]
@@ -23,11 +94,13 @@ pub struct Dependency {
     /// As written, relative to the manifest.
     pub path: String,
     pub span: Span,
+    /// The permissions that its `allow` entry names, each with its span.
+    pub allow: Vec<(String, Span)>,
 }
 
 enum Value {
     Text(String),
-    Bool,
+    Bool(bool),
     List(Vec<(Value, Span)>),
     Table(Vec<Entry>),
 }
@@ -177,11 +250,11 @@ impl Reader<'_> {
             Some('{') => self.inline_table(depth)?,
             _ if self.text[self.at..].starts_with("true") => {
                 self.at += 4;
-                Value::Bool
+                Value::Bool(true)
             }
             _ if self.text[self.at..].starts_with("false") => {
                 self.at += 5;
-                Value::Bool
+                Value::Bool(false)
             }
             _ => {
                 let message = "expected a string, `true`, `false`, `[`, or `{`";
@@ -346,22 +419,48 @@ fn read_package(table: &Table, diags: &mut Vec<Diagnostic>) -> Option<String> {
     name
 }
 
-fn read_permissions(table: &Table, diags: &mut Vec<Diagnostic>) {
+fn read_permissions(table: &Table, diags: &mut Vec<Diagnostic>) -> Vec<Grant> {
+    let mut grants = vec![NOTHING; PERMISSIONS.len()];
     for entry in &table.entries {
         let key = entry.key.as_str();
-        if !PERMISSIONS.contains(&key) {
+        let Some(at) = PERMISSIONS.iter().position(|&p| p == key) else {
             diags.push(error(format!("no permission `{key}`"), entry.span));
-        } else if matches!(key, "files" | "env") {
-            text_list(entry, diags);
-        } else if !matches!(entry.value, Value::Bool) {
-            diags.push(error(format!("`{key}` must be `true` or `false`"), entry.span));
-        }
+            continue;
+        };
+        let listed = matches!(key, "files" | "env");
+        grants[at] = match &entry.value {
+            Value::Bool(true) => Grant::All,
+            Value::Bool(false) => NOTHING,
+            Value::List(items) if listed => {
+                text_list(entry, diags);
+                let text = |(item, _): &(Value, Span)| match item {
+                    Value::Text(text) => Some(text.clone()),
+                    _ => None,
+                };
+                let items: Vec<String> = items.iter().filter_map(text).collect();
+                if items.iter().any(String::is_empty) {
+                    diags.push(error(format!("`{key}` cannot list an empty string"), entry.span));
+                }
+                Grant::List(items)
+            }
+            _ if listed => {
+                let message = format!("`{key}` must be `true`, `false`, or a list of strings");
+                diags.push(error(message, entry.span));
+                NOTHING
+            }
+            _ => {
+                diags.push(error(format!("`{key}` must be `true` or `false`"), entry.span));
+                NOTHING
+            }
+        };
     }
+    grants
 }
 
 fn read_dependency(entry: &Entry, diags: &mut Vec<Diagnostic>) -> Option<Dependency> {
     check_name(&entry.key, entry.span, diags);
     let mut path = None;
+    let mut allow = Vec::new();
     if let Value::Table(fields) = &entry.value {
         for field in fields {
             match (field.key.as_str(), &field.value) {
@@ -371,9 +470,10 @@ fn read_dependency(entry: &Entry, diags: &mut Vec<Diagnostic>) -> Option<Depende
                     text_list(field, diags);
                     let Value::List(items) = value else { continue };
                     for (item, span) in items {
-                        if let Value::Text(text) = item
-                            && !PERMISSIONS.contains(&text.as_str())
-                        {
+                        let Value::Text(text) = item else { continue };
+                        if PERMISSIONS.contains(&text.as_str()) {
+                            allow.push((text.clone(), *span));
+                        } else {
                             diags.push(error(format!("no permission `{text}`"), *span));
                         }
                     }
@@ -392,17 +492,18 @@ fn read_dependency(entry: &Entry, diags: &mut Vec<Diagnostic>) -> Option<Depende
         let note = "write `name = { path = \"../name\" }`. A registry is planned for M8";
         diags.push(error(message, entry.span).note(note));
     }
-    Some(Dependency { name: entry.key.clone(), path: path?, span: entry.span })
+    Some(Dependency { name: entry.key.clone(), path: path?, span: entry.span, allow })
 }
 
 fn read_tables(tables: &[Table]) -> (Option<Manifest>, Vec<Diagnostic>) {
     let mut diags = Vec::new();
     let mut name = None;
     let mut dependencies = Vec::new();
+    let mut permissions = vec![NOTHING; PERMISSIONS.len()];
     for table in tables {
         match table.name.as_str() {
             "package" => name = read_package(table, &mut diags),
-            "permissions" => read_permissions(table, &mut diags),
+            "permissions" => permissions = read_permissions(table, &mut diags),
             "dependencies" => {
                 let read = table.entries.iter();
                 dependencies.extend(read.filter_map(|e| read_dependency(e, &mut diags)));
@@ -416,7 +517,7 @@ fn read_tables(tables: &[Table]) -> (Option<Manifest>, Vec<Diagnostic>) {
     if !diags.is_empty() {
         return (None, diags);
     }
-    (name.map(|name| Manifest { name, dependencies }), diags)
+    (name.map(|name| Manifest { name, dependencies, permissions }), diags)
 }
 
 #[cfg(test)]
@@ -466,8 +567,8 @@ mod tests {
         bad(&format!("{HEAD}extra = true\n"), "has no key");
         bad(&format!("{HEAD}[permissions]\nweb = true\n"), "no permission");
         bad(&format!("{HEAD}[permissions]\nnet = \"yes\"\n"), "must be `true`");
-        bad(&format!("{HEAD}[permissions]\nfiles = true\n"), "list of strings");
         bad(&format!("{HEAD}[permissions]\nfiles = [true]\n"), "list of strings");
+        bad(&format!("{HEAD}[permissions]\nenv = [\"\"]\n"), "empty string");
         bad(&format!("{HEAD}[dependencies]\nx = \"1.2\"\n"), "needs a `path`");
         bad(&format!("{HEAD}[dependencies]\nx = {{ path = \"a\", }}\n"), "expected a key");
         bad(&format!("{HEAD}[dependencies]\nx = {{ path = \"a\"\n"), "expected `,` or `}`");
@@ -479,6 +580,25 @@ mod tests {
         bad(&format!("{HEAD}x = true false\n"), "end of the line");
         bad("x = true\n", "must follow a table");
         bad(&format!("{HEAD}x = [{}\n", "[".repeat(100_000)), "too deep");
+    }
+
+    #[test]
+    fn grants_cover_lists() {
+        let list = |items: &[&str]| Grant::List(items.iter().map(|s| s.to_string()).collect());
+        assert!(list(&["./data"]).covers(&list(&["data/a", "data/b/../c", "./data"]), "files"));
+        assert!(!list(&["./data"]).covers(&list(&["data/../x"]), "files"));
+        assert!(!list(&["./data"]).covers(&list(&["database"]), "files"));
+        assert!(!list(&["data/x"]).covers(&list(&["data"]), "files"));
+        assert!(Grant::All.covers(&list(&["../anything"]), "files"));
+        assert!(!list(&["/"]).covers(&Grant::All, "files"));
+        assert!(!list(&["PORT"]).covers(&list(&["PORT", "HOME"]), "env"));
+        assert!(!NOTHING.held() && list(&["x"]).held());
+        let (manifest, _) = parse(&format!("{HEAD}[permissions]
+files = true
+net = false
+"));
+        let permissions = manifest.expect("a manifest").permissions;
+        assert_eq!(permissions[..2], [NOTHING, Grant::All]);
     }
 
     /// Only structure is checked, so no input may panic: cut a valid manifest

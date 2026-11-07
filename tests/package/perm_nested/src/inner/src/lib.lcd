@@ -1,0 +1,2 @@
+public task two() -> int
+    return 2

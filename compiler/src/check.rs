@@ -49,7 +49,12 @@ const TEST_UNION: &str = "test it first, as in `if x is not none`. Only a name n
 /// names and types that feature would supply make any other error unreliable.
 /// With `keep_tests` false, `test` blocks are dropped unread.
 pub fn check(file: &ast::File, source: &Source, keep_tests: bool) -> (Program, Vec<Diagnostic>) {
-    let mut checker = Checker { src: &source.text, files: &source.files, ..Checker::default() };
+    let mut checker = Checker {
+        src: &source.text,
+        files: &source.files,
+        no_unsafe: &source.no_unsafe,
+        ..Checker::default()
+    };
     checker.declare_types(file);
     checker.declare(file);
     let written: Vec<_> = file
@@ -270,6 +275,8 @@ struct Checker<'a> {
     /// The text of the files, where an `unsafe` block needs a comment.
     src: &'a str,
     files: &'a [SourceFile],
+    /// See `Source::no_unsafe`.
+    no_unsafe: &'a [(usize, String)],
     diags: Vec<Diagnostic>,
     /// The ids of `extern` tasks.
     foreign: HashSet<usize>,
@@ -1615,6 +1622,7 @@ impl<'a> Checker<'a> {
                 self.check_foreign(def, &signature);
                 self.foreign.insert(id);
                 self.unsafe_sites.push(("extern", stmt.span));
+                self.need_permission("an `extern` task", stmt.span);
             }
             self.signatures.push(signature);
         }
@@ -1871,10 +1879,21 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Reports `unsafe` code in a package that lacks the `unsafe` permission.
+    fn need_permission(&mut self, what: &str, span: Span) {
+        let file = self.files[file_index(self.files, span.start)].start;
+        if let Some((_, manifest)) = self.no_unsafe.iter().find(|(start, _)| *start == file) {
+            let message = format!("{what} needs the `unsafe` permission");
+            let note = format!("add it under `[permissions]` in `{manifest}`");
+            self.report(Diagnostic::new("E0340", message, span).note(note));
+        }
+    }
+
     /// `unsafe`. The comment that security.md asks for comes first, or at the
     /// end of the line.
     fn unsafe_block(&mut self, body: &'a [ast::Stmt], span: Span) -> Stmt {
         self.unsafe_sites.push(("block", span));
+        self.need_permission("an `unsafe` block", span);
         // Only this file: a package's manifest sits just before its entry file.
         let file = self.files[file_index(self.files, span.start)].start;
         if !has_comment(&self.src[file..], span.start - file) {

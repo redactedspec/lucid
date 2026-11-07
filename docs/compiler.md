@@ -78,6 +78,8 @@ A file with a `use` that has no `./` finds its package by walking up to the near
 
 Every entry of every manifest read is checked, used or not, after the modules load. A dependency's path, `lucid.toml`, and `src` must match their spelling on disk exactly, by the rule in `exact_file`. `lucid test` on a package checks all files before it runs any test. `is_library` compares real paths, so `src/lib.lcd` follows the library rules when it is named directly too.
 
+Permissions are checked in three places, by decision 146. `Loader::import_std` checks a `std` module's permission, and `Loader::check_allow` checks each dependency entry against both manifests. `resolve.rs` records the files of each package without `unsafe` in `Source::no_unsafe`, and `check.rs` reports E0340 at each `unsafe` block and `extern` in them. The root package's permissions go in `Source::grants`. `native.rs` passes its `files` and `env` lists, as lines of text from `manifest::runtime_grants`, to `lucid_rt::set_grants` under the JIT, and as the data `lucid_grants` in a built program, which `exe.rs` reads. The runtime checks each `std.fs` path and `std.env` name against them.
+
 `Source` holds all the files end to end, entry file first, or the manifest and then the entry file for a package, so a span alone gives its file. `Lines::place` turns an offset into a file, line, and column.
 
 ## `lucid fmt`
@@ -263,7 +265,7 @@ Exit codes: 0 for success, 1 for compile errors or a failed test, 2 for bad usag
 - **Golden cost tests:** `tests/costs/name.lcd` with `name.out` for what `lucid check --costs` reports.
 - **Golden trap tests:** `tests/trap/name.lcd` with `name.err` for the trap message, and exit code 101.
 - **Modules:** a file that a golden test imports sits in `modules_lib/` under the test directory, which the runner does not list.
-- **Golden package tests:** `tests/package/name/` must print `expected.out` and exit 0, or `expected.err` and exit 1, under `lucid run name`. A directory with neither is a dependency of the others. E0338 and E0339 are tested here, since they need a manifest.
+- **Golden package tests:** `tests/package/name/` must print `expected.out` and exit 0, or `expected.err` and exit 1, under `lucid run name`. A directory with neither is a dependency of the others. E0338, E0339, and E0340 are tested here, since they need a manifest. `permissions_hold_at_run_time` in `golden.rs` checks the run-time lists under `lucid run` and in a built program.
 - **Golden format tests:** `tests/fmt/name.lcd` with `name.out` for what `lucid fmt` makes of it. Each `.out` file must stay unchanged under `lucid fmt --check`, and so must every `.lcd` file in `std/`, `tools/`, and `examples/`.
 - **Golden `lucid test` tests:** `tests/test/name.lcd` with `name.out` for the report. Exit code 1 if it holds a failure.
 - **Error code check:** `compiler/tests/golden.rs` fails if a code in the source has no golden test or no entry in `docs/errors.md`, or if an example there does not give its own code.

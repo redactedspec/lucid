@@ -1,0 +1,4 @@
+perm_unsafe/src/main.lcd:1:1: error E0340: an `extern` task needs the `unsafe` permission
+  note: add it under `[permissions]` in `perm_unsafe/lucid.toml`
+perm_unsafe/src/main.lcd:4:1: error E0340: an `unsafe` block needs the `unsafe` permission
+  note: add it under `[permissions]` in `perm_unsafe/lucid.toml`

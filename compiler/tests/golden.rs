@@ -487,6 +487,49 @@ fn built_programs_match_run() {
     }
 }
 
+/// The root package's `files` and `env` lists hold at run time, under
+/// `lucid run` and in a built program. See "Package permissions" in
+/// docs/security.md.
+#[test]
+fn permissions_hold_at_run_time() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("permissions");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("src")).expect("cannot make directory");
+    fs::create_dir_all(dir.join("data")).expect("cannot make directory");
+    let manifest = "[package]\nname = \"permissions\"\nversion = \"1.0.0\"\n\n\
+        [permissions]\nfiles = [\"data\"]\nenv = [\"LUCID_PERM_SET\"]\n";
+    let main = "use std.env\nuse std.fs\n\n\
+        task show(result: text or fs.FileError)\n    match result\n        \
+        content: text -> print content\n        e: fs.FileError -> print e.error_message()\n\n\
+        show(fs.read_text(\"data/a.txt\"))\nshow(fs.read_text(\"lucid.toml\"))\n\
+        show(fs.read_text(\"data/../lucid.toml\"))\nprint fs.exists(\"data/a.txt\")\n\
+        print fs.exists(\"lucid.toml\")\nprint env.get(\"LUCID_PERM_SET\")\n\
+        print env.get(\"LUCID_PERM_OTHER\")\n";
+    fs::write(dir.join("lucid.toml"), manifest).expect("cannot write");
+    fs::write(dir.join("src/main.lcd"), main).expect("cannot write");
+    fs::write(dir.join("data/a.txt"), "inside").expect("cannot write");
+    let output = lucid(&dir, &["build"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let outside = "outside the `files` permission in `lucid.toml`";
+    let expected =
+        format!("inside\nlucid.toml: {outside}\ndata/../lucid.toml: {outside}\ntrue\nfalse\nyes\n");
+    for built in [false, true] {
+        let mut command = if built {
+            Command::new(dir.join("permissions.exe"))
+        } else {
+            let mut command = Command::new(LUCID);
+            command.arg("run");
+            command
+        };
+        let output = command.current_dir(&dir).env("LUCID_PERM_SET", "yes").output();
+        let output = output.expect("cannot start the program");
+        assert_eq!(text(&output.stdout), expected, "built: {built}");
+        assert_eq!(output.status.code(), Some(101), "built: {built}");
+        let trap = "trap: `env.get(\"LUCID_PERM_OTHER\")`: the `env` permission does not list it";
+        assert!(text(&output.stderr).starts_with(trap), "{}", text(&output.stderr));
+    }
+}
+
 /// A standard module's sites are not the program's to audit or fix.
 #[test]
 fn reports_leave_out_std() {

@@ -59,11 +59,11 @@ mailer = { path = "../mailer", allow = ["net"] }
 
 `std.args`, `std.json`, and `std.time` need no permission. `std` itself needs none, since it ships with the compiler.
 
-**State:** `lucid.toml` is read and its permissions are validated, and E0338 rejects an unknown one. Nothing enforces them yet. The design below is planned for M5, by decision 146.
+`false`, an empty list, and a permission left out all grant nothing. A listed path or name cannot be empty. E0338 rejects an unknown permission. The rules below are built, by decision 146.
 
-**Who is checked:** every module of a package, the root package too. A program with no `lucid.toml` is not a package, and has full trust, as a script has today.
+**Who is checked:** every module of a package, the root package too. A `use ./` cannot reach a file under another `lucid.toml`, or else E0339, so a file cannot take a nested package's permissions. A program with no `lucid.toml` is not a package, and has full trust, as a script has today.
 
-**At compile time (planned):** error E0340 rejects:
+**At compile time:** error E0340 rejects:
 
 - a `use` of a `std` module, in a package without the permission that unlocks it
 - an `unsafe` block or `extern` declaration, in a package without `unsafe`
@@ -71,7 +71,7 @@ mailer = { path = "../mailer", allow = ["net"] }
 - an `allow` entry that names a permission its own package does not hold
 - a dependency's path or name list that its parent's list does not cover. `true` covers any list. A path covers itself and every path below it, compared after `.` and `..` are removed
 
-**At run time (planned):** paths and names are checked against the root package's lists, for the whole program. A listed path is relative to the working directory at start, and the program cannot change that directory. Each `std.fs` call resolves its path through any links that exist, and then must lie at or below a listed path. Outside them, a task that can fail returns `Failed`, with a detail that names the `files` permission, and `fs.exists` returns `false`. `env.get` of an unlisted name traps, since a name is almost always fixed in the code, and so a wrong one is a bug.
+**At run time:** paths and names are checked against the root package's lists, for the whole program, under `lucid run`, `lucid test`, and in a built program. A listed path is relative to the working directory at start, and the program cannot change that directory. Each `std.fs` call resolves its path, and each listed path, through any links that exist, and then the path must lie at or below a listed path. Outside them, a task that can fail returns `Failed`, with a detail that names the `files` permission, and `fs.exists` returns `false`. `env.get` of an unlisted name traps, since a name is almost always fixed in the code, and so a wrong one is a bug. Names compare exactly, so on Windows `path` does not match a listed `PATH`. That errs toward refusing.
 
 **Limit of the run-time check:** a dependency can reach any path or name that the root lists, not just its own. The compile-time rules still make the root's author list, and so approve, each path a dependency asks for. Checking per package would need each package to have its own copy of `std` tasks, while their types stay shared. Deno also checks paths for the whole process. A link changed between the check and the call can escape the check. Both are within the limit below: permissions are not a sandbox.
 

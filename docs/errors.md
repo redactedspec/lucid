@@ -573,15 +573,15 @@ Fix: correct the line the message names. A manifest holds `[package]` with `name
 
 ## E0339: A package has no entry file or two, or a dependency is wrong
 
-A package has `src/main.lcd` or `src/lib.lcd`, not both. A dependency must exist, have the name it is given, be a library, and not share a name with another package. `lucid run` cannot run a library.
+A package has `src/main.lcd` or `src/lib.lcd`, not both. A `use ./` cannot reach a file under another `lucid.toml`, since that file would have the other package's permissions. A dependency must exist, have the name it is given, be a library, and not share a name with another package. `lucid run` cannot run a library.
 
 Fix: follow the message: add or remove an entry file, or correct the dependency's `path` or name.
 
-## E0340: A package uses a permission it does not hold (planned)
+## E0340: A package uses a permission it does not hold
 
-Planned for M5, by decision 146. A package's `use` of a `std` module, its `unsafe` block or `extern`, or a dependency's permissions go beyond what its `lucid.toml` grants. See "Package permissions" in `docs/security.md`.
+A package's `use` of a `std` module, its `unsafe` block or `extern`, or a dependency's permissions go beyond what its `lucid.toml` grants. A dependency may hold only what its `allow` entry names, a package may only allow what it holds, and a dependency's `files` and `env` lists must fall inside its parent's. See "Package permissions" in `docs/security.md`.
 
-An example, with its test, comes when the check is built.
+For example, `use std.fs` in a package whose `lucid.toml` has no `files` permission. The tests are in `tests/package/perm_*`, since they need a manifest.
 
 Fix: add the permission to `[permissions]` in the package's `lucid.toml`, as `files = ["./notes"]`, or to the `allow` entry of the dependency that needs it.
 

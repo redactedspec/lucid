@@ -1,0 +1,3 @@
+use ./inner.raw
+
+print raw.one()

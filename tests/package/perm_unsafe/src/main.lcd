@@ -1,0 +1,5 @@
+unsafe extern task abs(n: i32) -> i32
+
+# `abs` reads only its argument.
+unsafe
+    print abs(-1)

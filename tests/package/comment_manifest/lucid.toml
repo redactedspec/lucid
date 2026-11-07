@@ -1,4 +1,7 @@
 [package]
 name = "comment_manifest"
 version = "1.0.0"
+
+[permissions]
+unsafe = true
 # It is fine.

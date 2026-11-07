@@ -81,7 +81,7 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] `lucid context`
 - [x] `lucid fix`
 - [x] `lucid fmt`, written in Lucid as first dogfooding test: `tools/fmt.lcd`
-- [ ] Permission checks, specified in `security.md` by decision 146
+- [x] Permission checks, specified in `security.md` by decision 146
 - [ ] Full agent benchmark
 - [ ] Fuzzing
 
