@@ -65,7 +65,16 @@ Lucid covers both sides of a website.
 
 **Browser side** compiles to WebAssembly with `lucid build --target web`. The output is a `.wasm` file with a small JavaScript loader. Browser access goes through `std.dom`, because WebAssembly cannot touch the DOM directly.
 
-The browser framework is deliberately not designed yet. Decide it at M6, based on real programs.
+The page is built in the Elm architecture, by decision 163. Planned for M6:
+
+- a model: any value that holds the page's state;
+- `view(model)`: gives a tree of nodes, where a handler names a message, not code;
+- `update(change model, message)`: changes the model in reply to one message;
+- `dom.app(init, view, update)`: shows `view(init)`, and after each event runs `update`, then `view`, and changes only the parts of the page that differ, matched by tag and position, so an `<input>` keeps its focus.
+
+A handler cannot hold state itself, since a capture cannot change. The names of the tasks and nodes are settled by writing the M6 example page first. A keyed diff, for lists that reorder, waits for a program that needs it.
+
+On the web, `std.fs` gives `Failed`, `env.get` gives none, `args.all()` gives `[]`, and `time.sleep` traps. `std.dom` works only with `--target web`.
 
 ## Example: JSON
 

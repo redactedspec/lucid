@@ -21,6 +21,7 @@ Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file wheneve
 | Agent-friendliness | Moderate. The M5 benchmark passed 44 of 50 on the first attempt, against 49 for Python and 46 for TypeScript, and 50 of 50 in the end, with limits stated below | Snippet, trial, benchmark | Fix the diagnostics and guide gaps it found |
 | Indentation syntax helps agents | No evidence | None | Owner preference. Measure |
 | No `async`, lightweight tasks in browser | Now feasible through JSPI | Snippet | Decide at M7 |
+| WebAssembly as two modules with shared memory, Elm-style UI | Follows the tool conventions and Elm. No measurement yet | Read | Build at M6, decisions 156 to 164 |
 | ASCII names, text escapes | Judgment call from existing practice | None | Revisit before 1.0 |
 | Division, argument order | Judgment call from existing practice | None | No failure in the M3 trial or the M5 benchmark |
 | Type arguments in brackets, read in one pass | Follows Go. Form also proposed for Python | Read, parser Snippet | No failure in the M3 trial or the M5 benchmark |
@@ -575,6 +576,23 @@ Decision 154.
 Level: **Read** for both exception texts, through SPDX's copies.
 
 Sources: [GCC Runtime Library Exception 3.1](https://www.gnu.org/licenses/gcc-exception-3.1.html), [SPDX GCC-exception-3.1](https://spdx.org/licenses/GCC-exception-3.1.html), [SPDX Classpath-exception-2.0](https://spdx.org/licenses/Classpath-exception-2.0.html), [GPL version 3](https://www.gnu.org/licenses/gpl-3.0.html).
+
+## WebAssembly
+
+Decisions 156 to 164.
+
+Level: **Read** for each source below, 2026-11-07, except where marked.
+
+- **Shared memory and table.** The WebAssembly tool conventions for dynamic linking say a module may import `env.memory`, "a wasm memory that is shared between all wasm modules that make up the program", and `env.__indirect_function_table`, the same for the table. `env.__memory_base` and `env.__table_base` are immutable `i32` globals, and a module "can use this global in the initializer of its data segments so that they loaded at the correct address", and likewise for table elements. The page says "There is no stable ABI yet", so Lucid follows the shape and writes its own loader, not a loader of that ABI.
+- **Constant offsets.** The core specification lets a constant expression use `global.get` only of an immutable global, and only of "_imported_ or _previously defined_ globals". So a segment can sit at an imported base.
+- **Linker flags.** `wasm-ld` documents `--export-table`, "Export the function table to the environment". `--growable-table` is not on that page, but the `rust-lld` of Rust 1.97.1 lists it: "Remove maximum size from function table, allowing table to grow". Checked with `rust-lld -flavor wasm --help`.
+- **Rust on `wasm32-unknown-unknown`.** The rustc platform page says the target "does not import any functions from the host for the standard library", that "many parts of the standard library do not work and return errors", and that `std::fs` will "always return errors". It does not name `std::env` or `std::time`. That `SystemTime::now` and `Instant::now` panic there is from memory, and step 2 of M6 must check it.
+- **Hash keys.** `SipHasher::new_with_keys` is stable since 1.0.0, and deprecated since 1.13.0 in favor of `DefaultHasher`, which takes no keys.
+- **Loading from disk.** MDN: with module scripts "you can no longer view your HTML using the `file://` protocol", because "module requests use CORS, and `file://` URLs are never same-origin". That a classic `<script src>` with no `fetch` does load from `file://` is from memory, and the M6 exit check tests it.
+- **UI shape.** The Elm guide says a program "always breaks into three parts": the model, "the state of your application", the view, "a way to turn your state into HTML", and update, "a way to update your state based on messages". That Redux and iced use the same split is from memory.
+- **Weak ground.** No measurement yet. The cost of a call between the two modules, and of counting through runtime calls in place of inline code, is unknown until the backend exists. That `Error.stack` holds a function index and code offset for each WebAssembly frame is from memory of V8 and Node, and step 4 of M6 must check it.
+
+Sources: [Dynamic linking conventions](https://github.com/WebAssembly/tool-conventions/blob/main/DynamicLinking.md), [constant expressions](https://webassembly.github.io/spec/core/valid/instructions.html#constant-expressions), [wasm-ld](https://lld.llvm.org/WebAssembly.html), [wasm32-unknown-unknown](https://doc.rust-lang.org/rustc/platform-support/wasm32-unknown-unknown.html), [SipHasher](https://doc.rust-lang.org/std/hash/struct.SipHasher.html), [Modules on the web](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules/Modules_on_the_web), [The Elm Architecture](https://guide.elm-lang.org/architecture/).
 
 ## Open research
 

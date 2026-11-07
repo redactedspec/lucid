@@ -89,10 +89,14 @@ Build a thin end-to-end path first. Depth comes later.
 
 ## M6: Browser
 
-- [ ] WebAssembly backend from MIR
-- [ ] Runtime on `wasm32`
-- [ ] `std.dom`, JavaScript loader
+Designed by decisions 156 to 164, see "WebAssembly" in `compiler.md`. Build in this order:
+
 - [ ] Prelude: text split, integer parsing, case change, list sort, by decision 155
+- [ ] Runtime on `wasm32`, with the fixed-width layout of decision 156
+- [ ] WebAssembly backend from MIR: numbers, control flow, calls, `print`, the loader, `--target web`
+- [ ] WebAssembly backend: heap values, task values, `change`, `std`, traces. All run and trap tests pass under Node
+- [ ] `std.dom` and `dom.app`, by decision 163
+- [ ] Example page, checked in a browser
 
 **Exit:** an interactive page written only in Lucid runs in a browser.
 
