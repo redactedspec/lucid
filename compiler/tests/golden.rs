@@ -544,7 +544,7 @@ fn failed_stdout_write_traps_without_a_position() {
 }
 
 /// AGENTS.md: every compile error needs a stable code and a test. It must
-/// also be listed in docs/agents.md.
+/// also have an entry in docs/errors.md.
 #[test]
 fn every_error_code_is_tested_and_documented() {
     // missing_file_is_reported, huge_frame_is_rejected, and
@@ -558,7 +558,7 @@ fn every_error_code_is_tested_and_documented() {
             .unwrap_or_default();
     }
     let documented =
-        fs::read_to_string(repo().join("docs").join("agents.md")).expect("cannot read docs");
+        fs::read_to_string(repo().join("docs").join("errors.md")).expect("cannot read docs");
     let mut codes = Vec::new();
     for source in files(&repo().join("compiler").join("src"), "rs") {
         let source = fs::read_to_string(source).expect("cannot read source");
@@ -575,7 +575,49 @@ fn every_error_code_is_tested_and_documented() {
     codes.dedup();
     assert!(codes.len() >= 10, "found only {codes:?}");
     let untested: Vec<_> = codes.iter().filter(|c| !tested.contains(*c)).collect();
-    let undocumented: Vec<_> = codes.iter().filter(|c| !documented.contains(*c)).collect();
+    let entry = |code: &String| documented.contains(&format!("\n## {code}: "));
+    let undocumented: Vec<_> = codes.iter().filter(|c| !entry(c)).collect();
     assert!(untested.is_empty(), "no golden test for {untested:?}");
-    assert!(undocumented.is_empty(), "not in docs/agents.md: {undocumented:?}");
+    assert!(undocumented.is_empty(), "not in docs/errors.md: {undocumented:?}");
+}
+
+/// Each example in docs/errors.md gives its own code, and only that code.
+/// `lucid check` leaves out what only code generation finds.
+#[test]
+fn error_examples_give_their_code() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("explain");
+    fs::create_dir_all(&dir).expect("cannot make directory");
+    let doc = fs::read_to_string(repo().join("docs/errors.md")).expect("cannot read docs");
+    let mut failures = Vec::new();
+    for entry in doc.split("\n## ").skip(1) {
+        let code = &entry[..5];
+        let Some(example) = entry.split("```lucid\n").nth(1) else { continue };
+        let example = example.split("```").next().expect("split gives one part");
+        fs::write(dir.join("example.lcd"), example).expect("cannot write");
+        let command = if code.starts_with("E09") { "run" } else { "check" };
+        let errors = text(&lucid(&dir, &[command, "example.lcd"]).stderr);
+        let mut found: Vec<&str> =
+            errors.split(": error ").skip(1).map(|rest| rest.get(..5).unwrap_or(rest)).collect();
+        found.dedup();
+        if found != [code] {
+            failures.push(format!("{code}: {errors}"));
+        }
+    }
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+}
+
+#[test]
+fn explain_prints_one_entry() {
+    let dir = repo();
+    let output = lucid(&dir, &["explain", "e0301"]);
+    assert_eq!(output.status.code(), Some(0));
+    let entry = text(&output.stdout);
+    assert!(entry.starts_with("E0301: Name is not defined\n"), "{entry}");
+    assert!(entry.contains("Fix: ") && !entry.contains("E0302"), "{entry}");
+    let json = text(&lucid(&dir, &["explain", "--json", "E0314"]).stdout);
+    assert!(json.starts_with("{\"code\":\"E0314\",\"title\":\"Empty list"), "{json}");
+    assert!(json.contains("\"example\":\"let a = []\\n\",\"fix\":\"annotate"), "{json}");
+    let missing = lucid(&dir, &["explain", "E9999"]);
+    assert_eq!(missing.status.code(), Some(1));
+    assert_eq!(text(&missing.stderr), "lucid: no error code `E9999`, see docs/errors.md\n");
 }

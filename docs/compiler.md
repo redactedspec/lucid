@@ -194,7 +194,7 @@ ROUNDS=3 sh benchmarks/run.sh                 # fewer rounds
 | `lucid test [--json] [PATH]` | Run `test` blocks | Works, for a file, or every file in a package's `src` |
 | `lucid fmt` | Format, no options | Planned |
 | `lucid fix` | Apply suggested fixes | Planned |
-| `lucid explain CODE` | Explain an error code | Planned |
+| `lucid explain [--json] CODE` | Explain an error code | Works, from `docs/errors.md`, which the compiler holds through `include_str!` |
 | `lucid context MODULE` | Print a compact API | Planned |
 | `lucid doc` | Generate docs | Planned |
 
@@ -215,7 +215,7 @@ Exit codes: 0 for success, 1 for compile errors or a failed test, 2 for bad usag
 - **Modules:** a file that a golden test imports sits in `modules_lib/` under the test directory, which the runner does not list.
 - **Golden package tests:** `tests/package/name/` must print `expected.out` and exit 0, or `expected.err` and exit 1, under `lucid run name`. A directory with neither is a dependency of the others. E0338 and E0339 are tested here, since they need a manifest.
 - **Golden `lucid test` tests:** `tests/test/name.lcd` with `name.out` for the report. Exit code 1 if it holds a failure.
-- **Error code check:** `compiler/tests/golden.rs` fails if a code in the source has no golden test or is missing from `docs/agents.md`.
+- **Error code check:** `compiler/tests/golden.rs` fails if a code in the source has no golden test or no entry in `docs/errors.md`, or if an example there does not give its own code.
 - **Examples:** everything in `examples/` must parse. Later milestones raise this to compile.
 - **Agent guide:** every `lucid` block in `docs/agent-guide.md` must run with exit code 0, and the guide must stay under the token budget, at about 4 bytes per token.
 - **Ownership-off mode:** the run and trap tests run a second time with `LUCID_NAIVE` set, which turns ownership optimizations off. Output must match.

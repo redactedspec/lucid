@@ -19,7 +19,7 @@ use resolve::{load, package_files, package_root};
 use std::io::Write;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\nPATH is a file or a package directory, by default the current directory.";
+const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\n       lucid explain [--json] CODE\nPATH is a file or a package directory, by default the current directory.";
 
 /// Set for the child process of `lucid test`, to the place of its first test.
 const TEST_FROM: &str = "LUCID_TEST_FROM";
@@ -42,6 +42,12 @@ fn main() -> ExitCode {
 fn cli(args: &[String]) -> ExitCode {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let Some((&command, mut rest)) = args.split_first() else { return usage() };
+    match (command, rest) {
+        ("explain", [code]) if !code.starts_with('-') => return explain(code, false),
+        ("explain", ["--json", code]) => return explain(code, true),
+        ("explain", _) => return usage(),
+        _ => {}
+    }
     // What follows the path of `lucid run` belongs to the program.
     if command == "run" && rest.first().is_some_and(|path| !path.starts_with('-')) {
         lucid_rt::set_args(rest[1..].iter().map(|arg| (*arg).to_string()).collect());
@@ -199,6 +205,43 @@ fn unsafe_sites(path: &str, json: bool) -> ExitCode {
     let report: String =
         if json { format!("[{}]\n", items.collect::<Vec<_>>().join(",")) } else { items.collect() };
     emit(std::io::stdout(), &report);
+    ExitCode::SUCCESS
+}
+
+/// Every error code, with its cause, an example, and a fix.
+const ERRORS: &str = include_str!("../../docs/errors.md");
+
+/// `lucid explain`: the entry of one error code in docs/errors.md.
+fn explain(code: &str, json: bool) -> ExitCode {
+    let code = code.to_ascii_uppercase();
+    let entries = ERRORS.split("\n## ").skip(1);
+    let entry = entries.map(str::trim_end).find_map(|entry| {
+        let (heading, body) = entry.split_once('\n').unwrap_or((entry, ""));
+        Some((heading.strip_prefix(code.as_str())?.strip_prefix(": ")?, entry, body))
+    });
+    let Some((title, entry, body)) = entry else {
+        emit(std::io::stderr(), &format!("lucid: no error code `{code}`, see docs/errors.md\n"));
+        return ExitCode::FAILURE;
+    };
+    if !json {
+        emit(std::io::stdout(), &format!("{entry}\n"));
+        return ExitCode::SUCCESS;
+    }
+    let cause = body.split("```lucid").next().and_then(|cause| cause.split("\nFix: ").next());
+    let example = body.split("```lucid\n").nth(1).and_then(|block| block.split("```").next());
+    let fix = body.lines().find_map(|line| line.strip_prefix("Fix: "));
+    let field = |text: Option<&str>| diag::json_string(text.unwrap_or("").trim_matches(' '));
+    let cause = diag::json_string(cause.unwrap_or("").trim());
+    emit(
+        std::io::stdout(),
+        &format!(
+            "{{\"code\":{},\"title\":{},\"cause\":{cause},\"example\":{},\"fix\":{}}}\n",
+            diag::json_string(&code),
+            diag::json_string(title),
+            field(example),
+            field(fix),
+        ),
+    );
     ExitCode::SUCCESS
 }
 

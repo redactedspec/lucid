@@ -469,6 +469,15 @@ Level: **Read** (own measurement), 2026-11-07, on the development machine.
 
 Sources: [find-msvc-tools](https://docs.rs/find-msvc-tools), [MSVC /STACK](https://learn.microsoft.com/en-us/cpp/build/reference/stack-stack-allocations), [rustc --print native-static-libs](https://doc.rust-lang.org/rustc/command-line-arguments.html#--print-print-compiler-information), [std::process::exit](https://doc.rust-lang.org/std/process/fn.exit.html).
 
+## Error explanations
+
+Decision 141.
+
+- **rustc.** `rustc --explain E0308` prints a Markdown entry with a cause and code examples, and the entries live in the compiler source as one file per code. Its examples are compiled by its test suite. This is from memory of the Rust repository, not read for this entry.
+- **Weak ground.** No study shows that agents fix errors faster with an explanation than with the message alone. The full agent benchmark at M5 can test it, since it counts repair turns.
+
+Sources: [Rust error codes index](https://doc.rust-lang.org/error_codes/error-index.html).
+
 ## Open research
 
 | Topic | Needed by |

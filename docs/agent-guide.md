@@ -666,7 +666,7 @@ There is no console input. These do not exist, so write your own: `sort`, `split
 
 ## Reading errors
 
-Each error has a stable code and usually says what to do.
+Each error has a stable code and usually says what to do. `lucid explain E0303` gives its cause, an example, and a fix.
 
 | Code | Usual cause |
 | --- | --- |

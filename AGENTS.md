@@ -17,7 +17,7 @@ Docs must never go stale. Every commit that changes behavior, code, plans, or de
 | Syntax or semantics | `docs/language.md`, `docs/grammar.md`, `docs/agent-guide.md`, `examples/` |
 | Memory or ownership behavior | `docs/memory-model.md` |
 | Safety guarantees or permissions | `docs/security.md` |
-| Diagnostics, tools, or agent workflow | `docs/agents.md` |
+| Diagnostics, tools, or agent workflow | `docs/agents.md`, `docs/errors.md` |
 | Standard library or web support | `docs/stdlib-and-web.md`, `docs/agent-guide.md` |
 | Compiler structure, commands, dependencies, or toolchain | `docs/compiler.md`, this file |
 | Goals, targets, or trade-offs | `docs/vision.md` |

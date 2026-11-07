@@ -26,6 +26,7 @@ Read in this order:
 | [memory-model.md](docs/memory-model.md) | Inferred ownership: the core technical bet |
 | [security.md](docs/security.md) | Safety guarantees and package permissions |
 | [agents.md](docs/agents.md) | What makes Lucid agent-friendly, as checkable rules |
+| [errors.md](docs/errors.md) | Every error code, with cause, example, and fix |
 | [agent-guide.md](docs/agent-guide.md) | Everything that runs today, in one file for agents |
 | [stdlib-and-web.md](docs/stdlib-and-web.md) | Standard library, servers, and browser output |
 | [compiler.md](docs/compiler.md) | Compiler architecture and toolchain |

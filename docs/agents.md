@@ -22,7 +22,7 @@ Every tool has a stable `--json` output.
 | `lucid check --json` | Fast diagnostics, no code generation |
 | `lucid build --json` | A standalone executable, or the diagnostics that `lucid check --json` gives |
 | `lucid fix` | Apply machine-suggested fixes |
-| `lucid explain E0123` | Cause, example, and fix for an error code |
+| `lucid explain [--json] CODE` | Cause, example, and fix for an error code, from `errors.md`. `--json` gives `code`, `title`, `cause`, `example`, and `fix` |
 | `lucid test --json` | Per-test results of a file, or of every file in a package's `src`, with values on failure: `name`, `passed`, `file`, `line`, `column`, and `output`, which holds what the test printed and, on failure, the trap message and trace |
 | `lucid context <module>` | Compact public API of a module or package: signatures and doc comments only |
 | `lucid doc --json` | Full docs as data |
@@ -67,69 +67,7 @@ A parser error on a line that already has a lexer error is dropped, since it is 
 
 Type checking runs only on a file with no syntax errors. If a file uses a feature that is not built, `lucid run` reports only E0901, because that feature could supply the names and types that other errors depend on. For the same reason, `lucid check` then reports nothing beyond syntax errors.
 
-The ranges are: `E00xx` files, `E01xx` lexer, `E02xx` parser, `E03xx` names and types, `E09xx` compiler limits and features not built yet. Every code has a golden test in `tests/fail/`, or a test in `compiler/tests/golden.rs`.
-
-| Code | Meaning |
-| --- | --- |
-| E0001 | Cannot read the file |
-| E0002 | File is not valid UTF-8 |
-| E0101 | Tab in indentation |
-| E0102 | Indentation width is wrong |
-| E0103 | Unexpected character |
-| E0104 | Text is not closed |
-| E0105 | Unknown escape |
-| E0106 | Single `}` in text |
-| E0107 | Malformed number |
-| E0108 | Text after an opening `"""` |
-| E0201 | Unexpected token |
-| E0202 | Invalid assignment target |
-| E0203 | `match` used as a value has a block arm |
-| E0204 | Chained comparison or range |
-| E0205 | Nesting over 128 levels, or over 1024 operators in one expression |
-| E0206 | Declaration only allowed at top level |
-| E0301 | Name is not defined |
-| E0302 | Type is not defined |
-| E0303 | Types do not fit |
-| E0304 | Name is already defined in this scope |
-| E0305 | Name cannot change |
-| E0306 | Task uses a top-level `var` |
-| E0307 | Arguments or parameters are in the wrong form |
-| E0308 | Called value is not a task |
-| E0309 | Task may end without returning |
-| E0310 | `return` outside a task |
-| E0311 | `break` or `continue` outside a loop |
-| E0312 | Number does not fit its type |
-| E0313 | Default is not a literal |
-| E0314 | Empty list or map has no type to take |
-| E0315 | Alias is defined by itself, or a type holds itself with no way to end |
-| E0316 | `match` does not cover every case |
-| E0317 | `match` arm can never run |
-| E0318 | Pattern does not fit its value: unknown variant, wrong number of names, a bound type or variant name, `{}` in text, or a type that the value never holds |
-| E0319 | Type argument cannot be told from the values |
-| E0320 | Type does not have a trait that a bound or operator needs |
-| E0321 | Wrong number of type arguments |
-| E0322 | Type form where a value belongs, or a value where a type belongs |
-| E0323 | Task named after a derived task or operator has the wrong form |
-| E0324 | Lambda has no task type to take from its context, or has `try` and no result type from it |
-| E0325 | Lambda or nested task captures a name that can change |
-| E0326 | A value is used while something changes it: two `change` arguments overlap, a statement uses what it changes, a `for` body changes what it visits, or a `for change` body uses it |
-| E0327 | `try` or `else` on a value with no error type or `none` to act on, or with nothing left after it |
-| E0328 | An error that nothing uses: a statement drops it, or a name holds it and is never read |
-| E0329 | A `test` name holds `{}`, or repeats |
-| E0330 | A call to an `extern` task or `.pointer()` is outside an `unsafe` block |
-| E0331 | An `extern` task has a form that C cannot take, sits below top level, or is used as a value, a pointer type is not `pointer[byte]`, or `.pointer()` is not on a name |
-| E0332 | An `unsafe` block has no comment |
-| E0333 | A private name or task with `self` is used from another module |
-| E0334 | The file of a `use` does not exist, or is spelled with other letter case |
-| E0335 | Modules import each other in a cycle |
-| E0336 | An imported module holds something other than declarations and literal `let` values |
-| E0337 | A `use` with no `./` names something that is not a dependency of the file's package |
-| E0338 | `lucid.toml` is not valid: bad syntax, a form outside the supported TOML, an unknown key, or a bad name or version |
-| E0339 | A package has no entry file or two, or a dependency is missing, misnamed, a program, or shares a name with another package, or `lucid run` gets a library |
-| E0901 | Parses, but cannot run at this milestone |
-| E0904 | No library has this foreign task |
-| E0902 | Task frame is too large for the stack check: over 512 KiB, or half the stack for top-level code |
-| E0903 | Too many generic instances: over 20,000, or a type argument of over 256 parts |
+Every code has a golden test in `tests/fail/`, or a test in `compiler/tests/golden.rs`. [errors.md](errors.md) lists every code, with its cause, an example, and a fix, and `lucid explain CODE` prints one entry.
 
 ## Agent onboarding
 

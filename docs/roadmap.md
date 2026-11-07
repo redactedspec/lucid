@@ -77,7 +77,8 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] Packages, `lucid.toml`, with path dependencies. The registry is at M8
 - [x] `std.fs`, `std.json`, `std.env`, `std.args`, `std.time`
 - [x] `lucid build`, `lucid test`
-- [ ] `lucid fix`, `explain`, `context`
+- [x] `lucid explain`
+- [ ] `lucid fix`, `context`
 - [ ] `lucid fmt`, written in Lucid as first dogfooding test
 - [ ] Permission checks
 - [ ] Full agent benchmark
