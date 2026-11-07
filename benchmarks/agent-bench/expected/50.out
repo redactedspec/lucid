@@ -1,0 +1,10 @@
+fay 35 lima
+ana 31 oslo
+cal 31 oslo
+eve 25 oslo
+dan 40 rome
+ben 25 rome
+eve ben ana cal fay dan
+lima: 1
+oslo: 3
+rome: 2

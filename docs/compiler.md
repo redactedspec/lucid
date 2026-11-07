@@ -161,6 +161,7 @@ tools/             `fmt.lcd`, the formatter in Lucid, held inside the compiler
 tests/             golden tests
 benchmarks/        Lucid and Rust versions of each program
     agent-trial/   tasks, reference answers, and runner of the M3 trial
+    agent-bench/   tasks, reference, runner, and scorer of the M5 agent benchmark
 ```
 
 ## Runtime
@@ -233,6 +234,8 @@ cargo fmt                                     # formatting
 sh benchmarks/run.sh                          # build, then 15 paired rounds, needs python
 sh benchmarks/run.sh fib                      # one program
 ROUNDS=3 sh benchmarks/run.sh                 # fewer rounds
+python benchmarks/agent-bench/ref.py          # from that directory: rewrite expected/
+sh try.sh lucid 07                            # in a benchmark workspace: one attempt, needs python, node, tsc
 ```
 
 | Command | Behavior | State |

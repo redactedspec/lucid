@@ -1,0 +1,6 @@
+grid 2x2 of 2 16
+rect 2x5 10
+rect 3x3 9
+square 3 9
+square 1 1
+total 45

@@ -1,0 +1,4 @@
+line 7: missing =
+name=demo
+port=9090
+debug=true
