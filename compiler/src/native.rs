@@ -244,6 +244,9 @@ fn compile(
     builder.symbol("lucid_args", lucid_rt::lucid_args as *const u8);
     builder.symbol("lucid_env_has", lucid_rt::lucid_env_has as *const u8);
     builder.symbol("lucid_env_get", lucid_rt::lucid_env_get as *const u8);
+    builder.symbol("lucid_time_now", lucid_rt::lucid_time_now as *const u8);
+    builder.symbol("lucid_time_clock", lucid_rt::lucid_time_clock as *const u8);
+    builder.symbol("lucid_time_sleep", lucid_rt::lucid_time_sleep as *const u8);
     builder.symbol("lucid_fs_read", lucid_rt::lucid_fs_read as *const u8);
     builder.symbol("lucid_fs_write", lucid_rt::lucid_fs_write as *const u8);
     builder.symbol("lucid_fs_exists", lucid_rt::lucid_fs_exists as *const u8);

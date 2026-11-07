@@ -1,0 +1,116 @@
+# Clocks, durations, and dates. A date is in UTC: local time needs zone tables.
+
+# A length of time. It has `+`, `-`, and an order.
+public type Duration
+    nanos: int
+
+# A moment on the wall clock, in nanoseconds from 1970 in UTC, which reaches
+# the years 1678 to 2262. This clock can jump, so use `clock` to measure.
+public type Time
+    nanos: int
+
+# A moment on a clock that only goes forward. It means nothing alone.
+public type Instant
+    nanos: int
+
+public type Date
+    year: int
+    month: int
+    day: int
+    hour: int = 0
+    minute: int = 0
+    second: int = 0
+
+let NANOS_PER_SECOND = 1000000000
+let SECONDS_PER_DAY = 86400
+
+unsafe extern task lucid_time_now() -> int
+unsafe extern task lucid_time_clock() -> int
+unsafe extern task lucid_time_sleep(nanos: int)
+
+public task seconds(count: int) -> Duration
+    return Duration(nanos: count * NANOS_PER_SECOND)
+
+public task millis(count: int) -> Duration
+    return Duration(nanos: count * 1000000)
+
+public task to_seconds(self: Duration) -> float
+    return self.nanos.to_float() / NANOS_PER_SECOND.to_float()
+
+public task to_millis(self: Duration) -> int
+    return self.nanos // 1000000
+
+public task add(self: Duration, other: Duration) -> Duration
+    return Duration(nanos: self.nanos + other.nanos)
+
+public task sub(self: Duration, other: Duration) -> Duration
+    return Duration(nanos: self.nanos - other.nanos)
+
+# The moment now, on the wall clock.
+public task now() -> Time
+    # The runtime takes nothing, and gives a number.
+    unsafe
+        return Time(nanos: lucid_time_now())
+
+# The moment now, on the clock that only goes forward.
+public task clock() -> Instant
+    # The runtime takes nothing, and gives a number.
+    unsafe
+        return Instant(nanos: lucid_time_clock())
+
+public task since(self: Instant, earlier: Instant) -> Duration
+    return Duration(nanos: self.nanos - earlier.nanos)
+
+public task since(self: Time, earlier: Time) -> Duration
+    return Duration(nanos: self.nanos - earlier.nanos)
+
+public task sleep(length: Duration)
+    # The runtime takes a number, and only waits.
+    unsafe
+        lucid_time_sleep(length.nanos)
+
+# The date and time of a moment, in UTC. The next two tasks follow "chrono-
+# Compatible Low-Level Date Algorithms" by Howard Hinnant.
+public task date(self: Time) -> Date
+    let total = self.nanos // NANOS_PER_SECOND
+    let days = total // SECONDS_PER_DAY
+    let rest = total % SECONDS_PER_DAY
+    # From a year that starts on 1 March, so a leap day comes last.
+    let shifted = days + 719468
+    let era = shifted // 146097
+    let of_era = shifted - era * 146097
+    let years = (of_era - of_era // 1460 + of_era // 36524 - of_era // 146096) // 365
+    let of_year = of_era - (365 * years + years // 4 - years // 100)
+    let shifted_month = (5 * of_year + 2) // 153
+    let month = if shifted_month < 10 then shifted_month + 3 else shifted_month - 9
+    let year = years + era * 400 + (if month <= 2 then 1 else 0)
+    return Date(
+        year: year,
+        month: month,
+        day: of_year - (153 * shifted_month + 2) // 5 + 1,
+        hour: rest // 3600,
+        minute: rest // 60 % 60,
+        second: rest % 60,
+    )
+
+# The moment of a date and time, in UTC.
+public task time(self: Date) -> Time
+    let year = if self.month <= 2 then self.year - 1 else self.year
+    let era = year // 400
+    let of_era = year - era * 400
+    let shifted_month = if self.month > 2 then self.month - 3 else self.month + 9
+    let of_year = (153 * shifted_month + 2) // 5 + self.day - 1
+    let days = era * 146097 + of_era * 365 + of_era // 4 - of_era // 100 + of_year - 719468
+    let rest = self.hour * 3600 + self.minute * 60 + self.second
+    return Time(nanos: (days * SECONDS_PER_DAY + rest) * NANOS_PER_SECOND)
+
+task padded(value: int, width: int) -> text
+    var out = "{value}"
+    while out.len() < width
+        out = "0{out}"
+    return out
+
+# The ISO 8601 form, such as `2026-11-06T09:30:00Z`.
+public task show(self: Date) -> text
+    let day = "{padded(self.year, 4)}-{padded(self.month, 2)}-{padded(self.day, 2)}"
+    return "{day}T{padded(self.hour, 2)}:{padded(self.minute, 2)}:{padded(self.second, 2)}Z"

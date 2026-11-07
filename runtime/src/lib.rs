@@ -1761,6 +1761,29 @@ pub unsafe extern "C" fn lucid_bytes_text(data: *const List) -> *mut Text {
     text_from(String::from_utf8_lossy(unsafe { list_bytes(data) }).as_bytes())
 }
 
+/// Nanoseconds from 1970 on the wall clock, which fit until the year 2262.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_time_now() -> i64 {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+    match now {
+        Ok(since) => since.as_nanos() as i64,
+        Err(before) => -(before.duration().as_nanos() as i64),
+    }
+}
+
+/// Nanoseconds from the first call, on a clock that only goes forward.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_time_clock() -> i64 {
+    static START: OnceLock<std::time::Instant> = OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_nanos() as i64
+}
+
+/// Waits. A negative length does not wait.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_time_sleep(nanos: i64) {
+    std::thread::sleep(std::time::Duration::from_nanos(nanos.max(0).cast_unsigned()));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

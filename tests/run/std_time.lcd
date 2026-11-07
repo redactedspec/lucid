@@ -1,0 +1,36 @@
+use std.time
+use std.time.Date
+use std.time.Time
+
+task moment(nanos: int) -> Time
+    return Time(nanos: nanos)
+
+print moment(0).date()
+print moment(-1).date()
+print moment(951782400000000000).date()     # the leap day of 2000
+print moment(1709164800000000000).date()     # the leap day of 2024
+print moment(1793957400000000000).date()
+print moment(-5364662400000000000).date()   # 1800, not a leap year
+
+task check(date: Date)
+    expect date.time().date() == date
+
+check(Date(year: 2000, month: 2, day: 29, hour: 23, minute: 59, second: 59))
+check(Date(year: 1900, month: 3, day: 1))
+check(Date(year: 1969, month: 12, day: 31, second: 1))
+check(Date(year: 2100, month: 1, day: 1))
+print Date(year: 1970, month: 1, day: 2).time()
+print Date(year: 1970, month: 1, day: 1, hour: 1).time().since(moment(0))
+
+let wait = time.millis(1500)
+print wait
+print wait.to_seconds()
+print wait.to_millis()
+print wait + time.seconds(1) == time.millis(2500)
+print wait - time.seconds(1) < wait
+
+let start = time.clock()
+time.sleep(time.millis(2))
+print time.clock().since(start) >= time.millis(2)
+time.sleep(time.seconds(-1))
+print time.now().date().year >= 2026

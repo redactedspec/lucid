@@ -595,6 +595,7 @@ print models.greet(User(name: "Ada"))
 use std.args
 use std.env
 use std.fs
+use std.time
 
 let name = args.get(0) else "world"    # the first word after the program, as `text?`
 print "Hello, {name}!"
@@ -607,11 +608,17 @@ task copy(from: text, to: text) -> none or fs.FileError
 
 print fs.exists("no/such/file")
 print fs.read_text("no/such/file") else "empty"
+
+let start = time.clock()
+time.sleep(time.millis(5))
+print time.clock().since(start).to_seconds() > 0.0
+print time.Date(year: 2026, month: 11, day: 6).time().date()      # 2026-11-06T00:00:00Z
 ```
 
 - Pass arguments after the path: `lucid run file.lcd add "buy milk"`.
 - `std.fs` reads and writes whole files: `read_text`, `write_text`, `append_text`, `read_bytes`, `write_bytes`, `list_dir`, `make_dir`, `remove`, `rename`. Each gives its result or a `fs.FileError`. `exists` gives a `bool`.
 - `FileError` has `NotFound(path)`, `Denied(path)`, `NotText(path)`, and `Failed(path, detail)`.
+- `time.now()` gives a `Time`, and `.date()` its UTC `Date`. `time.clock()` gives an `Instant`, for measuring. `.since(earlier)` gives a `Duration`, which has `+`, `-`, `<`, `.to_seconds()`, and `.to_millis()`. `time.seconds(n)` and `time.millis(n)` make one.
 
 ## Packages
 

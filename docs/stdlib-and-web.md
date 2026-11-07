@@ -4,7 +4,7 @@
 
 The standard library covers what most programs need, so that small projects need no dependencies. It is written in Lucid. Only low-level parts use `unsafe` and the runtime.
 
-Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/`, and the compiler holds a copy of them, so a program needs no files beside it. `std` alone can call the runtime, through `extern` tasks that start with `lucid_`. Built today: `std.args`, `std.env`, and `std.fs`.
+Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/`, and the compiler holds a copy of them, so a program needs no files beside it. `std` alone can call the runtime, through `extern` tasks that start with `lucid_`. Built today: `std.args`, `std.env`, `std.fs`, and `std.time`.
 
 | Module | Contents | Milestone |
 | --- | --- | --- |
@@ -42,6 +42,16 @@ Never hand-roll cryptography primitives. Wrap a vetted implementation.
 | `fs.rename(from, to)` | `none or FileError`: replaces what is at `to` |
 
 `FileError` is a `choice`: `NotFound(path)`, `Denied(path)`, `NotText(path)`, or `Failed(path, detail)`. Paths are text, and `/` works on every system, so `"{dir}/{name}"` joins them.
+
+| `time.now()` | `Time`: the wall clock, which can jump |
+| `time.clock()` | `Instant`: a clock that only goes forward, for measuring |
+| `later.since(earlier)` | `Duration`, for two `Time` or two `Instant` values |
+| `time.seconds(n)`, `time.millis(n)` | `Duration` |
+| `d.to_seconds()`, `d.to_millis()` | `float`, `int` |
+| `time.sleep(length)` | waits. A negative length does not wait |
+| `t.date()`, `date.time()` | `Date` and `Time`, each from the other, in UTC |
+
+A `Duration` has `+`, `-`, and an order. A `Time` holds nanoseconds from 1970, in the `nanos` field, so it reaches the years 1678 to 2262. A `Date` has `year`, `month`, `day`, `hour`, `minute`, and `second`, where the last three default to 0, and it shows in ISO 8601. There are no time zones: local time needs zone tables. Parsing dates waits for a program that needs it.
 
 Text from the system that is not valid Unicode has its bad parts replaced, except that `fs.read_text` gives `NotText`.
 
