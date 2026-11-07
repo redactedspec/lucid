@@ -22,7 +22,7 @@ Safe code has **no undefined behavior**. A compiler or runtime bug that breaks t
 
 ## Hash flooding
 
-Map and set hashes use SipHash through Rust's `RandomState`, with keys chosen once per process. So whoever supplies a map's keys cannot plan collisions, and a map's order never depends on the hash. A derived hash of a compound key is a chain of the same keyed steps. A hand-written `hash` gives a value that is hashed the same way, so its only collisions are its own equal results. A hand-written `hash` or `equal` that breaks the rules can lose a key, and cannot break memory safety: a probe always ends, and each task only reads borrowed values. The Rust documentation does not promise this algorithm forever, so review it when the toolchain changes.
+Map and set hashes use SipHash through Rust's `RandomState`, with keys chosen once per process. On the web, where `RandomState` has no random source, the keys come from `crypto.getRandomValues`, through `SipHasher::new_with_keys`. So whoever supplies a map's keys cannot plan collisions, and a map's order never depends on the hash. A derived hash of a compound key is a chain of the same keyed steps. A hand-written `hash` gives a value that is hashed the same way, so its only collisions are its own equal results. A hand-written `hash` or `equal` that breaks the rules can lose a key, and cannot break memory safety: a probe always ends, and each task only reads borrowed values. The Rust documentation does not promise this algorithm forever, so review it when the toolchain changes.
 
 ## Unsafe code
 

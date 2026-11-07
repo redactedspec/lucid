@@ -9,6 +9,7 @@
 //! and exit 1, under `lucid run x`. A directory with neither is a dependency.
 
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
@@ -780,4 +781,67 @@ fn shipped_code_is_formatted() {
             assert!(output.status.success(), "{name}: {}", text(&output.stdout));
         }
     }
+}
+
+/// Loads the WebAssembly runtime under Node, with the imports the loader
+/// gives, by decisions 156 and 159. Checks its imports and exports, that its
+/// headers sit at the host's offsets, and each import it uses.
+#[test]
+fn web_runtime_loads() {
+    let script = r#"
+        const [len, count, tag] = process.argv.slice(1).map(BigInt);
+        const bytes = require("fs").readFileSync(0);
+        const module = new WebAssembly.Module(bytes);
+        const say = (...words) => console.log(words.join(" "));
+        say("imports", WebAssembly.Module.imports(module).map(i => i.module + "." + i.name).sort());
+        let memory, written = ["", "", ""], random = 0;
+        const text = (at, n) => Buffer.from(memory.buffer, at, n).toString();
+        const js = {
+            write: (stream, at, n) => { written[stream] += text(at, n); },
+            trap: (at, n) => { throw new Error(text(at, n)); },
+            exit: code => { throw new Error("exit " + code); },
+            now: () => Date.now(),
+            clock: () => performance.now(),
+            random: (at, n) => { random += n; crypto.getRandomValues(new Uint8Array(memory.buffer, at, n)); },
+        };
+        const run = new WebAssembly.Instance(module, { js }).exports;
+        memory = run.memory;
+        const words = at => new BigUint64Array(memory.buffer.slice(at, at + 8))[0];
+        say("table grows", run.__indirect_function_table.grow(1) > 0);
+        const truth = run.lucid_bool_text(1);
+        say("text", words(truth + Number(len)), words(truth + Number(count)));
+        say("tag", words(run.lucid_record_new(7n, 0, 0) + Number(tag)));
+        run.lucid_print_int(42n);
+        say("stdout", JSON.stringify(written[1]), "stderr", JSON.stringify(written[2]));
+        say("now", run.lucid_time_now() > 1_700_000_000_000_000_000n, run.lucid_time_clock() >= 0n);
+        run.lucid_hash_int(0n, 1n);
+        say("random", random);
+        try { run.lucid_time_sleep(1n); } catch (error) { say(error.message); }
+    "#;
+    let mut node = Command::new("node")
+        .args(["-e", script])
+        .args(
+            [lucid_rt::LEN_OFFSET, lucid_rt::COUNT_OFFSET, lucid_rt::TAG_OFFSET]
+                .map(|at| at.to_string()),
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("cannot start node, which web tests need");
+    let wasm = include_bytes!(env!("LUCID_RT_WASM"));
+    io::Write::write_all(&mut node.stdin.take().expect("piped"), wasm).expect("cannot write");
+    let output = node.wait_with_output().expect("node failed");
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let expected = "\
+imports js.clock,js.exit,js.now,js.random,js.trap,js.write
+table grows true
+text 4 1
+tag 7
+stdout \"42\\n\" stderr \"\"
+now true true
+random 16
+trap: time.sleep is not available on the web
+";
+    assert_eq!(text(&output.stdout), expected);
 }

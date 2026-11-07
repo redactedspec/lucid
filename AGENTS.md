@@ -41,7 +41,7 @@ Docs describe what is true now. Mark planned items as planned, and remove claims
 
 ## Commands
 
-`cargo test` runs unit and golden tests. Other commands are in `docs/compiler.md`.
+`cargo test` runs unit and golden tests. It needs `node`, and the build needs `rustup target add wasm32-unknown-unknown`. Other commands are in `docs/compiler.md`.
 
 ## Commits
 

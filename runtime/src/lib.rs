@@ -6,7 +6,9 @@
 use std::alloc::{Layout, alloc, dealloc};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::hash::{BuildHasher, RandomState};
+use std::hash::BuildHasher;
+#[cfg(not(target_arch = "wasm32"))]
+use std::hash::RandomState as Keys;
 use std::io::{ErrorKind, Write};
 use std::mem::offset_of;
 use std::path::{Component, Path, PathBuf};
@@ -15,6 +17,23 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[cfg(feature = "exe")]
 mod exe;
+#[cfg(target_arch = "wasm32")]
+mod web;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::process::exit;
+#[cfg(target_arch = "wasm32")]
+use web::{Keys, exit, stderr, stdout};
+
+#[cfg(not(target_arch = "wasm32"))]
+fn stdout() -> impl Write {
+    std::io::stdout().lock()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn stderr() -> impl Write {
+    std::io::stderr().lock()
+}
 
 /// The stack of the main thread of a program that `lucid build` made. Most of
 /// it is only reserved, so it costs address space, not memory.
@@ -1015,9 +1034,9 @@ pub unsafe extern "C" fn lucid_record_unique(record: *mut Record) -> *mut Record
 
 /// The keys of a process. Random keys stop a remote input from choosing
 /// collisions, and a map's order never shows the hash.
-fn hasher() -> &'static RandomState {
-    static HASHER: OnceLock<RandomState> = OnceLock::new();
-    HASHER.get_or_init(RandomState::new)
+fn hasher() -> &'static Keys {
+    static HASHER: OnceLock<Keys> = OnceLock::new();
+    HASHER.get_or_init(Keys::new)
 }
 
 /// Adds an `int`-sized value to a hash in progress. A compound key is a chain
@@ -1422,7 +1441,7 @@ pub extern "C" fn lucid_bool_text(value: u8) -> *mut Text {
 
 /// Writes one line to stdout. If stdout fails, the program traps.
 fn print_line(value: impl std::fmt::Display) {
-    if writeln!(std::io::stdout().lock(), "{value}").is_err() {
+    if writeln!(stdout(), "{value}").is_err() {
         trap(STDOUT_FAILED);
     }
 }
@@ -1436,7 +1455,7 @@ fn print_line(value: impl std::fmt::Display) {
 pub unsafe extern "C" fn lucid_print(text: *const u8, len: usize) {
     // SAFETY: the caller guarantees the range, and compiled code passes static data.
     let bytes = unsafe { std::slice::from_raw_parts(text, len) };
-    let mut stdout = std::io::stdout().lock();
+    let mut stdout = stdout();
     if stdout.write_all(bytes).and_then(|()| stdout.write_all(b"\n")).is_err() {
         trap(STDOUT_FAILED);
     }
@@ -1570,17 +1589,21 @@ pub unsafe extern "C" fn lucid_exit(text: *const Text) -> ! {
     // SAFETY: the caller guarantees a live text.
     let bytes = unsafe { bytes(text) };
     // As in `trap`: the exit code still reports the failure.
-    let mut stderr = std::io::stderr().lock();
+    let mut stderr = stderr();
     let _ = stderr.write_all(bytes).and_then(|()| stderr.write_all(b"\n"));
-    std::process::exit(1)
+    exit(1)
 }
 
+#[cfg(target_arch = "wasm32")]
+use web::trap;
+
 /// Ends the program with the exit code that language.md gives to traps.
+#[cfg(not(target_arch = "wasm32"))]
 fn trap(message: &[u8]) -> ! {
     // Must not panic, since a caller is an `extern "C"` task. The exit code still reports the trap.
-    let mut stderr = std::io::stderr().lock();
+    let mut stderr = stderr();
     let _ = stderr.write_all(message).and_then(|()| stderr.write_all(b"\n"));
-    std::process::exit(101)
+    exit(101)
 }
 
 /// What `std.args` gives, when something other than the process's own command
@@ -1933,6 +1956,7 @@ pub unsafe extern "C" fn lucid_bytes_text(data: *const List) -> *mut Text {
 }
 
 /// Nanoseconds from 1970 on the wall clock, which fit until the year 2262.
+#[cfg(not(target_arch = "wasm32"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn lucid_time_now() -> i64 {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
@@ -1943,6 +1967,7 @@ pub extern "C" fn lucid_time_now() -> i64 {
 }
 
 /// Nanoseconds from the first call, on a clock that only goes forward.
+#[cfg(not(target_arch = "wasm32"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn lucid_time_clock() -> i64 {
     static START: OnceLock<std::time::Instant> = OnceLock::new();
@@ -1950,6 +1975,7 @@ pub extern "C" fn lucid_time_clock() -> i64 {
 }
 
 /// Waits. A negative length does not wait.
+#[cfg(not(target_arch = "wasm32"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn lucid_time_sleep(nanos: i64) {
     std::thread::sleep(std::time::Duration::from_nanos(nanos.max(0).cast_unsigned()));
