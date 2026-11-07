@@ -671,6 +671,10 @@ fn fix_applies_fixes() {
         "let total = 1\r\nprint total\r\nprint \"a}}b\"\r\nif true\r\n    print total\r\n"
     );
     assert_eq!(text(&lucid(&dir, &["fix", "f.lcd"]).stdout), "");
+    // No rename to the same name, or to a name that does not work there.
+    let unfixable = "print count\nlet count = 1\nvar total = 0\ntask f() -> int\n    return totl\n";
+    fs::write(dir.join("g.lcd"), unfixable).expect("cannot write");
+    assert_eq!(text(&lucid(&dir, &["fix", "g.lcd"]).stdout), "");
     // In a package the manifest comes first, so `main.lcd` does not start
     // at offset 0, and its fixes must still land in it.
     let package = dir.join("package");

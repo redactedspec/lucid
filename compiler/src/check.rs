@@ -2029,8 +2029,13 @@ impl<'a> Checker<'a> {
     /// Adds a fix to E0301 if one name in sight is a close spelling. Two names
     /// at the same distance make the guess unsure, so neither is offered.
     fn similar(&self, diag: Diagnostic, name: &str, span: Span) -> Diagnostic {
+        // Only names that would work here: a task reads a top-level literal
+        // `let` and no other, and top-level code sees a top-level name only
+        // once declared, so already in `scopes`.
+        let in_task = self.frame.returns.is_some();
+        let top = self.top.iter().filter(|(_, top)| in_task && matches!(top, Top::Literal(..)));
         let locals = self.frame.scopes.iter().flat_map(|scope| scope.keys().copied());
-        let names = locals.chain(self.top.keys().copied()).chain(self.task_ids.keys().copied());
+        let names = locals.chain(top.map(|(name, _)| *name)).chain(self.task_ids.keys().copied());
         let names = names.chain(self.constructors.keys().copied());
         // As rustc does: a third of the length, and at least one. A change to
         // every character is no longer a spelling.
@@ -2039,7 +2044,7 @@ impl<'a> Checker<'a> {
         let mut best: Vec<(usize, &str)> = names
             .filter(|other| other.chars().all(|c| c.is_alphanumeric() || c == '_'))
             .map(|other| (crate::diag::edit_distance(name, other), other))
-            .filter(|&(distance, _)| distance <= limit)
+            .filter(|&(distance, _)| distance > 0 && distance <= limit)
             .collect();
         best.sort();
         best.dedup();
