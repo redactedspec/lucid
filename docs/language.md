@@ -221,7 +221,7 @@ task connect(host: text, port: int = 443, secure: bool = true)
     ...
 ```
 
-Arguments are positional. A parameter with a default must be passed by name, and only such a parameter can be. Parameters with defaults come last. Named arguments follow positional ones, in parameter order, so arguments always run in the order written. A default is a literal, which includes `none`.
+Arguments are positional. A parameter with a default must be passed by name, and only such a parameter can be. Parameters with defaults come last. Named arguments follow positional ones, in parameter order, so arguments always run in the order written. A default is a literal, which includes `none` and an empty `[]` or `{}`. Each call that uses an empty one gets a new collection.
 
 ```lucid
 connect("example.com", port: 8080)
@@ -310,7 +310,7 @@ let ada = User(name: "Ada", age: 36)
 print ada.name
 ```
 
-Arguments may come in any order, and run in the order written. A field with no default must be given. A default is a literal.
+Arguments may come in any order, and run in the order written. A field with no default must be given. A default is a literal, as for a parameter, so `items: list[int] = []` works.
 
 Copying is by value: `var b = a` then changing `b` never affects `a`. A field of a `var` can change, as in `b.age += 1` or `team.lead.name = "Ada"`. Each index in such a path runs once, before the value.
 

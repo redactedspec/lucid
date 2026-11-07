@@ -288,7 +288,7 @@ Fix: use a smaller number, or a type with a larger range, such as `u64` or `floa
 
 ## E0313: Default is not a literal
 
-A parameter default must be a literal value, so that a signature tells everything.
+A parameter or field default must be a literal value, or an empty `[]` or `{}`, so that a signature tells everything.
 
 ```lucid
 task f(a: int = 1 + 1)

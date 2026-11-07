@@ -66,6 +66,7 @@ print word.bytes()     # list[byte], the UTF-8 bytes
 - Slice ends are both required, and can be any `int` expression, as in `x[i..i + 1]`. A slice out of range traps. There is no negative index.
 - `==`, `<`, and the like compare text by code point.
 - `"""` starts multi-line text, with common indentation removed.
+- Escapes are `\n`, `\t`, `\"`, and `\\`.
 
 ## Collections
 
@@ -176,7 +177,7 @@ print connect("example.com", port: 80)   # a default goes by name, others by pos
 
 - A parameter cannot be assigned. Copy it to a `var`, or use `change`.
 - A task cannot read or write a top-level `var`: pass it. A task may read a top-level `let` only if its value is a literal.
-- A default is a literal, and parameters with defaults come last.
+- A default is a literal or an empty `[]` or `{}`, and parameters with defaults come last.
 
 ### Parameter modes
 

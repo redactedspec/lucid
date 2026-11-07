@@ -1,0 +1,30 @@
+type Bank
+    name: text
+    balances: map[text, int] = {}
+    log: list[text] = []
+
+task add(change b: Bank, who: text, n: int)
+    b.balances[who] = n
+    b.log.push(who)
+
+task total(items: list[int] = []) -> int
+    var t = 0
+    for x in items
+        t += x
+    return t
+
+var a = Bank(name: "a")
+var c = Bank(name: "c")
+add(change a, "ada", 5)
+print a.balances
+print c.balances
+print a.log
+print c.log.len()
+print total()
+print total(items: [1, 2])
+var i = 0
+while i < 3
+    var d = Bank(name: "d")
+    add(change d, "x", i)
+    print d.log.len()
+    i += 1

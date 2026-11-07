@@ -1705,8 +1705,13 @@ impl<'a> Checker<'a> {
     }
 
     fn default_value(&mut self, value: &'a ast::Expr, ty: Ty) -> Expr {
-        if !is_literal(value) {
-            return self.fail("E0313", "a default must be a literal".into(), value.span);
+        let empty = match &value.kind {
+            Ast::List(items) => items.is_empty(),
+            Ast::Map(entries) => entries.is_empty(),
+            _ => false,
+        };
+        if !is_literal(value) && !empty {
+            return self.fail("E0313", "a default must be a literal, or an empty `[]` or `{}`".into(), value.span);
         }
         let value = self.expected(value, Some(ty));
         self.expect(&value, ty, "this default");
