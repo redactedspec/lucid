@@ -41,9 +41,16 @@ impl Grant {
         let (Grant::List(mine), Grant::List(theirs)) = (self, other) else {
             return *self == Grant::All;
         };
+        // An empty path, as `.` becomes, is a prefix of every path, so it
+        // covers only paths that stay inside it.
+        let inside =
+            |item: &Path| matches!(item.components().next(), None | Some(Component::Normal(_)));
         let covered = |item: &String| {
             mine.iter().any(|own| match permission {
-                "files" => normal(item).starts_with(normal(own)),
+                "files" => {
+                    let (item, own) = (normal(item), normal(own));
+                    item.starts_with(&own) && (!own.as_os_str().is_empty() || inside(&item))
+                }
                 _ => own == item,
             })
         };
@@ -600,6 +607,12 @@ mod tests {
         assert!(!list(&["./data"]).covers(&list(&["database"]), "files"));
         assert!(!list(&["data/x"]).covers(&list(&["data"]), "files"));
         assert!(Grant::All.covers(&list(&["../anything"]), "files"));
+        for own in [".", "./", "a/.."] {
+            assert!(list(&[own]).covers(&list(&["data", "./x/y", "."]), "files"));
+            for outside in ["/etc", "../shared", "x/../.."] {
+                assert!(!list(&[own]).covers(&list(&[outside]), "files"), "{own} {outside}");
+            }
+        }
         assert!(!list(&["/"]).covers(&Grant::All, "files"));
         assert!(!list(&["PORT"]).covers(&list(&["PORT", "HOME"]), "env"));
         assert!(!NOTHING.held() && list(&["x"]).held());
