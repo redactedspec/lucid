@@ -1,0 +1,4 @@
+tuple.lcd:1:11: error E0201: expected `)`, found `,`
+  note: there are no tuples: use a `type` with named fields
+tuple.lcd:2:17: error E0201: expected `)`, found `,`
+  note: there are no tuples: use a `type` with named fields

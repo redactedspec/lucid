@@ -104,7 +104,7 @@ let = 1
 
 Fix: write what the message expects at that place.
 
-A note names the usual cause in three places: a `{` in text that starts an interpolation, where `{{` gives a literal brace; a match arm with no `->`; and a nested `match` written after `->` on the same line, which needs its own indented block.
+A note names the usual cause in four places: a `{` in text that starts an interpolation, where `{{` gives a literal brace; a match arm with no `->`; a nested `match` written after `->` on the same line, which needs its own indented block; and a `,` inside `()`, since there are no tuples.
 
 ## E0202: Invalid assignment target
 

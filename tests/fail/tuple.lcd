@@ -1,0 +1,3 @@
+let p = (1, 2)
+task f() -> (int, int)
+    return 1

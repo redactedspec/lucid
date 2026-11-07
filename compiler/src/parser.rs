@@ -107,6 +107,17 @@ impl Parser {
         }
     }
 
+    /// Ends a parenthesized expression or type, where a `,` means a tuple.
+    fn close_group(&mut self) -> Parsed<()> {
+        if self.at(",") {
+            let span = self.token().span;
+            let note = "there are no tuples: use a `type` with named fields";
+            self.diags.push(Diagnostic::new("E0201", "expected `)`, found `,`", span).note(note));
+            return Err(());
+        }
+        self.expect(")")
+    }
+
     fn newline(&mut self) -> Parsed<()> {
         self.expect_kind(TokenKind::Newline)
     }
@@ -512,7 +523,7 @@ impl Parser {
             TypeKind::Task { params, returns }
         } else if self.eat("(") {
             let inner = self.ty()?;
-            self.expect(")")?;
+            self.close_group()?;
             return Ok(inner);
         } else if matches!(self.kind(), TokenKind::Name(_)) {
             let mut path = vec![self.name()?];
@@ -1059,7 +1070,7 @@ impl Parser {
             TokenKind::Sym("(") => {
                 self.advance();
                 let inner = self.expression()?;
-                self.expect(")")?;
+                self.close_group()?;
                 return Ok(inner);
             }
             TokenKind::Sym("[") => {
