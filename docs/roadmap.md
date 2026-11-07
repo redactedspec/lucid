@@ -69,7 +69,7 @@ Build a thin end-to-end path first. Depth comes later.
 
 **Result:** all five programs meet the memory target, and four meet the speed target. `nbody` runs at 3.38x. Decision 101 keeps the model, adds no LLVM backend for now, and keeps the target. Figures are in `docs/research.md`.
 
-## M5: A usable language
+## M5: A usable language (done)
 
 - [x] `try`, `else`, the `Error` trait, unused-error check
 - [x] `test`, `expect`, `unsafe`, and stack traces on a trap
