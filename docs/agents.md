@@ -21,6 +21,7 @@ Every tool has a stable `--json` output.
 | --- | --- |
 | `lucid check --json` | Fast diagnostics, no code generation |
 | `lucid build --json` | A standalone executable, or the diagnostics that `lucid check --json` gives |
+| `lucid build --target web` | `NAME.js`, which runs the program in a browser or under `node`. What the web target does not build yet is E0901 |
 | `lucid fix [--json] [PATH]` | Make the fix of each error that has one, in place, and list each as `file:line:column: fixed CODE: description`, or `code`, `description`, `file`, `line`, and `column` with `--json`. If two fixes touch the same text, only the first is made, and a second run makes the next. A lexer error stops checking, so its fixes come a run before those of the checker. `std` is never changed |
 | `lucid explain [--json] CODE` | Cause, example, and fix for an error code, from `errors.md`. `--json` gives `code`, `title`, `cause`, `example`, and `fix` |
 | `lucid test --json` | Per-test results of a file, or of every file in a package's `src`, with values on failure: `name`, `passed`, `file`, `line`, `column`, and `output`, which holds what the test printed and, on failure, the trap message and trace |

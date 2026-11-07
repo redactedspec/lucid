@@ -687,7 +687,7 @@ markdown = { path = "../markdown", allow = [] }
 - Outside `files`, `std.fs` gives `Failed`, and `env.get` of a name not in `env` traps. A file with no `lucid.toml` has every permission.
 
 - `lucid run`, `lucid build`, `lucid check`, and `lucid test` take a file or a package directory. With no path they use the package around the current directory.
-- `lucid build` writes a standalone program, `NAME.exe`, to the current directory.
+- `lucid build` writes a standalone program, `NAME.exe`, to the current directory. `lucid build --target web` writes `NAME.js` instead, for a page or `node`. It does not build lists, maps, records, or `std` yet.
 - `lucid fix` makes the fixes that errors show as `fix:`, such as a misspelled name. Run it again after a fix of a lexer error.
 - `lucid fmt` puts a file or package in the one layout. `lucid fmt --check` only lists what would change.
 - `lucid context std.fs` prints the public tasks and types of a module, a file, or a package, with their `##` doc comments.

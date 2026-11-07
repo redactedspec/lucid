@@ -63,7 +63,7 @@ Lucid covers both sides of a website.
 
 **Server side** compiles to a native binary. See [examples/website.lcd](../examples/website.lcd).
 
-**Browser side** compiles to WebAssembly with `lucid build --target web`. The output is a `.wasm` file with a small JavaScript loader. Browser access goes through `std.dom`, because WebAssembly cannot touch the DOM directly.
+**Browser side** compiles to WebAssembly with `lucid build --target web`. The output is one JavaScript file, `NAME.js`, which holds a small loader and both WebAssembly modules, so a page needs only `<script src="NAME.js">`. Numbers, text, control flow, and calls work now. The rest is planned for M6. Browser access goes through `std.dom`, because WebAssembly cannot touch the DOM directly.
 
 The page is built in the Elm architecture, by decision 163. Planned for M6:
 

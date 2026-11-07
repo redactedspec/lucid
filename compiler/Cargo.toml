@@ -15,6 +15,7 @@ cranelift-jit = "0.137.1"
 cranelift-module = "0.137.1"
 cranelift-object = "0.137.1"
 lucid_rt = { path = "../runtime" }
+wasm-encoder = "0.255.0"
 
 [target."cfg(windows)".dependencies]
 find-msvc-tools = "0.1.15"

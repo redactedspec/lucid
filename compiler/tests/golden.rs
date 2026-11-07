@@ -845,3 +845,71 @@ trap: time.sleep is not available on the web
 ";
     assert_eq!(text(&output.stdout), expected);
 }
+
+/// Copies a directory and what it holds.
+fn copy_dir(from: &Path, to: &Path) {
+    fs::create_dir_all(to).expect("cannot make directory");
+    for entry in fs::read_dir(from).expect("cannot list directory") {
+        let path = entry.expect("cannot read entry").path();
+        let target = to.join(path.file_name().expect("an entry has a name"));
+        if path.is_dir() {
+            copy_dir(&path, &target);
+        } else {
+            fs::copy(&path, &target).expect("cannot copy");
+        }
+    }
+}
+
+/// Builds each run and trap test with `--target web`, and runs it under
+/// `node`, against the same golden files. A test that uses what the web target
+/// does not build yet gives E0901, and is left out until M6 step 4, as is a
+/// trap whose expected output has a trace. These must not be left out, so the
+/// test fails if the web target loses them. See "WebAssembly" in
+/// docs/compiler.md.
+#[test]
+fn web_programs_match_run() {
+    const MUST_RUN: [&str; 7] =
+        ["hello", "arithmetic", "control", "fib", "fizzbuzz", "tasks", "text"];
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("web");
+    let _ = fs::remove_dir_all(&root);
+    let mut failures = Vec::new();
+    let mut ran = Vec::new();
+    for (kind, code, extension) in [("run", 0, "out"), ("trap", 101, "err")] {
+        let dir = root.join(kind);
+        copy_dir(&repo().join("tests").join(kind), &dir);
+        for source in files(&dir, "lcd") {
+            let name = file_name(&source);
+            let expected = text(&fs::read(source.with_extension(extension)).expect("no golden"));
+            if expected.contains("\n    at ") {
+                continue;
+            }
+            let output = lucid(&dir, &["build", "--target", "web", name]);
+            let stderr = text(&output.stderr);
+            if !output.status.success() {
+                if !stderr.contains("error E0901") {
+                    failures.push(format!("{name}: build failed: {stderr}"));
+                }
+                continue;
+            }
+            let script = source.with_extension("js");
+            let output = Command::new("node").arg(&script).current_dir(&dir).output();
+            let output = output.expect("cannot start node, which web tests need");
+            let got = match kind {
+                "run" => text(&output.stdout),
+                _ => text(&output.stderr),
+            };
+            if output.status.code() != Some(code) || got != expected {
+                let stderr = text(&output.stderr);
+                failures.push(format!(
+                    "{name}: exit {:?}\ngot: {got:?}\nexpected: {expected:?}\nstderr: {stderr}",
+                    output.status.code()
+                ));
+            }
+            ran.push(name.trim_end_matches(".lcd").to_string());
+        }
+    }
+    let lost: Vec<_> = MUST_RUN.iter().filter(|name| !ran.iter().any(|r| r == *name)).collect();
+    assert!(lost.is_empty(), "no longer built for the web: {lost:?}");
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+    eprintln!("web: ran {} tests: {}", ran.len(), ran.join(" "));
+}

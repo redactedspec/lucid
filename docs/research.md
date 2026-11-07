@@ -580,7 +580,7 @@ Sources: [GCC Runtime Library Exception 3.1](https://www.gnu.org/licenses/gcc-ex
 
 ## WebAssembly
 
-Decisions 156 to 164.
+Decisions 156 to 164, and 166.
 
 Level: **Read** for each source below, 2026-11-07, except where marked.
 
@@ -591,6 +591,9 @@ Level: **Read** for each source below, 2026-11-07, except where marked.
 - **Hash keys.** `SipHasher::new_with_keys` is stable since 1.0.0, and deprecated since 1.13.0 in favor of `DefaultHasher`, which takes no keys.
 - **Loading from disk.** MDN: with module scripts "you can no longer view your HTML using the `file://` protocol", because "module requests use CORS, and `file://` URLs are never same-origin". That a classic `<script src>` with no `fetch` does load from `file://` is from memory, and the M6 exit check tests it.
 - **UI shape.** The Elm guide says a program "always breaks into three parts": the model, "the state of your application", the view, "a way to turn your state into HTML", and update, "a way to update your state based on messages". That Redux and iced use the same split is from memory.
+- **Static room.** **Checked** in `library/vendor/dlmalloc-0.2.13/src/wasm.rs` of Rust 1.97.1 on 2026-11-07: after a chunk that the linker leaves, `alloc_via_grow` calls `memory_grow(0, pages)` and uses only the pages from the old size on, so memory that the loader grew before is never reused. Decision 166.
+- **Overflow tests.** WebAssembly has no overflow flag. A signed sum overflows when both operands have one sign and the result has the other, `((x ^ r) & (y ^ r)) < 0`, and a difference when the operands' signs differ and the result's is not `x`'s, `((x ^ y) & (x ^ r)) < 0`. These are the tests of Hacker's Delight, section 2-13, from memory. `web_programs_match_run` runs every overflow trap test against them.
+- **Async load.** The loader compiles with `WebAssembly.instantiate`, never `new WebAssembly.Module`: from memory, Chrome refuses a synchronous compile of over 4 KB on the main thread, and the runtime is about 150 KB. The M6 exit check tests the loader in Chrome.
 - **Weak ground.** No measurement yet. The cost of a call between the two modules, and of counting through runtime calls in place of inline code, is unknown until the backend exists. That `Error.stack` holds a function index and code offset for each WebAssembly frame is from memory of V8 and Node, and step 4 of M6 must check it.
 
 Sources: [Dynamic linking conventions](https://github.com/WebAssembly/tool-conventions/blob/main/DynamicLinking.md), [constant expressions](https://webassembly.github.io/spec/core/valid/instructions.html#constant-expressions), [wasm-ld](https://lld.llvm.org/WebAssembly.html), [wasm32-unknown-unknown](https://doc.rust-lang.org/rustc/platform-support/wasm32-unknown-unknown.html), [SipHasher](https://doc.rust-lang.org/std/hash/struct.SipHasher.html), [Modules on the web](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules/Modules_on_the_web), [The Elm Architecture](https://guide.elm-lang.org/architecture/).

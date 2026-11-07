@@ -47,13 +47,15 @@ The object file targets baseline x86-64, not the features of the machine that bu
 
 ## WebAssembly
 
-By decisions 156 to 164. The layout, the runtime on `wasm32`, and its build are done. The rest is planned for M6.
+By decisions 156 to 164, and 166. The layout, the runtime on `wasm32`, the scalar core of `wasm.rs`, the loader, and `lucid build --target web` are done. Heap values other than text, `change`, task values, `std`, and traces are planned for step 4 of M6, and give E0901 until then. `std.dom` follows.
 
-**Layout.** The header fields that compiled code reads are `u64` on every target, so `COUNT_OFFSET`, `LEN_OFFSET`, `SLOTS_OFFSET`, `TAG_OFFSET`, and the images from `static_text` and `static_record` hold for `wasm32` too. `web_runtime_loads` reads a text's and a record's header in the WebAssembly runtime at those offsets. `wasm.rs` will use the host's `lucid_rt` constants.
+**Layout.** The header fields that compiled code reads are `u64` on every target, so `COUNT_OFFSET`, `LEN_OFFSET`, `SLOTS_OFFSET`, `TAG_OFFSET`, and the images from `static_text` and `static_record` hold for `wasm32` too. `web_runtime_loads` reads a text's and a record's header in the WebAssembly runtime at those offsets. `wasm.rs` uses the host's `lucid_rt::static_text` for text literals.
 
-**Two modules.** `compiler/build.rs` also builds `lucid_rt` for `wasm32-unknown-unknown`, on every host, as a `cdylib` linked with `--export-table --growable-table`, and gives its path in `LUCID_RT_WASM`. It exports `memory`, `__indirect_function_table`, and every `lucid_` task. Planned: the compiler holds it through `include_bytes!`, and `wasm.rs` writes the program module with `wasm-encoder`. It imports `memory`, `table`, `memory_base`, `table_base`, and each `lucid_` task it calls, and puts its data and table entries at those bases. The loader starts the runtime, gets static room from it, grows the table, then starts the program with both bases. So the runtime calls a key task or a task value through the shared table, as it calls a function pointer on native.
+**Two modules.** `compiler/build.rs` also builds `lucid_rt` for `wasm32-unknown-unknown`, on every host, as a `cdylib` linked with `--export-table --growable-table`, and gives its path in `LUCID_RT_WASM`. It exports `memory`, `__indirect_function_table`, and every `lucid_` task. `wasm.rs` holds it through `include_bytes!`, and writes the program module with `wasm-encoder`. The program imports `rt.memory`, `env.memory_base`, and every task in `IMPORTS`, and puts its static data at that base, as one data segment. The loader starts the runtime, grows its memory by the pages that the data needs, and starts the program with the old end of memory as the base. The runtime's allocator never hands out those pages, by decision 166. The program exports `main`, the top level. Planned for step 4: the program also imports the table and `table_base`, and the loader grows the table, so the runtime calls a key task or a task value through the shared table, as it calls a function pointer on native.
 
-**Values.** Every value is an `i64` local, as on native. An address is zero-extended into one, and wrapped to `i32` for a load, a store, or a pointer parameter of a runtime task. `wasm.rs` lists the signature of each runtime import, and a wrong entry fails when the page loads, which every web golden test does. A `change` argument goes on a shadow stack: a region from the runtime allocator, with a pointer in a global of the program module.
+**Values.** A local has the type that native gives the value, by decision 166: an integer or an address is an `i64`, a float an `f64` or `f32`, and a `bool` or `none` an `i32`. An address is zero-extended into an `i64`, and wrapped to `i32` for a load, a store, or a pointer parameter of a runtime task. `IMPORTS` in `wasm.rs` lists every runtime task with the form of each parameter and result, and the program imports all of them, so a wrong entry fails when any program loads. WebAssembly has no overflow flag, so a checked `+`, `-`, or `*` reads its operands and the wrapped result from locals, and a narrow type checks its result as native does. A text join appends each part to a new empty text, since native's array of parts on the stack needs the shadow stack. Planned for step 4: a `change` argument goes on a shadow stack, a region from the runtime allocator, with a pointer in a global of the program module.
+
+**Control flow.** MIR is structured, so each `if`, loop, `break`, and `continue` is a WebAssembly block and a branch to it. An `if` chain is one block with a branch out of each arm, so its length adds no depth. A task's body is one block. A `return` stores its value in a local and leaves that block, and the code after it releases the owned locals once, as native's exit block does.
 
 **Runtime.** Built. `runtime/src/web.rs`, under `cfg(target_arch = "wasm32")`, does only what Rust's standard library cannot there: print, trap, and exit through JavaScript imports, `time.now` and `time.clock` from `Date.now` and `performance.now`, a trap from `time.sleep`, and hash keys from `crypto.getRandomValues` through `SipHasher::new_with_keys`. `std.fs` gives `Failed`, `env.get` gives none, and `args.all()` gives `[]`, with no new code. The loader must give these imports, all in module `js`:
 
@@ -66,15 +68,15 @@ By decisions 156 to 164. The layout, the runtime on `wasm32`, and its build are 
 | `clock()` | `performance.now()`, in milliseconds |
 | `random(at, len)` | fills bytes from `crypto.getRandomValues` |
 
-A Rust panic in the runtime is a WebAssembly `unreachable`, which the loader sees as a `RuntimeError`.
+A Rust panic in the runtime is a WebAssembly `unreachable`, which the loader sees as a `RuntimeError`. The loader prints it as `trap: ` and the error, and exits with 101.
 
-**Output.** `lucid build --target web app.lcd` writes `app.js`: the loader, with both modules inside as base64. A page loads it with `<script src="app.js">`, which also works from `file://`. Under `node app.js`, print goes to stdout, a trap exits with 101, and a failed top-level `try` with 1.
+**Output.** Built. `lucid build --target web app.lcd` writes `app.js` to the current directory: `compiler/src/loader.js`, with both modules inside as base64, and the size of the static data. The loader compiles both with `WebAssembly.instantiate`, which a browser allows for a large module on its main thread. A page loads it with `<script src="app.js">`, which should also work from `file://`, as the M6 exit check tests. Under `node app.js`, print goes to stdout through `fs.writeSync`, a trap exits with 101, and a failed top-level `try` with 1. In a browser, each whole line goes to `console.log`, or `console.error` for stderr.
 
-**Traps.** `wasm.rs` writes a table from code offset to task, line, and column. The loader reads each `wasm-function[i]:0xOFF` frame of `Error.stack` through it, so a trap prints the message and trace that native prints. An engine stack overflow prints the stack overflow trap.
+**Traps.** A trap now prints its message with no trace. Planned for step 4: `wasm.rs` writes a table from code offset to task, line, and column. The loader reads each `wasm-function[i]:0xOFF` frame of `Error.stack` through it, so a trap prints the message and trace that native prints. An engine stack overflow prints the stack overflow trap.
 
-**Errors.** Under `--target web`, a user `extern` and `.pointer()` get one new code, and `use std.dom` without the target another.
+**Errors.** What the web target does not build yet is E0901, at the first place found. Planned: under `--target web`, a user `extern` and `.pointer()` get one new code, and `use std.dom` without the target another.
 
-**Tests.** `cargo test` builds every run and trap test with `--target web` and runs it under `node`, against the same golden files. A missing `node` fails. `std.dom` tests run under `node` with a fake `document`.
+**Tests.** `web_programs_match_run` builds every run and trap test with `--target web` and runs it under `node`, against the same golden files. A missing `node` fails. Until step 4, a test that gives E0901, or whose trap has a trace, is left out, and the test fails if a program in its `MUST_RUN` list stops building. On 2026-11-07, 42 tests ran. Planned: `std.dom` tests run under `node` with a fake `document`.
 
 ## Early exits
 
@@ -183,8 +185,9 @@ compiler/          Rust crate `lucid`: the CLI and compiler
         mir.rs     typed, structured operations
         ownership.rs   owners and counts of heap values, last-use moves
         native.rs  Cranelift backend
-        wasm.rs        planned: WebAssembly backend
-    build.rs       builds `lucid_rt` as a static library for `lucid build`
+        wasm.rs    WebAssembly backend, for `--target web`
+        loader.js  the JavaScript that `--target web` writes, with both modules
+    build.rs       builds `lucid_rt` as a static library and as WebAssembly
     tests/golden.rs    runs everything in `tests/` and `examples/`
 runtime/           Rust crate `lucid_rt`: allocator, counting, text, traps
     src/exe.rs     start of a built program, only in the static library
@@ -249,7 +252,7 @@ A trap site is a cold block that passes `lucid_trap` a message holding its sourc
 | `cranelift-object` | Object files for `lucid build` |
 | `find-msvc-tools` | Finds the MSVC linker and its library paths for `lucid build`, on Windows only (decision 139) |
 | `target-lexicon` | Target descriptions (added when needed) |
-| `wasm-encoder` | WebAssembly output (added when needed) |
+| `wasm-encoder` | WebAssembly output for `--target web`, at 0.255 |
 
 Cranelift crates are at 0.137, the latest stable release at M1. No parser generators and no CLI framework.
 
@@ -278,7 +281,7 @@ sh try.sh lucid 07                            # in a benchmark workspace: one at
 | `lucid check [--json] --unsafe [PATH]` | List `unsafe` blocks and `extern` tasks | Works, for a program and all it imports, dependencies too |
 | `lucid check [--json] --costs [PATH]` | List copy and count sites | Works, from the MIR after `ownership.rs`. A task that `derive.rs` wrote stays out |
 | `lucid build [--json] [PATH]` | Produce a native executable | Works on Windows, for the features under "Status". Writes `NAME.exe` to the current directory |
-| `lucid build --target web` | Produce WebAssembly and a loader | Planned |
+| `lucid build --target web [--json] [PATH]` | Produce WebAssembly and a loader | Works for numbers, `bool`, `none`, text values, control flow, calls, and `print`, and gives E0901 for the rest until M6 step 4. Writes `NAME.js` to the current directory. See "WebAssembly" |
 | `lucid test [--json] [PATH]` | Run `test` blocks | Works, for a file, or every file in a package's `src` |
 | `lucid fmt [--check] [PATH]` | Format in place, with no style options. `--check` lists files that would change, and exits with 1 if any would | Works, for a file, or every file in a package's `src`. See "`lucid fmt`" |
 | `lucid fix [--json] [PATH]` | Apply suggested fixes | Works. A `Diagnostic` holds `fixes`, each a set of edits. The command writes the edited text of each file back with its own line endings, from the text that `Source` holds |
@@ -309,6 +312,7 @@ Exit codes: 0 for success, 1 for compile errors or a failed test, 2 for bad usag
 - **Agent guide:** every `lucid` block in `docs/agent-guide.md` must run with exit code 0, and the guide must stay under the token budget, at about 4 bytes per token.
 - **Ownership-off mode:** the run and trap tests run a second time with `LUCID_NAIVE` set, which turns ownership optimizations off. Output must match.
 - **Memory checks:** the debug runtime counts live values, so every golden test also fails on a leak or double free.
+- **Web programs:** `web_programs_match_run` runs the run and trap tests built for the web, under `node`. See "WebAssembly".
 - **Web runtime:** `web_runtime_loads` loads the WebAssembly runtime under `node`, with the imports above, and checks its imports, exports, header offsets, and each import it uses.
 - **Built programs:** `todo_example_works` and `built_programs_match_run` build with `lucid build`, and compare the program with `lucid run`. Every run and trap test gave the same output built, when checked by hand on 2026-11-07.
 - **Fuzzing:** `front_end_never_panics` in `fuzz.rs` mutates the `.lcd` files of `tests/`, `examples/`, `std/`, and `tools/`, and runs each result through `load`, `check`, `mono`, and `ownership`. None may panic. `cargo test` runs 300 inputs from a fixed seed. `LUCID_FUZZ=20000` runs more, and `LUCID_FUZZ_SEED` changes the seed. An input that panics is saved as `target/fuzz-crash-<seed>-<n>.lcd`. On 2026-11-07, 20,000 inputs gave no panic, and about 14% of them reached the checker. Code generation is not fuzzed (decision 150).

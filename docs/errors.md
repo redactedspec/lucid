@@ -591,7 +591,7 @@ Fix: add the permission to `[permissions]` in the package's `lucid.toml`, as `fi
 
 ## E0901: Parses, but cannot run at this milestone
 
-The feature is in the language, but not built yet. `lucid check` does not report this code.
+The feature is in the language, but not built yet, or not built yet for `lucid build --target web`. `lucid check` does not report this code.
 
 ```lucid
 let a = [1, 2]

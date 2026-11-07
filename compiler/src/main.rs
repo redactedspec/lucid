@@ -16,13 +16,14 @@ mod native;
 mod ownership;
 mod parser;
 mod resolve;
+mod wasm;
 
 use diag::{Diagnostic, Source};
 use resolve::{load, package_files, package_root};
 use std::io::Write;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\n       lucid fix [--json] [PATH]\n       lucid explain [--json] CODE\n       lucid context [--json] MODULE\n       lucid fmt [--check] [PATH]\nPATH is a file or a package directory, by default the current directory.";
+const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--target web] [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\n       lucid fix [--json] [PATH]\n       lucid explain [--json] CODE\n       lucid context [--json] MODULE\n       lucid fmt [--check] [PATH]\nPATH is a file or a package directory, by default the current directory.";
 
 /// Set for the child process of `lucid test`, to the place of its first test.
 const TEST_FROM: &str = "LUCID_TEST_FROM";
@@ -63,11 +64,16 @@ fn cli(args: &[String]) -> ExitCode {
         lucid_rt::set_args(rest[1..].iter().map(|arg| (*arg).to_string()).collect());
         rest = &rest[..1];
     }
-    let (rest, path) = match rest.split_last() {
+    let (mut rest, path) = match rest.split_last() {
         Some((path, flags)) if !path.starts_with('-') => (flags, *path),
         _ => (rest, "."),
     };
     let build = command == "build";
+    // `--target web` comes first, so the flags below match as they do without it.
+    let web = build && rest.starts_with(&["--target", "web"]);
+    if web {
+        rest = &rest[2..];
+    }
     let (run, json, costs) = match (command, rest) {
         ("test", []) => return test(path, false),
         ("test", ["--json"]) => return test(path, true),
@@ -100,9 +106,14 @@ fn cli(args: &[String]) -> ExitCode {
             emit(std::io::stdout(), &ownership::render_costs(&source, &found, json));
             return ExitCode::SUCCESS;
         }
-        if build && diags.is_empty() {
+        if web && diags.is_empty() {
+            match wasm::script(&program, &source) {
+                Ok(script) => return write_script(&script, &out_name(path, "js")),
+                Err(errors) => diags = errors,
+            }
+        } else if build && diags.is_empty() {
             match native::object(&program, &source) {
-                Ok(object) => return link(&object, &exe_name(path)),
+                Ok(object) => return link(&object, &out_name(path, "exe")),
                 Err(errors) => diags = errors,
             }
         } else if run && diags.is_empty() {
@@ -117,9 +128,9 @@ fn cli(args: &[String]) -> ExitCode {
     if diags.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
 
-/// The executable that `lucid build` writes to the current directory: named
-/// after the file, or after the directory of the package.
-fn exe_name(path: &str) -> String {
+/// What `lucid build` writes to the current directory: named after the file,
+/// or after the directory of the package, with this extension.
+fn out_name(path: &str, extension: &str) -> String {
     let path = std::path::Path::new(path);
     let stem = if path.is_dir() {
         let root = std::fs::canonicalize(format!("{}.", package_root(&path.display().to_string())));
@@ -127,7 +138,19 @@ fn exe_name(path: &str) -> String {
     } else {
         path.file_stem().map(|name| name.to_os_string())
     };
-    format!("{}.exe", stem.unwrap_or("main".into()).display())
+    format!("{}.{extension}", stem.unwrap_or("main".into()).display())
+}
+
+/// Writes the output of `lucid build --target web`. As in `link`, a failure
+/// is in the system, so it has no code.
+fn write_script(script: &str, name: &str) -> ExitCode {
+    match std::fs::write(name, script) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            emit(std::io::stderr(), &format!("lucid: cannot write `{name}`: {e}\n"));
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// Links an object file from `native::object` with the embedded runtime, into
