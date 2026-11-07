@@ -86,3 +86,7 @@ trait Show
 
 type Equal
     a: int
+
+# A user trait is not a built-in.
+type Describe
+    a: int

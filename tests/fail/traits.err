@@ -37,3 +37,5 @@ traits.lcd:84:7: error E0304: `Show` is already defined as a built-in trait
   note: pick another name
 traits.lcd:87:6: error E0304: `Equal` is already defined as a built-in trait
   note: pick another name
+traits.lcd:91:6: error E0304: `Describe` is already defined as a trait
+  note: pick another name

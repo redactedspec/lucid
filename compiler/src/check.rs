@@ -1042,8 +1042,12 @@ impl<'a> Checker<'a> {
             let trait_name = BUILT_IN_TRAITS.contains(&short)
                 || LATER_TRAITS.contains(&short)
                 || PRELUDE_TRAITS.contains(&short);
-            let what = if trait_name { "trait" } else { "type" };
-            let message = format!("`{text}` is already defined as a built-in {what}");
+            let what = match (trait_name, is_built_in(short)) {
+                (true, _) => "a built-in trait",
+                (false, true) => "a built-in type",
+                (false, false) => "a trait",
+            };
+            let message = format!("`{text}` is already defined as {what}");
             self.report(Diagnostic::new("E0304", message, name.span).note("pick another name"));
             return false;
         }
