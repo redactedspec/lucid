@@ -36,7 +36,7 @@ const OUT_OF_MEMORY: &[u8] = b"trap: out of memory";
 /// Starts every heap value, so one `retain` and `release` serve them all.
 #[repr(C)]
 pub struct Head {
-    count: usize,
+    count: u64,
     kind: Kind,
 }
 
@@ -65,8 +65,8 @@ enum Ascii {
 #[repr(C)]
 pub struct Text {
     head: Head,
-    len: usize,
-    cap: usize,
+    len: u64,
+    cap: u64,
 }
 
 /// A counted list. `cap` slots follow this header, of one byte each for a
@@ -74,8 +74,8 @@ pub struct Text {
 #[repr(C)]
 pub struct List {
     head: Head,
-    len: usize,
-    cap: usize,
+    len: u64,
+    cap: u64,
 }
 
 /// A counted map, or a set, whose values are unused. `cap` entries follow this
@@ -86,7 +86,7 @@ pub struct List {
 #[repr(C)]
 pub struct Map {
     head: Head,
-    len: usize,
+    len: u64,
     used: usize,
     cap: usize,
     keys: Option<KeyTasks>,
@@ -111,7 +111,7 @@ struct KeyTasks {
 #[repr(C)]
 pub struct Record {
     head: Head,
-    tag: usize,
+    tag: u64,
     len: u32,
     counted: u32,
 }
@@ -154,7 +154,7 @@ pub const RECORD_SLOTS_OFFSET: i32 = size_of::<Record>() as i32;
 pub const COUNTED_OFFSET: i32 = offset_of!(Record, counted) as i32;
 
 /// Debug builds only: the count of a released value.
-const DEAD: usize = usize::MAX;
+const DEAD: u64 = u64::MAX;
 
 /// Debug builds only: the number of values not yet released.
 static LIVE: AtomicUsize = AtomicUsize::new(0);
@@ -234,11 +234,11 @@ fn text_alloc(len: usize) -> *mut Text {
 
 fn text_with_room(len: usize, cap: usize) -> *mut Text {
     let head = Head { count: 1, kind: Kind::Text { ascii: Ascii::Unknown } };
-    object(text_size(cap), Text { head, len, cap })
+    object(text_size(cap), Text { head, len: len as u64, cap: cap as u64 })
 }
 
 /// The count of a value in static data. Nothing can release it this many times.
-const IMMORTAL: usize = 1 << 62;
+const IMMORTAL: u64 = 1 << 62;
 
 /// Copies a header, for a backend to put in static data.
 ///
@@ -258,7 +258,7 @@ fn image<T>(value: T) -> Vec<u8> {
 pub fn static_text(text: &str) -> Vec<u8> {
     let ascii = if text.is_ascii() { Ascii::Yes } else { Ascii::No };
     let head = Head { count: IMMORTAL, kind: Kind::Text { ascii } };
-    let mut value = image(Text { head, len: text.len(), cap: text.len() });
+    let mut value = image(Text { head, len: text.len() as u64, cap: text.len() as u64 });
     value.extend_from_slice(text.as_bytes());
     value
 }
@@ -266,7 +266,7 @@ pub fn static_text(text: &str) -> Vec<u8> {
 /// A record with no slots as static data, for a variant with no fields.
 pub fn static_record(tag: usize) -> Vec<u8> {
     let head = Head { count: IMMORTAL, kind: Kind::Record };
-    image(Record { head, tag, len: 0, counted: 0 })
+    image(Record { head, tag: tag as u64, len: 0, counted: 0 })
 }
 
 /// True if every character of `text` is one byte.
@@ -298,7 +298,7 @@ unsafe fn bytes<'a>(text: *const Text) -> &'a [u8] {
     // SAFETY: the caller guarantees a live text, whose bytes follow the header.
     unsafe {
         check_live(text.cast());
-        std::slice::from_raw_parts(text.add(1).cast::<u8>(), (*text).len)
+        std::slice::from_raw_parts(text.add(1).cast::<u8>(), (*text).len as usize)
     }
 }
 
@@ -358,14 +358,14 @@ pub unsafe extern "C" fn lucid_text_join(parts: *const *const Text, count: usize
 unsafe fn add_bytes(first: *mut Text, part: &[u8]) -> *mut Text {
     // SAFETY: the caller guarantees a live text, and each copy fits the room.
     unsafe {
-        let start = (*first).len;
+        let start = (*first).len as usize;
         let len = start.saturating_add(part.len());
         let Kind::Text { ascii } = (*first).head.kind else {
             unreachable!("the caller holds a text");
         };
         // Unknown stays unknown, so a scan waits until something needs it.
         let ascii = if ascii == Ascii::Yes && !part.is_ascii() { Ascii::No } else { ascii };
-        let text = if (*first).head.count == 1 && len <= (*first).cap {
+        let text = if (*first).head.count == 1 && len as u64 <= (*first).cap {
             first
         } else {
             let grown = text_with_room(len, len.saturating_mul(2));
@@ -376,7 +376,7 @@ unsafe fn add_bytes(first: *mut Text, part: &[u8]) -> *mut Text {
         };
         let end = text.add(1).cast::<u8>().add(start);
         std::ptr::copy_nonoverlapping(part.as_ptr(), end, part.len());
-        (*text).len = len;
+        (*text).len = len as u64;
         (*text).head.kind = Kind::Text { ascii };
         text
     }
@@ -448,9 +448,9 @@ pub unsafe extern "C" fn lucid_release(value: *mut Head) {
         drop_count(value, &mut pending);
         while !pending.is_null() {
             let value = pending;
-            pending = (*value).count as *mut Head;
+            pending = (*value).count as usize as *mut Head;
             match (*value).kind {
-                Kind::Text { .. } => free(value, text_size((*value.cast::<Text>()).cap)),
+                Kind::Text { .. } => free(value, text_size((*value.cast::<Text>()).cap as usize)),
                 Kind::List { counted, small } => {
                     let list = value.cast::<List>();
                     if counted {
@@ -458,7 +458,7 @@ pub unsafe extern "C" fn lucid_release(value: *mut Head) {
                             drop_count(slot as *mut Head, &mut pending);
                         }
                     }
-                    free(value, list_size((*list).cap, small));
+                    free(value, list_size((*list).cap as usize, small));
                 }
                 Kind::Map { key_counted, value_counted } => {
                     let map = value.cast::<Map>();
@@ -500,7 +500,7 @@ unsafe fn drop_count(value: *mut Head, pending: &mut *mut Head) {
         }
         (*value).count -= 1;
         if (*value).count == 0 {
-            (*value).count = *pending as usize;
+            (*value).count = *pending as u64;
             *pending = value;
         }
     }
@@ -721,7 +721,7 @@ pub unsafe extern "C" fn lucid_text_lower(text: *const Text) -> *mut Text {
 
 fn list_alloc(cap: usize, counted: bool, small: bool) -> *mut List {
     let head = Head { count: 1, kind: Kind::List { counted, small } };
-    object(list_size(cap, small), List { head, len: 0, cap })
+    object(list_size(cap, small), List { head, len: 0, cap: cap as u64 })
 }
 
 /// True for a `list[byte]`.
@@ -754,7 +754,7 @@ unsafe fn slots<'a>(list: *mut List) -> &'a mut [i64] {
     // SAFETY: the caller guarantees a live list, whose slots follow the header.
     unsafe {
         check_live(list.cast());
-        std::slice::from_raw_parts_mut(list.add(1).cast(), (*list).len)
+        std::slice::from_raw_parts_mut(list.add(1).cast(), (*list).len as usize)
     }
 }
 
@@ -775,13 +775,13 @@ unsafe fn unique_list(list: *mut List, cap: usize) -> *mut List {
     // one count: moved to the copy, or dropped because the copy retains.
     unsafe {
         let shared = (*list).head.count > 1;
-        if !shared && (*list).cap >= cap {
+        if !shared && (*list).cap >= cap as u64 {
             return list;
         }
         let (counted, small) = (is_counted(list), is_small(list));
         let copy = list_alloc(cap, counted, small);
-        let len = (*list).len;
-        (*copy).len = len;
+        let len = (*list).len as usize;
+        (*copy).len = len as u64;
         let size = len * slot_size(small);
         std::ptr::copy_nonoverlapping(list.add(1).cast::<u8>(), copy.add(1).cast(), size);
         if shared {
@@ -790,7 +790,7 @@ unsafe fn unique_list(list: *mut List, cap: usize) -> *mut List {
             }
             (*list).head.count -= 1;
         } else {
-            free(list.cast(), list_size((*list).cap, small));
+            free(list.cast(), list_size((*list).cap as usize, small));
         }
         copy
     }
@@ -804,7 +804,7 @@ unsafe fn unique_list(list: *mut List, cap: usize) -> *mut List {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lucid_list_unique(list: *mut List) -> *mut List {
     // SAFETY: the caller guarantees this.
-    unsafe { unique_list(list, (*list).cap) }
+    unsafe { unique_list(list, (*list).cap as usize) }
 }
 
 /// An empty list with room for `cap` slots, which it holds counts of if
@@ -825,13 +825,13 @@ pub unsafe extern "C" fn lucid_list_push(list: *mut List, value: i64) -> *mut Li
     // SAFETY: the caller guarantees a live list, and `cap` makes room.
     unsafe {
         let list = lucid_list_room(list);
-        let len = (*list).len;
+        let len = (*list).len as usize;
         if is_small(list) {
             list.add(1).cast::<u8>().add(len).write(value as u8);
         } else {
             list.add(1).cast::<i64>().add(len).write(value);
         }
-        (*list).len = len + 1;
+        (*list).len = len as u64 + 1;
         list
     }
 }
@@ -846,7 +846,7 @@ pub unsafe extern "C" fn lucid_list_push(list: *mut List, value: i64) -> *mut Li
 pub unsafe extern "C" fn lucid_list_room(list: *mut List) -> *mut List {
     // SAFETY: the caller guarantees this.
     unsafe {
-        let (len, cap) = ((*list).len, (*list).cap);
+        let (len, cap) = ((*list).len as usize, (*list).cap as usize);
         let cap = if len == cap { cap.saturating_mul(2).max(SMALLEST_LIST) } else { cap };
         unique_list(list, cap)
     }
@@ -855,7 +855,7 @@ pub unsafe extern "C" fn lucid_list_room(list: *mut List) -> *mut List {
 /// True if `0 <= index < len`.
 fn in_bounds(list: *const List, index: i64) -> bool {
     // SAFETY: every caller holds a live list.
-    (index as u64) < unsafe { (*list).len } as u64
+    (index as u64) < unsafe { (*list).len }
 }
 
 /// Drops the last value, and returns the list that replaces `list`.
@@ -870,9 +870,9 @@ pub unsafe extern "C" fn lucid_list_pop(list: *mut List) -> *mut List {
     // `unique_list` keeps that. A caller that wants the value retains it first.
     unsafe {
         let counted = is_counted(list);
-        let list = unique_list(list, (*list).cap);
-        let last = (*list).len - 1;
-        (*list).len = last;
+        let list = unique_list(list, (*list).cap as usize);
+        let last = (*list).len as usize - 1;
+        (*list).len = last as u64;
         if counted {
             release_slot(list.add(1).cast::<i64>().add(last).read());
         }
@@ -893,9 +893,9 @@ pub unsafe extern "C" fn lucid_list_swap(list: *mut List, a: i64, b: i64) -> *mu
     }
     // SAFETY: the caller guarantees a live list, and both indexes are in bounds.
     unsafe {
-        let list = unique_list(list, (*list).cap);
+        let list = unique_list(list, (*list).cap as usize);
         if is_small(list) {
-            std::slice::from_raw_parts_mut(list.add(1).cast::<u8>(), (*list).len)
+            std::slice::from_raw_parts_mut(list.add(1).cast::<u8>(), (*list).len as usize)
                 .swap(a as usize, b as usize);
         } else {
             slots(list).swap(a as usize, b as usize);
@@ -913,7 +913,7 @@ pub unsafe extern "C" fn lucid_list_swap(list: *mut List, a: i64, b: i64) -> *mu
 pub unsafe extern "C" fn lucid_list_has(list: *mut List, value: i64) -> bool {
     let counted = is_counted(list);
     // SAFETY: the caller guarantees a live list, and borrows hold for this call.
-    unsafe { (0..(*list).len).any(|at| same_key(counted, slot_value(list, at), value)) }
+    unsafe { (0..(*list).len as usize).any(|at| same_key(counted, slot_value(list, at), value)) }
 }
 
 /// A new list of the elements from `start` up to but not including `end`.
@@ -927,13 +927,13 @@ pub unsafe extern "C" fn lucid_list_has(list: *mut List, value: i64) -> bool {
 pub unsafe extern "C" fn lucid_list_slice(list: *mut List, start: i64, end: i64) -> *mut List {
     // SAFETY: the caller guarantees a live list, and the range is checked here.
     unsafe {
-        if start < 0 || end < start || end as u64 > (*list).len as u64 {
+        if start < 0 || end < start || end as u64 > (*list).len {
             return std::ptr::null_mut();
         }
         let (start, len) = (start as usize, (end - start) as usize);
         let (counted, small) = (is_counted(list), is_small(list));
         let copy = list_alloc(len, counted, small);
-        (*copy).len = len;
+        (*copy).len = len as u64;
         let size = slot_size(small);
         let first = list.add(1).cast::<u8>().add(start * size);
         std::ptr::copy_nonoverlapping(first, copy.add(1).cast(), len * size);
@@ -948,7 +948,7 @@ pub unsafe extern "C" fn lucid_list_slice(list: *mut List, start: i64, end: i64)
 /// before anything can read them. Each slot below `counted` keeps a count that
 /// the caller gives.
 #[unsafe(no_mangle)]
-pub extern "C" fn lucid_record_new(tag: usize, len: u32, counted: u32) -> *mut Record {
+pub extern "C" fn lucid_record_new(tag: u64, len: u32, counted: u32) -> *mut Record {
     let head = Head { count: 1, kind: Kind::Record };
     object(record_size(len as usize), Record { head, tag, len, counted })
 }
@@ -1198,7 +1198,7 @@ unsafe fn unique_map(map: *mut Map) -> *mut Map {
             return map;
         }
         let cap = if full {
-            (*map).len.saturating_mul(2).next_power_of_two().max(SMALLEST_MAP)
+            ((*map).len as usize).saturating_mul(2).next_power_of_two().max(SMALLEST_MAP)
         } else {
             (*map).cap
         };
@@ -1384,7 +1384,7 @@ pub unsafe extern "C" fn lucid_set_from(
     unsafe {
         let counted = is_counted(list);
         let mut map = lucid_map_new(counted, false, hash, equal);
-        for at in 0..(*list).len {
+        for at in 0..(*list).len as usize {
             let slot = slot_value(list, at);
             if counted {
                 retain_slot(slot);
@@ -1776,7 +1776,7 @@ fn file_result<T>(result: std::io::Result<T>) -> Option<T> {
 /// `list` must point to a live list with slots of one byte.
 unsafe fn list_bytes<'a>(list: *const List) -> &'a [u8] {
     // SAFETY: the caller guarantees the list, and its `len` slots are bytes.
-    unsafe { std::slice::from_raw_parts(list.add(1).cast(), (*list).len) }
+    unsafe { std::slice::from_raw_parts(list.add(1).cast(), (*list).len as usize) }
 }
 
 /// A new `list[byte]`.
@@ -1784,7 +1784,7 @@ fn byte_list(bytes: &[u8]) -> *mut List {
     let list = list_alloc(bytes.len(), false, true);
     // SAFETY: `list_alloc` made room for `len` slots of one byte.
     unsafe {
-        (*list).len = bytes.len();
+        (*list).len = bytes.len() as u64;
         std::ptr::copy_nonoverlapping(bytes.as_ptr(), list.add(1).cast(), bytes.len());
     }
     list
