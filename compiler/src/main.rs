@@ -434,21 +434,24 @@ fn fmt(rest: &[&str]) -> ExitCode {
         command.arg("fmt").args(check.then_some("--check")).env(FMT_CHILD, "1");
         command.args(kept.iter().map(|(file, ..)| file)).status()
     });
+    let mut bug = false;
     for (file, old, tokens) in &kept {
-        let Ok(new) = std::fs::read_to_string(file) else { continue };
-        let (after, diags) = lexer::lex(&new);
-        if new == *old || (diags.is_empty() && same_tokens(tokens, &after)) {
+        // Bytes that are not UTF-8 are a change too.
+        let Ok(new) = std::fs::read(file) else { continue };
+        if only_space_changed(old, tokens, &new) {
             continue;
         }
+        bug = true;
         let restored = match std::fs::write(file, old) {
             Ok(()) => "its old text is back",
             Err(_) => "and its old text could not be written back",
         };
         let problem = format!(
-            "lucid: bug in `lucid fmt`: it changed the tokens of `{file}`, {restored}
-"
+            "lucid: bug in `lucid fmt`: it changed more than space in `{file}`, {restored}\n"
         );
         emit(std::io::stderr(), &problem);
+    }
+    if bug {
         return ExitCode::from(101);
     }
     match child {
@@ -469,6 +472,20 @@ fn fmt(rest: &[&str]) -> ExitCode {
 }
 
 /// True if two token lists differ only in their spans.
+/// True if `new` is `old` with only space and line breaks changed, as the
+/// formatter promises: the same tokens, and the same other characters, which
+/// covers comments. A byte order mark may go. Bytes that are not UTF-8 are a
+/// change.
+fn only_space_changed(old: &str, tokens: &[lexer::Token], new: &[u8]) -> bool {
+    let Ok(new) = std::str::from_utf8(new) else { return false };
+    let solid = |text: &str| {
+        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+        text.chars().filter(|c| !c.is_whitespace()).collect::<String>()
+    };
+    let (after, diags) = lexer::lex(new);
+    new == old || (diags.is_empty() && same_tokens(tokens, &after) && solid(new) == solid(old))
+}
+
 fn same_tokens(a: &[lexer::Token], b: &[lexer::Token]) -> bool {
     use lexer::{TextPart, TokenKind};
     let same_part = |pair: (&TextPart, &TextPart)| match pair {
@@ -684,4 +701,21 @@ fn usage() -> ExitCode {
 /// code still reports the result, so a failure here is ignored.
 fn emit(mut out: impl Write, text: &str) {
     let _ = out.write_all(text.as_bytes());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fmt_net_allows_only_space() {
+        let old = "let a = [1, 2] # note\n";
+        let kept = |new: &[u8]| only_space_changed(old, &lexer::lex(old).0, new);
+        assert!(kept(b"let  a = [1,2]   # note\r\n"));
+        let marked = format!("\u{feff}{old}");
+        assert!(only_space_changed(&marked, &lexer::lex(&marked).0, old.as_bytes()));
+        assert!(!kept(b"let a = [1, 2] # nte\n"), "a comment changed");
+        assert!(!kept(b"let a = [12] # note\n"), "two tokens joined");
+        assert!(!kept(b"let a = [1, 2] # not\xC3\n"), "bytes not UTF-8");
+    }
 }

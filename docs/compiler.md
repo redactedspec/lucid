@@ -90,7 +90,7 @@ Built, by decisions 144 and 145.
 
 The formatter reads each file as bytes and builds the output as a `list[byte]`. All syntax is ASCII, so a byte scan finds every token boundary. Text and comments are copied as bytes. It writes a file only if the output differs. With `--check` it writes nothing, prints each path that would change, and ends with a top-level `try` of an error, which exits with code 1.
 
-**Safety net.** Before the run, `lucid` keeps the text of each file. After it, whatever the child's exit code, `lucid` lexes each changed file again and compares the token kinds, spans aside, with the old ones. A difference is a formatter bug: `lucid` writes the old text back, names the file, and exits with 101. Comments are not tokens, so the net does not cover them. The formatter copies them unchanged.
+**Safety net.** Before the run, `lucid` keeps the text of each file. After it, whatever the child's exit code, `lucid` checks each changed file: it must be UTF-8, lex to the same token kinds, spans aside, and hold the same characters other than whitespace and a byte order mark, which covers comments. Any other change is a formatter bug: `lucid` writes the old text back and names the file, for every such file, then exits with 101.
 
 **Rules.** The formatter changes only space and line breaks. It never joins, splits, or reorders lines or tokens.
 
@@ -128,7 +128,7 @@ The formatter reads each file as bytes and builds the output as a `list[byte]`. 
 
 Line length has no limit, and no line is wrapped. Trailing commas, `use` order, and alignment are left as written.
 
-**Tests.** `tests/fmt/name.lcd` with `name.out`, the expected output. Every `.lcd` file in `std/`, `tools/`, and `examples/` must already be formatted, which `lucid fmt --check` tests. A second run over each `.out` file must change nothing. Line endings and a byte order mark are tested from generated files, since git may change them. The safety net was tried by hand with a formatter that drops all spaces, and has no automatic test.
+**Tests.** `tests/fmt/name.lcd` with `name.out`, the expected output. Every `.lcd` file in `std/`, `tools/`, and `examples/` must already be formatted, which `lucid fmt --check` tests. A second run over each `.out` file must change nothing. Line endings and a byte order mark are tested from generated files, since git may change them. The safety net's check is unit-tested in `main.rs`, and the whole net was tried by hand with a formatter that drops all spaces.
 
 ## Repository layout
 
