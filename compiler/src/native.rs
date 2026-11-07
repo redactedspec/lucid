@@ -244,6 +244,10 @@ fn compile(
     builder.symbol("lucid_args", lucid_rt::lucid_args as *const u8);
     builder.symbol("lucid_env_has", lucid_rt::lucid_env_has as *const u8);
     builder.symbol("lucid_env_get", lucid_rt::lucid_env_get as *const u8);
+    builder.symbol("lucid_text_is_int", lucid_rt::lucid_text_is_int as *const u8);
+    builder.symbol("lucid_text_int", lucid_rt::lucid_text_int as *const u8);
+    builder.symbol("lucid_text_float", lucid_rt::lucid_text_float as *const u8);
+    builder.symbol("lucid_text_json", lucid_rt::lucid_text_json as *const u8);
     builder.symbol("lucid_time_now", lucid_rt::lucid_time_now as *const u8);
     builder.symbol("lucid_time_clock", lucid_rt::lucid_time_clock as *const u8);
     builder.symbol("lucid_time_sleep", lucid_rt::lucid_time_sleep as *const u8);

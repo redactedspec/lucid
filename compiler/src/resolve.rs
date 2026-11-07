@@ -24,10 +24,11 @@ const PRELUDE: &str = "trait Error
 
 /// The standard library, inside the compiler, so that a program needs no files
 /// beside it. Each module sits at `@std/name.lcd`, a path that no `use` can write.
-const STD_MODULES: [(&str, &str); 4] = [
+const STD_MODULES: [(&str, &str); 5] = [
     ("args", include_str!("../../std/args.lcd")),
     ("env", include_str!("../../std/env.lcd")),
     ("fs", include_str!("../../std/fs.lcd")),
+    ("json", include_str!("../../std/json.lcd")),
     ("time", include_str!("../../std/time.lcd")),
 ];
 

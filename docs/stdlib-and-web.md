@@ -4,7 +4,7 @@
 
 The standard library covers what most programs need, so that small projects need no dependencies. It is written in Lucid. Only low-level parts use `unsafe` and the runtime.
 
-Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/`, and the compiler holds a copy of them, so a program needs no files beside it. `std` alone can call the runtime, through `extern` tasks that start with `lucid_`. Built today: `std.args`, `std.env`, `std.fs`, and `std.time`.
+Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/`, and the compiler holds a copy of them, so a program needs no files beside it. `std` alone can call the runtime, through `extern` tasks that start with `lucid_`. All of the M5 modules are built.
 
 | Module | Contents | Milestone |
 | --- | --- | --- |
@@ -74,9 +74,13 @@ type Book
     title: text
     pages: int
 
-let raw = """{{"title": "Dune", "pages": 412}}"""
+let raw = """
+    {{"title": "Dune", "pages": 412}}
+    """
 let book = try json.parse[Book](raw)
 print book.title
 ```
 
-`Json` is derived by the compiler. No annotations or generators are needed.
+`Json` is derived by the compiler. No annotations or generators are needed. How each type maps to JSON is under "Traits" in [language.md](language.md).
+
+`json.parse[T](raw)` gives `T or JsonError`, and `json.write(value)` gives `text`, with no spaces. A `JsonError` has `message` and `path`, as in `.books[2].title`. Input nested over 128 levels is an error, so it cannot overflow the stack. A `u64` reads only up to the highest `int`. A tree form for JSON of unknown shape waits for a program that needs it.

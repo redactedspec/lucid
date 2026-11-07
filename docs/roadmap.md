@@ -75,7 +75,7 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] `test`, `expect`, `unsafe`, and stack traces on a trap
 - [x] Modules, `use`, `public`
 - [x] Packages, `lucid.toml`, with path dependencies. The registry is at M8
-- [ ] `std.fs`, `std.json`, `std.env`, `std.args`, `std.time`
+- [x] `std.fs`, `std.json`, `std.env`, `std.args`, `std.time`
 - [ ] `lucid build`, `test`, `fix`, `explain`, `context`
 - [ ] `lucid fmt`, written in Lucid as first dogfooding test
 - [ ] Permission checks

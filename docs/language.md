@@ -535,8 +535,23 @@ A trait with type parameters, and a generic task in a trait, are planned.
 | `Hash` | be a key of a map or set | integers, `bool`, `text`, and lists, maps, sets, unions, and `type` or `choice` values made of those. A `none` counts only inside such a value |
 | `Add`, `Sub`, `Mul` | `+`, `-`, `*` | numbers |
 | `Div` | `/`, which gives a `T` | `float`, `f32`. An integer does not have it, since `/` on integers gives `float` |
+| `Json` | `json.parse` and `json.write` | `none`, `bool`, numbers, `text`, and lists, sets, maps with `text` keys, unions, and `type` or `choice` values made of those. See below |
 
-The compiler derives `Equal`, `Hash`, `Order`, `Show`, `Copy`, and `Json` for a type when all its fields support them. Writing the task by hand overrides the derived version, and works inside larger values too. There are no macros. So far `Equal`, `Hash`, `Order`, and `Show` are derived, by the rules in "Collections", "Types", and "Choices". In a derived order a NaN compares as neither less nor more, so it counts as a tie. Planned: `Copy` and `Json`.
+The compiler derives `Equal`, `Hash`, `Order`, `Show`, `Copy`, and `Json` for a type when all its fields support them. Writing the task by hand overrides the derived version, and works inside larger values too. There are no macros. So far `Equal`, `Hash`, `Order`, `Show`, and `Json` are derived, by the rules in "Collections", "Types", and "Choices", and below. In a derived order a NaN compares as neither less nor more, so it counts as a tie. `Json` has no hand-written form yet. Planned: `Copy`.
+
+`Json` lets `std.json` read and write a value:
+
+| Type | JSON |
+| --- | --- |
+| `none` | `null` |
+| `bool`, numbers, `text` | the same. An `int` type reads no number with a fraction or exponent, and a number that does not fit is an error. A NaN or infinity writes as `null` |
+| `list`, `set` | an array. A repeated element of a set reads as one |
+| `map` | an object. The key must be `text` |
+| `type` | an object with one name per field |
+| `choice` | `"Red"` for a variant with no fields, and `{"Circle": {"radius": 1.0}}` for one with fields |
+| a union | what its member gives |
+
+Reading skips names that the type lacks. A field that is left out takes its default, and with no default it reads `null`, which only a type that holds `none` accepts. If a name repeats, the last one counts. A union has `Json` only if no two members read from one kind of JSON value, so `int or text` has it, and `int or float` does not, nor does `text` with a `choice` that has a variant with no fields. So a read never tries a member and goes back. A mix that appears only through type arguments, as `T or U` with two number types, is not rejected: the first member, in the compiler's type order, whose kind of JSON value fits reads it, and no other member is tried. `JsonError` itself has no `Json`, since a read gives it for a failure. A task value, a `pointer`, an `any`, and a map with another key type have no `Json`.
 
 ```lucid
 task show(self: Money) -> text

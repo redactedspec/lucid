@@ -1,0 +1,129 @@
+use std.json
+use std.json.JsonError
+
+type Book
+    title: text
+    pages: int
+    rating: float = 1.5
+    note: text = ""
+    subtitle: text? = none
+
+type Pair[A, B]
+    left: A
+    right: B
+
+choice Shape
+    Dot
+    Circle(radius: float)
+    Rect(width: float, height: float)
+
+type Tree
+    value: int
+    kids: list[Tree]
+
+let book = try json.parse[Book]("{{\"title\": \"Dune\", \"pages\": 412, \"extra\": [1, {{\"a\": null}}]}}")
+print book
+print json.write(book)
+
+print json.parse[int]("  42\n")
+print json.parse[float]("42")
+print json.parse[float]("-1.5e2")
+print json.parse[bool]("true")
+print json.parse[none]("null")
+print json.parse[text]("\"a\\n\\u00e9\\ud83d\\ude00ñ\\\"\"")
+print json.parse[list[int]]("[1, 2, 3]")
+print json.parse[list[list[int]]]("[[], [1]]")
+print json.parse[map[text, int]]("{{\"a\": 1, \"b\": 2, \"a\": 3}}")
+print json.parse[set[text]]("[\"x\", \"y\", \"x\"]")
+print json.parse[int?]("null")
+print json.parse[int?]("7")
+print json.parse[int or text]("\"seven\"")
+print json.parse[Pair[int, list[text]]]("{{\"left\": 1, \"right\": [\"a\"]}}")
+print json.parse[byte]("255")
+print json.parse[i8]("-128")
+print json.parse[u64]("9223372036854775807")
+print json.parse[f32]("0.5")
+print json.parse[Tree]("{{\"value\": 1, \"kids\": [{{\"value\": 2, \"kids\": []}}]}}")
+
+print json.write(Pair(left: 1, right: "a\"\n\t\\"))
+print json.write([1, 2])
+print json.write(1.5)
+print json.write(1.0)
+print json.write(0.0 / 0.0)
+print json.write(true)
+print json.write("é")
+let nothing: int? = none
+print json.write(nothing)
+let some: int? = 5
+print json.write(some)
+let mixed: int or text = "x"
+print json.write(mixed)
+print json.write({"a": [1], "b": []})
+print json.write(set([1]))
+let empty_map: map[text, int] = {}
+print json.write(empty_map)
+print json.write(Tree(value: 1, kids: [Tree(value: 2, kids: [])]))
+let shapes: list[Shape] = [Dot, Circle(radius: 1.0), Rect(width: 1.0, height: 2.0)]
+print json.write(shapes)
+print json.parse[list[Shape]](json.write(shapes))
+
+# Errors are values, with where they happened.
+task show[T: Json and Show](raw: text)
+    match json.parse[T](raw)
+        e: JsonError -> print e.error_message()
+        value: T -> print value
+
+show[int]("")
+show[int]("1 2")
+show[int]("1.5")
+show[int]("99999999999999999999")
+show[byte]("256")
+show[u64]("-1")
+show[text]("7")
+show[bool]("nul")
+show[bool]("tru")
+show[float]("1e999")
+show[float]("01")
+show[float]("-")
+show[float]("1.")
+show[float]("1e")
+show[text]("\"abc")
+show[text]("\"a\nb\"")
+show[text]("\"\\x\"")
+show[text]("\"\\u12\"")
+show[text]("\"\\ud800\"")
+show[text]("\"\\ud800\\u0041\"")
+show[text]("\"\\udc00\"")
+show[list[int]]("[1, 2")
+show[list[int]]("[1,]")
+show[list[int]]("[1, \"a\"]")
+show[list[int]]("{{}}")
+show[map[text, int]]("{{\"a\": 1,}}")
+show[map[text, int]]("{{\"a\" 1}}")
+show[map[text, int]]("{{\"a\": 1 \"b\": 2}}")
+show[map[text, int]]("{{\"a\": null}}")
+show[Book]("{{\"pages\": 1}}")
+show[Book]("{{\"title\": \"a\", \"pages\": \"b\"}}")
+show[Book]("[]")
+show[list[Book]]("[{{\"title\": \"a\", \"pages\": 1}}, {{\"title\": \"b\"}}]")
+show[Shape]("7")
+show[Shape]("\"Nope\"")
+show[Shape]("{{\"Circle\": {{\"radius\": \"x\"}}}}")
+show[Shape]("{{\"Circle\": 1, \"Dot\": 2}}")
+show[int?]("\"a\"")
+
+var deep = ""
+for _ in 0..200
+    deep = "[{deep}"
+show[list[int]](deep)
+
+choice Option
+    Off
+    On(level: int? = none)
+
+show[Option]("{{\"On\": 5}}")
+show[Option]("\"On\"")
+show[Option]("{{\"Off\": 5}}")
+show[Option]("{{\"On\": {{}}}}")
+show[Option]("\"Off\"")
+show[byte]("\"x\"")

@@ -1,0 +1,83 @@
+Book(title: "Dune", pages: 412, rating: 1.5, note: "", subtitle: none)
+{"title":"Dune","pages":412,"rating":1.5,"note":"","subtitle":null}
+42
+42.0
+-150.0
+true
+none
+a
+é😀ñ"
+[1, 2, 3]
+[[], [1]]
+{"a": 3, "b": 2}
+set(["x", "y"])
+none
+7
+seven
+Pair(left: 1, right: ["a"])
+255
+-128
+9223372036854775807
+0.5
+Tree(value: 1, kids: [Tree(value: 2, kids: [])])
+{"left":1,"right":"a\"\n\t\\"}
+[1,2]
+1.5
+1.0
+null
+true
+"é"
+null
+5
+"x"
+{"a":[1],"b":[]}
+[1]
+{}
+{"value":1,"kids":[{"value":2,"kids":[]}]}
+["Dot",{"Circle":{"radius":1.0}},{"Rect":{"width":1.0,"height":2.0}}]
+[Dot, Circle(radius: 1.0), Rect(width: 1.0, height: 2.0)]
+bad JSON: expected a value, at line 1, column 1
+bad JSON: extra text after the value, at line 1, column 3
+bad JSON: expected int, found a number
+bad JSON: expected int, found a number
+bad JSON: 256 does not fit byte
+bad JSON: -1 does not fit u64
+bad JSON: expected text, found a number
+bad JSON: expected a value, at line 1, column 4
+bad JSON: expected a value, at line 1, column 4
+bad JSON: number too large, at line 1, column 6
+bad JSON: a number cannot start with `0`, at line 1, column 2
+bad JSON: expected a digit, at line 1, column 2
+bad JSON: expected a digit, at line 1, column 3
+bad JSON: expected a digit, at line 1, column 3
+bad JSON: text must end, and hold no control characters, at line 1, column 5
+bad JSON: text must end, and hold no control characters, at line 1, column 3
+bad JSON: unknown escape, at line 1, column 3
+bad JSON: expected four hex digits, at line 1, column 6
+bad JSON: a high surrogate with no low one, at line 1, column 8
+bad JSON: a high surrogate with no low one, at line 1, column 14
+bad JSON: a low surrogate with no high one, at line 1, column 8
+bad JSON: expected `,` or `]`, at line 1, column 6
+bad JSON: expected a value, at line 1, column 4
+bad JSON at [1]: expected int, found text
+bad JSON: expected a list, found an object
+bad JSON: expected a name in quotes, at line 1, column 9
+bad JSON: expected `:`, at line 1, column 6
+bad JSON: expected `,` or end of object, at line 1, column 9
+bad JSON at .a: expected int, found null
+bad JSON at .title: expected text, found null
+bad JSON at .pages: expected int, found text
+bad JSON: expected Book, found a list
+bad JSON at [1].pages: expected int, found null
+bad JSON: expected Shape, found a number
+bad JSON: expected Shape, found text
+bad JSON at .Circle.radius: expected float, found text
+bad JSON: expected Shape, found an object
+bad JSON: expected none or int, found text
+bad JSON: nested too deep, at line 1, column 129
+bad JSON: expected Option, found an object
+bad JSON: expected Option, found text
+bad JSON: expected Option, found an object
+On(level: none)
+Off
+bad JSON: expected byte, found text

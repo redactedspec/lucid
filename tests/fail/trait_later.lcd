@@ -12,6 +12,3 @@ type Table[V: Hash] = map[text, V]
 task copy[T: Copy](a: T)
     return
 
-task item[T: Json](a: T)
-    return
-

@@ -1,0 +1,523 @@
+# JSON, typed through the `Json` trait. Text becomes a tree, and the tree becomes
+# the type asked for. `mono.rs` writes the part that depends on a type's fields,
+# and calls the tasks below by name. See "`std.json`" in docs/compiler.md.
+
+public type JsonError
+    message: text
+    path: text = ""
+
+public task error_message(self: JsonError) -> text
+    if self.path is empty
+        return "bad JSON: {self.message}"
+    return "bad JSON at {self.path}: {self.message}"
+
+# `json_tags` in mir.rs holds the position of each variant.
+choice Value
+    Null
+    Flag(value: bool)
+    Whole(value: int)
+    Real(value: float)
+    Str(value: text)
+    Items(value: list[Value])
+    Fields(value: map[text, Value])
+
+# The compiler replaces each call to these two with a task for the type.
+task decode[T: Json](value: Value) -> T or JsonError
+    ...
+
+task encode[T: Json](value: T) -> text
+    ...
+
+# Reads a value of the type asked for. Fields that the type lacks are skipped.
+public task parse[T: Json](raw: text) -> T or JsonError
+    return decode[T](try read_value(raw))
+
+# The text of a value, with no spaces. A NaN or infinity is `null`.
+public task write[T: Json](value: T) -> text
+    return encode(value)
+
+unsafe extern task lucid_bytes_text(data: list[byte]) -> text
+unsafe extern task lucid_text_is_int(number: text) -> bool
+unsafe extern task lucid_text_int(number: text) -> int
+unsafe extern task lucid_text_float(number: text) -> float
+unsafe extern task lucid_text_json(value: text) -> text
+
+# Past this, a value is an error, so that input cannot overflow the stack.
+let MAX_DEPTH = 128
+
+let TAB = 9
+let LINE = 10
+let RETURN = 13
+let SPACE = 32
+let QUOTE = 34
+let PLUS = 43
+let COMMA = 44
+let MINUS = 45
+let DOT = 46
+let SLASH = 47
+let ZERO = 48
+let NINE = 57
+let COLON = 58
+let BIG_A = 65
+let BIG_E = 69
+let BIG_F = 70
+let OPEN_LIST = 91
+let BACKSLASH = 92
+let CLOSE_LIST = 93
+let SMALL_A = 97
+let SMALL_B = 98
+let SMALL_E = 101
+let SMALL_F = 102
+let SMALL_N = 110
+let SMALL_R = 114
+let SMALL_T = 116
+let SMALL_U = 117
+let OPEN_OBJECT = 123
+let CLOSE_OBJECT = 125
+
+type Reader
+    bytes: list[byte]
+    at: int
+
+task read_value(raw: text) -> Value or JsonError
+    var reader = Reader(bytes: raw.bytes(), at: 0)
+    reader.skip_space()
+    let value = try reader.value(0)
+    reader.skip_space()
+    if reader.at < reader.bytes.len()
+        return reader.bad("extra text after the value")
+    return value
+
+task bad(self: Reader, message: text) -> JsonError
+    var line = 1
+    var column = 1
+    for place in 0..self.at
+        if self.bytes[place].to_int() == LINE
+            line += 1
+            column = 0
+        column += 1
+    return JsonError(message: "{message}, at line {line}, column {column}")
+
+# The byte at the current place, or -1 at the end.
+task peek(self: Reader) -> int
+    if self.at < self.bytes.len()
+        return self.bytes[self.at].to_int()
+    return -1
+
+task skip_space(change self: Reader)
+    while self.at < self.bytes.len()
+        let next = self.bytes[self.at].to_int()
+        if next != SPACE and next != LINE and next != RETURN and next != TAB
+            return
+        self.at += 1
+
+task is_digit(next: int) -> bool
+    return next >= ZERO and next <= NINE
+
+task value(change self: Reader, depth: int) -> Value or JsonError
+    if depth == MAX_DEPTH
+        return self.bad("nested too deep")
+    let next = self.peek()
+    if next == QUOTE
+        return Str(value: try self.string())
+    if next == OPEN_LIST
+        return self.items(depth)
+    if next == OPEN_OBJECT
+        return self.fields(depth)
+    if next == MINUS or is_digit(next)
+        return self.number()
+    if next == SMALL_T
+        try self.word("true")
+        return Flag(value: true)
+    if next == SMALL_F
+        try self.word("false")
+        return Flag(value: false)
+    if next == SMALL_N
+        try self.word("null")
+        return Null
+    return self.bad("expected a value")
+
+task word(change self: Reader, expected: text) -> none or JsonError
+    for wanted in expected.bytes()
+        if self.peek() != wanted.to_int()
+            return self.bad("expected a value")
+        self.at += 1
+
+task items(change self: Reader, depth: int) -> Value or JsonError
+    self.at += 1
+    var out: list[Value] = []
+    self.skip_space()
+    if self.peek() == CLOSE_LIST
+        self.at += 1
+        return Items(value: out)
+    while true
+        self.skip_space()
+        out.push(try self.value(depth + 1))
+        self.skip_space()
+        let next = self.peek()
+        if next != COMMA and next != CLOSE_LIST
+            return self.bad("expected `,` or `]`")
+        self.at += 1
+        if next == CLOSE_LIST
+            return Items(value: out)
+    ...
+
+task fields(change self: Reader, depth: int) -> Value or JsonError
+    self.at += 1
+    var out: map[text, Value] = {}
+    self.skip_space()
+    if self.peek() == CLOSE_OBJECT
+        self.at += 1
+        return Fields(value: out)
+    while true
+        self.skip_space()
+        if self.peek() != QUOTE
+            return self.bad("expected a name in quotes")
+        let name = try self.string()
+        self.skip_space()
+        if self.peek() != COLON
+            return self.bad("expected `:`")
+        self.at += 1
+        self.skip_space()
+        let value = try self.value(depth + 1)
+        out[name] = value
+        self.skip_space()
+        let next = self.peek()
+        if next != COMMA and next != CLOSE_OBJECT
+            return self.bad("expected `,` or end of object")
+        self.at += 1
+        if next == CLOSE_OBJECT
+            return Fields(value: out)
+    ...
+
+# Input is valid text, and a part starts and ends at an ASCII byte, so a part
+# is valid text too. `escaped` only ever gets whole characters.
+task text_of(data: list[byte]) -> text
+    # The runtime only reads `data`, and builds a new text.
+    unsafe
+        return lucid_bytes_text(data)
+
+task string(change self: Reader) -> text or JsonError
+    self.at += 1
+    let start = self.at
+    while true
+        let next = self.peek()
+        if next == BACKSLASH
+            return self.escaped(start)
+        if next == QUOTE
+            self.at += 1
+            return text_of(self.bytes[start..self.at - 1])
+        if next < SPACE
+            return self.bad("text must end, and hold no control characters")
+        self.at += 1
+    ...
+
+# The rest of a text, after its first backslash.
+task escaped(change self: Reader, start: int) -> text or JsonError
+    var out = self.bytes[start..self.at]
+    while true
+        let next = self.peek()
+        if next == QUOTE
+            self.at += 1
+            return text_of(out)
+        if next < SPACE
+            return self.bad("text must end, and hold no control characters")
+        self.at += 1
+        if next == BACKSLASH
+            add_character(change out, try self.escape())
+        else
+            out.push(next.to_u8())
+    ...
+
+# One escape, after its backslash, as a code point.
+task escape(change self: Reader) -> int or JsonError
+    let next = self.peek()
+    self.at += 1
+    if next == QUOTE or next == BACKSLASH or next == SLASH
+        return next
+    if next == SMALL_B
+        return 8
+    if next == SMALL_F
+        return 12
+    if next == SMALL_N
+        return LINE
+    if next == SMALL_R
+        return RETURN
+    if next == SMALL_T
+        return TAB
+    if next != SMALL_U
+        self.at -= 1
+        return self.bad("unknown escape")
+    let first = try self.hex()
+    if first >= 56320 and first <= 57343
+        return self.bad("a low surrogate with no high one")
+    if first < 55296 or first > 56319
+        return first
+    if self.peek() != BACKSLASH
+        return self.bad("a high surrogate with no low one")
+    self.at += 1
+    if self.peek() != SMALL_U
+        return self.bad("a high surrogate with no low one")
+    self.at += 1
+    let second = try self.hex()
+    if second < 56320 or second > 57343
+        return self.bad("a high surrogate with no low one")
+    return 65536 + (first - 55296) * 1024 + (second - 56320)
+
+task hex(change self: Reader) -> int or JsonError
+    var out = 0
+    for _ in 0..4
+        let next = self.peek()
+        var digit = 0
+        if is_digit(next)
+            digit = next - ZERO
+        else if next >= SMALL_A and next <= SMALL_F
+            digit = next - SMALL_A + 10
+        else if next >= BIG_A and next <= BIG_F
+            digit = next - BIG_A + 10
+        else
+            return self.bad("expected four hex digits")
+        out = out * 16 + digit
+        self.at += 1
+    return out
+
+# The UTF-8 form of a code point that is no surrogate.
+task add_character(change out: list[byte], point: int)
+    if point < 128
+        out.push(point.to_u8())
+    else if point < 2048
+        out.push((192 + point // 64).to_u8())
+        out.push((128 + point % 64).to_u8())
+    else if point < 65536
+        out.push((224 + point // 4096).to_u8())
+        out.push((128 + point // 64 % 64).to_u8())
+        out.push((128 + point % 64).to_u8())
+    else
+        out.push((240 + point // 262144).to_u8())
+        out.push((128 + point // 4096 % 64).to_u8())
+        out.push((128 + point // 64 % 64).to_u8())
+        out.push((128 + point % 64).to_u8())
+
+task digits(change self: Reader) -> none or JsonError
+    if not is_digit(self.peek())
+        return self.bad("expected a digit")
+    while is_digit(self.peek())
+        self.at += 1
+
+task number(change self: Reader) -> Value or JsonError
+    let start = self.at
+    if self.peek() == MINUS
+        self.at += 1
+    if self.peek() == ZERO
+        self.at += 1
+        if is_digit(self.peek())
+            return self.bad("a number cannot start with `0`")
+    else
+        try self.digits()
+    if self.peek() == DOT
+        self.at += 1
+        try self.digits()
+    if self.peek() == SMALL_E or self.peek() == BIG_E
+        self.at += 1
+        if self.peek() == PLUS or self.peek() == MINUS
+            self.at += 1
+        try self.digits()
+    let number = text_of(self.bytes[start..self.at])
+    # The runtime only reads `number`.
+    unsafe
+        if lucid_text_is_int(number)
+            return Whole(value: lucid_text_int(number))
+        let value = lucid_text_float(number)
+        if value - value != 0.0
+            return self.bad("number too large")
+        return Real(value: value)
+
+# How a value differs from what was asked for.
+task wrong(value: Value, wanted: text) -> JsonError
+    let found = match value
+        Null -> "null"
+        Flag(_) -> "a bool"
+        Whole(_) -> "a number"
+        Real(_) -> "a number"
+        Str(_) -> "text"
+        Items(_) -> "a list"
+        Fields(_) -> "an object"
+    return JsonError(message: "expected {wanted}, found {found}")
+
+# One step of where an error is.
+task at(error: JsonError, step: text) -> JsonError
+    return JsonError(message: error.message, path: "{step}{error.path}")
+
+# The rest of this file is what `mono.rs` calls, by name.
+task read_none(value: Value) -> none or JsonError
+    return match value
+        Null -> none
+        _ -> wrong(value, "null")
+
+task read_bool(value: Value) -> bool or JsonError
+    return match value
+        Flag(flag) -> flag
+        _ -> wrong(value, "bool")
+
+task read_int(value: Value) -> int or JsonError
+    return match value
+        Whole(number) -> number
+        _ -> wrong(value, "int")
+
+task read_range(value: Value, low: int, high: int, name: text) -> int or JsonError
+    let number = match value
+        Whole(number) -> number
+        _ -> return wrong(value, name)
+    if number < low or number > high
+        return JsonError(message: "{number} does not fit {name}")
+    return number
+
+task read_byte(value: Value) -> byte or JsonError
+    return (try read_range(value, 0, 255, "byte")).to_u8()
+
+task read_i8(value: Value) -> i8 or JsonError
+    return (try read_range(value, -128, 127, "i8")).to_i8()
+
+task read_i16(value: Value) -> i16 or JsonError
+    return (try read_range(value, -32768, 32767, "i16")).to_i16()
+
+task read_i32(value: Value) -> i32 or JsonError
+    return (try read_range(value, -2147483648, 2147483647, "i32")).to_i32()
+
+task read_u16(value: Value) -> u16 or JsonError
+    return (try read_range(value, 0, 65535, "u16")).to_u16()
+
+task read_u32(value: Value) -> u32 or JsonError
+    return (try read_range(value, 0, 4294967295, "u32")).to_u32()
+
+# ponytail: reads only up to the highest `int`, since a tree number above that
+# is a `float`. Keep the digits in the tree if a program needs the top half.
+task read_u64(value: Value) -> u64 or JsonError
+    return (try read_range(value, 0, 9223372036854775807, "u64")).to_u64()
+
+task read_float(value: Value) -> float or JsonError
+    return match value
+        Whole(number) -> number.to_float()
+        Real(number) -> number
+        _ -> wrong(value, "float")
+
+task read_f32(value: Value) -> f32 or JsonError
+    let number = (try read_float(value)).to_f32()
+    if number - number != 0.0
+        return JsonError(message: "number does not fit f32")
+    return number
+
+task read_text(value: Value) -> text or JsonError
+    return match value
+        Str(found) -> found
+        _ -> wrong(value, "text")
+
+task read_list[T: Json](value: Value) -> list[T] or JsonError
+    match value
+        Items(items) ->
+            var out: list[T] = []
+            for place in 0..items.len()
+                let item = decode[T](items[place])
+                if item is JsonError
+                    return at(item, "[{place}]")
+                out.push(item)
+            return out
+        _ -> return wrong(value, "a list")
+
+task read_set[T: Json and Hash](value: Value) -> set[T] or JsonError
+    match value
+        Items(items) ->
+            var out: set[T] = set([])
+            for place in 0..items.len()
+                let item = decode[T](items[place])
+                if item is JsonError
+                    return at(item, "[{place}]")
+                out.add(item)
+            return out
+        _ -> return wrong(value, "a list")
+
+task read_map[V: Json](value: Value) -> map[text, V] or JsonError
+    match value
+        Fields(fields) ->
+            var out: map[text, V] = {}
+            for name in fields
+                let item = decode[V](fields[name])
+                if item is JsonError
+                    return at(item, ".{name}")
+                out[name] = item
+            return out
+        _ -> return wrong(value, "an object")
+
+# A missing field reads as null, so a field that takes `none` may be left out.
+task field_value(value: Value, name: text) -> Value
+    match value
+        Fields(fields) -> return fields.get(name) else Null
+        _ -> return Null
+
+task field_has(value: Value, name: text) -> bool
+    match value
+        Fields(fields) -> return name in fields
+        _ -> return false
+
+# The name of the variant that a value holds: `"Red"`, or `{"Circle": ...}`.
+task variant_name(value: Value, wanted: text) -> text or JsonError
+    match value
+        Str(name) -> return name
+        Fields(fields) ->
+            if fields.len() == 1
+                for name in fields
+                    return name
+        _ -> return wrong(value, wanted)
+    return wrong(value, wanted)
+
+task variant_fields(value: Value) -> Value
+    match value
+        Fields(fields) ->
+            for name in fields
+                return fields[name]
+        _ -> return Null
+    return Null
+
+task write_none(value: none) -> text
+    return "null"
+
+task write_plain[T: Show](value: T) -> text
+    return "{value}"
+
+task write_float(value: float) -> text
+    if value - value != 0.0
+        return "null"
+    return "{value}"
+
+task write_f32(value: f32) -> text
+    if value - value != 0.0
+        return "null"
+    return "{value}"
+
+task write_text(value: text) -> text
+    # The runtime only reads `value`, and builds a new text.
+    unsafe
+        return lucid_text_json(value)
+
+task write_list[T: Json](items: list[T]) -> text
+    var out = "["
+    for place in 0..items.len()
+        let comma = if place == 0 then "" else ","
+        out = "{out}{comma}{encode(items[place])}"
+    return "{out}]"
+
+task write_set[T: Json and Hash](items: set[T]) -> text
+    var out = "["
+    var first = true
+    for item in items
+        let comma = if first then "" else ","
+        out = "{out}{comma}{encode(item)}"
+        first = false
+    return "{out}]"
+
+task write_map[V: Json](items: map[text, V]) -> text
+    var out = "{{"
+    for name in items
+        let comma = if out.len() == 1 then "" else ","
+        out = "{out}{comma}{write_text(name)}:{encode(items[name])}"
+    return "{out}}}"

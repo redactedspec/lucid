@@ -398,12 +398,58 @@ impl Types {
 /// The shape of a `type` or `choice`. Field types use its own parameters.
 pub struct Shape {
     pub variants: Vec<ShapeVariant>,
+    pub choice: bool,
 }
 
 /// A `type` has one, with its own name.
 pub struct ShapeVariant {
     pub name: String,
     pub fields: Vec<(String, Ty)>,
+    /// The default of each field, if it has one. Literals, so no locals.
+    pub defaults: Vec<Option<Expr>>,
+}
+
+impl Shape {
+    /// Whether a `type` or `choice` reads from JSON text, for a variant with no
+    /// fields, and from an object. A `type` is an object, even with no fields.
+    pub fn json_forms(&self) -> (bool, bool) {
+        let bare = self.variants.iter().any(|variant| variant.fields.is_empty());
+        let full = self.variants.iter().any(|variant| !variant.fields.is_empty());
+        (self.choice && bare, !self.choice || full)
+    }
+}
+
+/// The variants of `Value` in `std/json.lcd` that a value of this type reads
+/// from, so a union can pick its member with no guessing. `forms` gives
+/// `Shape::json_forms` by a type's index.
+pub fn json_tags(ty: Ty, forms: impl Fn(usize) -> (bool, bool)) -> Vec<usize> {
+    const NULL: usize = 0;
+    const FLAG: usize = 1;
+    const WHOLE: usize = 2;
+    const REAL: usize = 3;
+    const STR: usize = 4;
+    const ITEMS: usize = 5;
+    const FIELDS: usize = 6;
+    match ty {
+        Ty::None => vec![NULL],
+        Ty::Bool => vec![FLAG],
+        Ty::Text => vec![STR],
+        Ty::List(_) | Ty::Set(_) => vec![ITEMS],
+        Ty::Map(..) => vec![FIELDS],
+        Ty::Data(_, id, _) => {
+            let (bare, full) = forms(id);
+            let mut tags = Vec::new();
+            if bare {
+                tags.push(STR);
+            }
+            if full {
+                tags.push(FIELDS);
+            }
+            tags
+        }
+        _ if ty.is_number() => vec![WHOLE, REAL],
+        _ => Vec::new(),
+    }
 }
 
 /// An index into `Task::locals`. Parameters come first.

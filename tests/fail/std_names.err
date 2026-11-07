@@ -1,0 +1,3 @@
+std_names.lcd:1:14: error E0301: the module has no name `nothing`
+std_names.lcd:2:14: error E0333: `lucid_args` is private to its module
+  note: mark it `public` in `std.args.lucid_args` to use it here

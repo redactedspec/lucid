@@ -444,12 +444,16 @@ Sources: [Cargo, specifying dependencies](https://doc.rust-lang.org/cargo/refere
 
 ## Standard library
 
-Decisions 128 to 133.
+Decisions 128 to 138.
 
 - **Go and Rust.** Both ship their standard library with the toolchain, and both pin it to the compiler version. This is from memory of their install layouts, not read for this entry.
 - **Whole-file reads.** Python has `Path.read_text`, Go has `os.ReadFile`, and Rust has `std::fs::read_to_string`. All are from memory, not read for this entry.
 - **Clocks.** Rust splits `SystemTime` from `Instant`. Go's `time.Time` carries a wall and a monotonic reading, and `UnixNano` covers the years 1678 to 2262. Hinnant's paper gives the date algorithms, and four results were checked against Python's `datetime`. Rust and Go are from memory, not read for this entry.
-- **Weak ground.** These are judgment calls with no study behind them. The test is M5's exit, a standalone `.exe`.
+- **JSON shape.** serde's page on enum representations states that the externally tagged form is its default, gives `{"Request": {...}}` as its shape, and shows a separate untagged form. That untagged tries variants in order was not confirmed by what was read: it is from memory.
+- **JSON limits.** RFC 8259 says that object names should be unique, that many implementations keep only the last of a repeated name, and that an implementation may limit the range and precision of numbers. The wording on nesting limits was seen only through a CPython documentation change. serde_json's default of 128 levels comes from third-party reports that cite its source, not its own documentation.
+- **Weak ground.** These are judgment calls with no study behind them, and the sources above were search summaries, not full reads. The test is M5's exit, a standalone `.exe`.
+
+Sources: [serde enum representations](https://serde.rs/enum-representations.html), [RFC 8259](https://datatracker.ietf.org/doc/html/rfc8259), [serde_stacker](https://docs.rs/serde_stacker/latest/src/serde_stacker/lib.rs.html), [a report on the limit](https://github.com/microsoft/pg_durable/pull/328).
 
 ## Open research
 

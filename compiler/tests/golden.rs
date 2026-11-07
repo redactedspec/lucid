@@ -423,6 +423,27 @@ fn run_passes_arguments() {
     assert_eq!(text(&output.stdout), "[\"add\", \"--json\", \"a b\"]\n");
 }
 
+/// Each run reads what the last one saved.
+#[test]
+fn todo_example_works() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("todo");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("cannot make directory");
+    fs::copy(repo().join("examples/todo.lcd"), dir.join("todo.lcd")).expect("cannot copy");
+    let run = |args: &[&str]| {
+        let args: Vec<&str> = ["run", "todo.lcd"].iter().chain(args).copied().collect();
+        let output = lucid(&dir, &args);
+        assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+        text(&output.stdout)
+    };
+    assert_eq!(run(&[]), "");
+    assert_eq!(run(&["add", "buy milk"]), "");
+    assert_eq!(run(&["add", "call \"Ada\""]), "");
+    assert_eq!(run(&["list"]), "[ ] buy milk\n[ ] call \"Ada\"\n");
+    assert_eq!(run(&["add"]), "Usage: todo add <title>\n");
+    assert_eq!(run(&["nope"]), "Unknown command: nope\n");
+}
+
 /// A standard module's sites are not the program's to audit or fix.
 #[test]
 fn reports_leave_out_std() {

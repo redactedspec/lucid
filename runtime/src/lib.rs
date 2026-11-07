@@ -1784,6 +1784,66 @@ pub extern "C" fn lucid_time_sleep(nanos: i64) {
     std::thread::sleep(std::time::Duration::from_nanos(nanos.max(0).cast_unsigned()));
 }
 
+/// True if a number's digits fit an `int`.
+///
+/// # Safety
+///
+/// `number` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_is_int(number: *const Text) -> bool {
+    // SAFETY: the caller guarantees a live text.
+    unsafe { system_text(number) }.parse::<i64>().is_ok()
+}
+
+/// The `int` of a number's digits, or 0 if they do not fit.
+///
+/// # Safety
+///
+/// `number` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_int(number: *const Text) -> i64 {
+    // SAFETY: the caller guarantees a live text.
+    unsafe { system_text(number) }.parse().unwrap_or(0)
+}
+
+/// The nearest `float` to a number, which may be an infinity, or NaN if the
+/// text is no number.
+///
+/// # Safety
+///
+/// `number` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_float(number: *const Text) -> f64 {
+    // SAFETY: the caller guarantees a live text.
+    unsafe { system_text(number) }.parse().unwrap_or(f64::NAN)
+}
+
+/// A text in JSON form, in quotes.
+///
+/// # Safety
+///
+/// `value` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_json(value: *const Text) -> *mut Text {
+    // SAFETY: the caller guarantees a live text.
+    let value = unsafe { system_text(value) };
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c < ' ' => out.push_str(&format!("\\u{:04x}", u32::from(c))),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    text_from(out.as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

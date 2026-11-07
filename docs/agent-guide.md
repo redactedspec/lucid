@@ -595,7 +595,12 @@ print models.greet(User(name: "Ada"))
 use std.args
 use std.env
 use std.fs
+use std.json
 use std.time
+
+type Book
+    title: text
+    pages: int = 0
 
 let name = args.get(0) else "world"    # the first word after the program, as `text?`
 print "Hello, {name}!"
@@ -613,11 +618,19 @@ let start = time.clock()
 time.sleep(time.millis(5))
 print time.clock().since(start).to_seconds() > 0.0
 print time.Date(year: 2026, month: 11, day: 6).time().date()      # 2026-11-06T00:00:00Z
+
+let raw = json.write([Book(title: "Dune", pages: 412)])
+print raw                                      # a list of one object
+let books = json.parse[list[Book]](raw) else []
+print books[0].title
+print json.parse[Book]("[]")                   # a JsonError
 ```
 
 - Pass arguments after the path: `lucid run file.lcd add "buy milk"`.
 - `std.fs` reads and writes whole files: `read_text`, `write_text`, `append_text`, `read_bytes`, `write_bytes`, `list_dir`, `make_dir`, `remove`, `rename`. Each gives its result or a `fs.FileError`. `exists` gives a `bool`.
 - `FileError` has `NotFound(path)`, `Denied(path)`, `NotText(path)`, and `Failed(path, detail)`.
+- `json.parse[T](raw)` gives `T or json.JsonError`, and `json.write(value)` gives `text`. Both need `Json`, which is derived. A `type` is an object, and a left-out field takes its default, or reads `null`. A `choice` is `"Red"` or `{"Circle": {"radius": 1.0}}`. A map key must be `text`.
+- A union has `Json` only if each member reads from its own kind of JSON value: `int or text` works, `int or float` does not.
 - `time.now()` gives a `Time`, and `.date()` its UTC `Date`. `time.clock()` gives an `Instant`, for measuring. `.since(earlier)` gives a `Duration`, which has `+`, `-`, `<`, `.to_seconds()`, and `.to_millis()`. `time.seconds(n)` and `time.millis(n)` make one.
 
 ## Packages

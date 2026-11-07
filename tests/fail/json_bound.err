@@ -1,0 +1,11 @@
+json_bound.lcd:11:7: error E0320: `map[int, int]` does not have `Json`
+json_bound.lcd:13:7: error E0320: `int or float` does not have `Json`
+  note: two members would read from one kind of JSON value
+json_bound.lcd:17:7: error E0320: `text or json_bound.Mixed` does not have `Json`
+  note: two members would read from one kind of JSON value
+json_bound.lcd:19:7: error E0320: `list[int] or set[int]` does not have `Json`
+  note: two members would read from one kind of JSON value
+json_bound.lcd:20:7: error E0320: `json_bound.Holds` does not have `Json`
+json_bound.lcd:22:7: error E0320: `any Show` does not have `Json`
+json_bound.lcd:24:7: error E0320: `std.json.JsonError or text` does not have `Json`
+json_bound.lcd:25:7: error E0320: `list[std.json.JsonError]` does not have `Json`

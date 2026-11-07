@@ -9,7 +9,7 @@ use crate::ast::{
 use crate::diag::{Diagnostic, Source, SourceFile, Span, file_index};
 use crate::mir::{
     Expr, ExprKind, Local, Program, Shape, ShapeVariant, Stmt, Task, TestCase, Ty, Types, Update,
-    Visit, inner,
+    Visit, inner, json_tags,
 };
 use crate::native::find_symbol;
 use std::collections::{HashMap, HashSet};
@@ -32,10 +32,11 @@ const MAX_ALIASES: usize = 128;
 const MAX_FINITE_CHECK: usize = 256;
 
 /// Traits that the compiler knows, and that a bound can name.
-const BUILT_IN_TRAITS: [&str; 8] = ["Equal", "Order", "Show", "Hash", "Add", "Sub", "Mul", "Div"];
+const BUILT_IN_TRAITS: [&str; 9] =
+    ["Equal", "Order", "Show", "Hash", "Add", "Sub", "Mul", "Div", "Json"];
 
 /// Traits in the spec that are not built yet.
-const LATER_TRAITS: [&str; 2] = ["Copy", "Json"];
+const LATER_TRAITS: [&str; 1] = ["Copy"];
 
 /// Dot calls that change their receiver, so they only work as statements, or
 /// for `pop`, as the whole value of one.
@@ -212,8 +213,9 @@ impl Data<'_> {
         let shape = |variant: &Variant| ShapeVariant {
             name: variant.name.into(),
             fields: variant.fields.iter().map(|f| (f.name.into(), f.ty)).collect(),
+            defaults: variant.fields.iter().map(|f| f.default.clone()).collect(),
         };
-        Shape { variants: self.variants.iter().map(shape).collect() }
+        Shape { variants: self.variants.iter().map(shape).collect(), choice: self.choice }
     }
 }
 
@@ -1104,6 +1106,8 @@ impl<'a> Checker<'a> {
                 diag.note(format!("add a bound, as in `[{param}: {name}]`"))
             } else if written_equal {
                 diag.note("a hand-written `equal` needs a hand-written `hash` to match it")
+            } else if name == "Json" && !self.json_union_clear(ty) {
+                diag.note("two members would read from one kind of JSON value")
             } else {
                 diag
             });
@@ -1183,8 +1187,18 @@ impl<'a> Checker<'a> {
         } else {
             parts
         };
+        // A read reports failure as a `JsonError`, so one cannot be a value read.
+        let json_error = matches!(ty, Ty::Data(name, ..) if name == "@std.json.JsonError");
+        if name == "Json" && (json_error || !self.json_union_clear(ty)) {
+            return false;
+        }
         let holds = match name {
             "Show" | "Equal" => true,
+            "Json" => match ty {
+                Ty::Map(key, _) => *key == Ty::Text,
+                Ty::Any(_) | Ty::Task(..) => false,
+                _ => true,
+            },
             "Hash" => ty.is_key() || (ty.is_compound() && !matches!(ty, Ty::Any(_))),
             "Order" => ty.is_number() || matches!(ty, Ty::Text | Ty::List(_) | Ty::Data(..)),
             "Div" => return ty.is_float(),
@@ -1194,6 +1208,21 @@ impl<'a> Checker<'a> {
             return false;
         }
         parts.into_iter().all(|part| self.satisfied(part, name, seen))
+    }
+
+    /// True unless two members of a union can read from one kind of JSON value.
+    /// So a read never has to try a member and go back. A type parameter
+    /// counts as clear: `mono.rs` then takes the first member, in type order,
+    /// whose kind of JSON value fits, and tries no other.
+    fn json_union_clear(&self, ty: Ty) -> bool {
+        let mut seen = Vec::new();
+        ty.members().len() < 2
+            || ty.members().iter().all(|&member| {
+                let tags = json_tags(member, |id| self.datas[id].shape().json_forms());
+                let clear = tags.iter().all(|tag| !seen.contains(tag));
+                seen.extend(tags);
+                clear
+            })
     }
 
     /// With a hand-written task for this type, true if its bounds hold.

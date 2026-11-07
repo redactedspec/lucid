@@ -1,0 +1,25 @@
+use std.json
+
+choice Mixed
+    Bare
+    Full(x: int)
+
+type Holds
+    run: task(int) -> int
+
+let a = json.write(1 == 1)
+print json.write({1: 2})
+let b: int or float = 1
+print json.write(b)
+let c: int or text = 1
+print json.write(c)
+let d: Mixed or text = "a"
+print json.write(d)
+let e: list[int] or set[int] = [1]
+print json.write(e)
+print json.parse[Holds]("1")
+let f: any Show = 1
+print json.write(f)
+print a
+print json.parse[json.JsonError or text]("1")
+print json.parse[list[json.JsonError]]("[]")

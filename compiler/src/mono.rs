@@ -32,6 +32,10 @@ pub fn run(program: &mut Program) -> Vec<Diagnostic> {
         generated: 0,
         queue: Vec::new(),
         diags: Vec::new(),
+        json: source.iter().position(|task| task.name == "@std.json.decode").map(|decode| {
+            let encode = source.iter().position(|task| task.name == "@std.json.encode");
+            (decode, encode.expect("`std.json` has both tasks"))
+        }),
         args: &[],
         locals: Vec::new(),
         captures: Vec::new(),
@@ -91,7 +95,7 @@ enum Job {
 }
 
 pub struct Mono<'a> {
-    source: &'a [Task],
+    pub source: &'a [Task],
     methods: &'a HashMap<String, Vec<usize>>,
     pub datas: &'a [Shape],
     pub types: &'a mut Types,
@@ -111,6 +115,8 @@ pub struct Mono<'a> {
     /// Tasks still to build, with their places in `done`.
     queue: Vec<(usize, Job)>,
     diags: Vec<Diagnostic>,
+    /// The tasks of `std.json` that stand for a derived one, if it is in use.
+    json: Option<(usize, usize)>,
     /// The type arguments of the task being rewritten.
     args: &'static [Ty],
     /// The locals of that task, with real types.
@@ -134,7 +140,7 @@ fn slots(counted: impl Iterator<Item = bool>) -> (Vec<usize>, usize) {
 }
 
 impl Mono<'_> {
-    fn instance(&mut self, id: usize, args: &'static [Ty], span: Span) -> usize {
+    pub fn instance(&mut self, id: usize, args: &'static [Ty], span: Span) -> usize {
         let Some(_) = self.check_size(args, span) else { return 0 };
         if let Some(&slot) = self.instances.get(&(id, args)) {
             return slot;
@@ -266,8 +272,15 @@ impl Mono<'_> {
         (found.get(field).copied().unwrap_or(0), total)
     }
 
+    /// Rewrites a field's default for its type's arguments. A default is a
+    /// literal, so it reads no local.
+    pub fn finish_default(&mut self, default: &mut Expr, args: &'static [Ty]) {
+        self.args = args;
+        self.expr(default);
+    }
+
     /// A value as the wider type `to`.
-    fn wrap(&mut self, value: Expr, to: Ty, span: Span) -> Expr {
+    pub fn wrap(&mut self, value: Expr, to: Ty, span: Span) -> Expr {
         if value.ty == to {
             return value;
         }
@@ -286,7 +299,7 @@ impl Mono<'_> {
     }
 
     /// A union as the narrower type `to`.
-    fn view(&self, value: Expr, to: Ty, span: Span) -> Expr {
+    pub fn view(&self, value: Expr, to: Ty, span: Span) -> Expr {
         if value.ty == to || matches!(to, Ty::Union(_)) || !matches!(value.ty, Ty::Union(_)) {
             return Expr { ty: to, ..value };
         }
@@ -366,7 +379,12 @@ impl Visit for Mono<'_> {
         value.kind = match kind {
             ExprKind::Call(id, args, values) => {
                 let args = self.types.subst_all(args, self.args);
-                ExprKind::Call(self.instance(id, args, span), &[], values)
+                let slot = match self.json {
+                    Some((decode, _)) if decode == id => self.json_reader(args[0], span),
+                    Some((_, encode)) if encode == id => self.json_writer(args[0], span),
+                    _ => self.instance(id, args, span),
+                };
+                ExprKind::Call(slot, &[], values)
             }
             ExprKind::Closure { task, args, fields, .. } => {
                 let args = self.types.subst_all(args, self.args);
