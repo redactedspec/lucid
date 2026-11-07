@@ -594,14 +594,24 @@ print models.greet(User(name: "Ada"))
 ```lucid
 use std.args
 use std.env
+use std.fs
 
 let name = args.get(0) else "world"    # the first word after the program, as `text?`
 print "Hello, {name}!"
 print args.all().len()
 print env.get("LUCID_NOT_SET") else "unset"
+
+task copy(from: text, to: text) -> none or fs.FileError
+    let content = try fs.read_text(from)
+    try fs.write_text(to, content)
+
+print fs.exists("no/such/file")
+print fs.read_text("no/such/file") else "empty"
 ```
 
 - Pass arguments after the path: `lucid run file.lcd add "buy milk"`.
+- `std.fs` reads and writes whole files: `read_text`, `write_text`, `append_text`, `read_bytes`, `write_bytes`, `list_dir`, `make_dir`, `remove`, `rename`. Each gives its result or a `fs.FileError`. `exists` gives a `bool`.
+- `FileError` has `NotFound(path)`, `Denied(path)`, `NotText(path)`, and `Failed(path, detail)`.
 
 ## Packages
 

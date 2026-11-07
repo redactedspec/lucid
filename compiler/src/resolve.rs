@@ -24,8 +24,11 @@ const PRELUDE: &str = "trait Error
 
 /// The standard library, inside the compiler, so that a program needs no files
 /// beside it. Each module sits at `@std/name.lcd`, a path that no `use` can write.
-const STD_MODULES: [(&str, &str); 2] =
-    [("args", include_str!("../../std/args.lcd")), ("env", include_str!("../../std/env.lcd"))];
+const STD_MODULES: [(&str, &str); 3] = [
+    ("args", include_str!("../../std/args.lcd")),
+    ("env", include_str!("../../std/env.lcd")),
+    ("fs", include_str!("../../std/fs.lcd")),
+];
 
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {

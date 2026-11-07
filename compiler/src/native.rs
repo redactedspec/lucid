@@ -244,6 +244,17 @@ fn compile(
     builder.symbol("lucid_args", lucid_rt::lucid_args as *const u8);
     builder.symbol("lucid_env_has", lucid_rt::lucid_env_has as *const u8);
     builder.symbol("lucid_env_get", lucid_rt::lucid_env_get as *const u8);
+    builder.symbol("lucid_fs_read", lucid_rt::lucid_fs_read as *const u8);
+    builder.symbol("lucid_fs_write", lucid_rt::lucid_fs_write as *const u8);
+    builder.symbol("lucid_fs_exists", lucid_rt::lucid_fs_exists as *const u8);
+    builder.symbol("lucid_fs_list", lucid_rt::lucid_fs_list as *const u8);
+    builder.symbol("lucid_fs_make_dir", lucid_rt::lucid_fs_make_dir as *const u8);
+    builder.symbol("lucid_fs_remove", lucid_rt::lucid_fs_remove as *const u8);
+    builder.symbol("lucid_fs_rename", lucid_rt::lucid_fs_rename as *const u8);
+    builder.symbol("lucid_fs_failure", lucid_rt::lucid_fs_failure as *const u8);
+    builder.symbol("lucid_fs_detail", lucid_rt::lucid_fs_detail as *const u8);
+    builder.symbol("lucid_bytes_valid", lucid_rt::lucid_bytes_valid as *const u8);
+    builder.symbol("lucid_bytes_text", lucid_rt::lucid_bytes_text as *const u8);
     let mut module = JITModule::new(builder);
 
     let pointer = module.target_config().pointer_type();

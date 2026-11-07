@@ -4,7 +4,7 @@
 
 The standard library covers what most programs need, so that small projects need no dependencies. It is written in Lucid. Only low-level parts use `unsafe` and the runtime.
 
-Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/`, and the compiler holds a copy of them, so a program needs no files beside it. `std` alone can call the runtime, through `extern` tasks that start with `lucid_`. Built today: `std.args` and `std.env`.
+Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/`, and the compiler holds a copy of them, so a program needs no files beside it. `std` alone can call the runtime, through `extern` tasks that start with `lucid_`. Built today: `std.args`, `std.env`, and `std.fs`.
 
 | Module | Contents | Milestone |
 | --- | --- | --- |
@@ -30,7 +30,20 @@ Never hand-roll cryptography primitives. Wrap a vetted implementation.
 | `args.get(index)` | `text?`: one of them |
 | `env.get(name)` | `text?`: a variable, if set |
 
-Text from the system that is not valid Unicode has its bad parts replaced.
+| `fs.read_text(path)` | `text or FileError` |
+| `fs.write_text(path, content)` | `none or FileError`: replaces the file, or makes it |
+| `fs.append_text(path, content)` | `none or FileError`: adds to its end, or makes it |
+| `fs.read_bytes(path)` | `list[byte] or FileError` |
+| `fs.write_bytes(path, data)` | `none or FileError` |
+| `fs.exists(path)` | `bool` |
+| `fs.list_dir(path)` | `list[text] or FileError`: sorted names |
+| `fs.make_dir(path)` | `none or FileError`: with any parents it needs |
+| `fs.remove(path)` | `none or FileError`: a file or an empty directory |
+| `fs.rename(from, to)` | `none or FileError`: replaces what is at `to` |
+
+`FileError` is a `choice`: `NotFound(path)`, `Denied(path)`, `NotText(path)`, or `Failed(path, detail)`. Paths are text, and `/` works on every system, so `"{dir}/{name}"` joins them.
+
+Text from the system that is not valid Unicode has its bad parts replaced, except that `fs.read_text` gives `NotText`.
 
 ## Websites
 

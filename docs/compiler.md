@@ -18,6 +18,8 @@ An `extern` task has a signature and a place in `Program::tasks`, like any task,
 
 An `extern` task in `std` may start with `lucid_` and may pass counted values. It gets a borrowed value for each parameter, and gives a new value, so `ownership.rs` counts `ExprKind::Foreign` as new. `native.rs` lists these symbols with the rest of the runtime. So the system calls in `std` are Rust's, in `lucid_rt`, and M8 gets Linux and macOS with no new `std` code. `--costs` and `--unsafe` leave out sites in `@std/`.
 
+A file task in `lucid_rt` keeps its failure in a thread local, and gives an empty value, so a call needs no result type of its own. `std.fs` asks for that failure next, and builds a `FileError`.
+
 ## `test`
 
 `check.rs` lowers a `test` to a task of its own, placed after the written tasks, only if the build keeps tests. `Frame::in_test` sends a failed `try` to `Stmt::Exit`, as at top level. `Program::tests` lists them.

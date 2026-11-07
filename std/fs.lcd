@@ -1,0 +1,101 @@
+# Files, read and written whole. There is no open file to close.
+
+public choice FileError
+    NotFound(path: text)
+    Denied(path: text)
+    NotText(path: text)
+    Failed(path: text, detail: text)
+
+public task error_message(self: FileError) -> text
+    return match self
+        NotFound(path) -> "file not found: {path}"
+        Denied(path) -> "permission denied: {path}"
+        NotText(path) -> "not UTF-8 text: {path}"
+        Failed(path, detail) -> "{path}: {detail}"
+
+unsafe extern task lucid_fs_read(path: text) -> list[byte]
+unsafe extern task lucid_fs_write(path: text, data: list[byte], append: bool)
+unsafe extern task lucid_fs_exists(path: text) -> bool
+unsafe extern task lucid_fs_list(path: text) -> list[text]
+unsafe extern task lucid_fs_make_dir(path: text)
+unsafe extern task lucid_fs_remove(path: text)
+unsafe extern task lucid_fs_rename(from: text, to: text)
+unsafe extern task lucid_fs_failure() -> int
+unsafe extern task lucid_fs_detail() -> text
+unsafe extern task lucid_bytes_valid(data: list[byte]) -> bool
+unsafe extern task lucid_bytes_text(data: list[byte]) -> text
+
+# How the last runtime call failed, if it did.
+task failure(path: text) -> FileError?
+    # Each task only reads what the last call left.
+    unsafe
+        return match lucid_fs_failure()
+            0 -> none
+            1 -> NotFound(path: path)
+            2 -> Denied(path: path)
+            _ -> Failed(path: path, detail: lucid_fs_detail())
+
+public task read_bytes(path: text) -> list[byte] or FileError
+    # The runtime only reads `path`, and builds a new list.
+    unsafe
+        let data = lucid_fs_read(path)
+        try failure(path)
+        return data
+
+public task read_text(path: text) -> text or FileError
+    let data = try read_bytes(path)
+    # Both tasks only read `data`, and the second builds a new text.
+    unsafe
+        if not lucid_bytes_valid(data)
+            return NotText(path: path)
+        return lucid_bytes_text(data)
+
+# Replaces the file, or makes it.
+public task write_bytes(path: text, data: list[byte]) -> none or FileError
+    # The runtime only reads `path` and `data`.
+    unsafe
+        lucid_fs_write(path, data, false)
+    try failure(path)
+
+public task write_text(path: text, content: text) -> none or FileError
+    try write_bytes(path, content.bytes())
+
+# Adds to the end of the file, or makes it.
+public task append_text(path: text, content: text) -> none or FileError
+    # The runtime only reads `path` and the bytes.
+    unsafe
+        lucid_fs_write(path, content.bytes(), true)
+    try failure(path)
+
+public task exists(path: text) -> bool
+    # The runtime only reads `path`.
+    unsafe
+        return lucid_fs_exists(path)
+
+# The names in a directory, in sorted order.
+public task list_dir(path: text) -> list[text] or FileError
+    # The runtime only reads `path`, and builds a new list.
+    unsafe
+        let names = lucid_fs_list(path)
+        try failure(path)
+        return names
+
+# Makes a directory, with any parents that it needs.
+public task make_dir(path: text) -> none or FileError
+    # The runtime only reads `path`.
+    unsafe
+        lucid_fs_make_dir(path)
+    try failure(path)
+
+# Removes a file or an empty directory.
+public task remove(path: text) -> none or FileError
+    # The runtime only reads `path`.
+    unsafe
+        lucid_fs_remove(path)
+    try failure(path)
+
+public task rename(from: text, to: text) -> none or FileError
+    # The runtime only reads both paths.
+    unsafe
+        lucid_fs_rename(from, to)
+    try failure(from)

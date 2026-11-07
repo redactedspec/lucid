@@ -1,0 +1,45 @@
+use std.fs
+use std.fs.FileError
+
+let dir = "../../target/std_fs_test"
+
+task clean(dir: text) -> none or FileError
+    if fs.exists(dir)
+        for name in try fs.list_dir(dir)
+            try fs.remove("{dir}/{name}")
+        try fs.remove(dir)
+
+try clean(dir)
+print fs.exists(dir)
+try fs.make_dir("{dir}/inner")
+try fs.remove("{dir}/inner")
+try fs.make_dir(dir)
+print fs.exists(dir)
+
+let path = "{dir}/año.txt"
+print fs.read_text(path)
+print fs.read_text(path) else "fallback"
+try fs.write_text(path, "first\n")
+try fs.append_text(path, "second ñ\n")
+print fs.read_text(path)
+print (try fs.read_bytes(path)).len()
+
+try fs.write_bytes("{dir}/raw", [255, 0, 65])
+print fs.read_bytes("{dir}/raw")
+print fs.read_text("{dir}/raw")
+
+try fs.rename("{dir}/raw", "{dir}/moved")
+print fs.list_dir(dir)
+print fs.rename("{dir}/raw", "{dir}/other")
+print fs.list_dir("{dir}/none")
+
+match fs.read_text("{dir}/none")
+    text_value: text -> print text_value
+    e: FileError -> print e.error_message()
+
+let failed = fs.read_text(dir)
+if failed is FileError
+    print "a directory is no file"
+
+try clean(dir)
+print fs.exists(dir)

@@ -1,0 +1,16 @@
+false
+true
+NotFound(path: "../../target/std_fs_test/año.txt")
+fallback
+first
+second ñ
+
+16
+[255, 0, 65]
+NotText(path: "../../target/std_fs_test/raw")
+["año.txt", "moved"]
+NotFound(path: "../../target/std_fs_test/raw")
+NotFound(path: "../../target/std_fs_test/none")
+file not found: ../../target/std_fs_test/none
+a directory is no file
+false

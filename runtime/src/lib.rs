@@ -4,9 +4,10 @@
 //! never reuse their memory. So a leak or double free stops the program.
 
 use std::alloc::{Layout, alloc, dealloc};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{BuildHasher, RandomState};
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::mem::offset_of;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -663,14 +664,7 @@ pub unsafe extern "C" fn lucid_text_quote(text: *const Text) -> *mut Text {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lucid_text_bytes(text: *const Text) -> *mut List {
     // SAFETY: the caller guarantees a live text.
-    let bytes = unsafe { bytes(text) };
-    let list = list_alloc(bytes.len(), false, true);
-    // SAFETY: `list_alloc` made room for `len` slots of one byte.
-    unsafe {
-        (*list).len = bytes.len();
-        std::ptr::copy_nonoverlapping(bytes.as_ptr(), list.add(1).cast(), bytes.len());
-    }
-    list
+    byte_list(unsafe { bytes(text) })
 }
 
 fn list_alloc(cap: usize, counted: bool, small: bool) -> *mut List {
@@ -1599,6 +1593,172 @@ pub unsafe extern "C" fn lucid_env_get(name: *const Text) -> *mut Text {
     // SAFETY: the caller guarantees a live text.
     let value = std::env::var_os(unsafe { system_text(name) }).unwrap_or_default();
     text_from(value.to_string_lossy().as_bytes())
+}
+
+std::thread_local! {
+    /// How the last file task failed: 0 if it did not, 1 for a missing file,
+    /// 2 for no permission, or 3 for anything else, with the system's words.
+    static FILE_FAILURE: RefCell<(i64, String)> = const { RefCell::new((0, String::new())) };
+}
+
+/// Keeps what `std.fs` asks for next.
+fn file_result<T>(result: std::io::Result<T>) -> Option<T> {
+    let failure = match &result {
+        Ok(_) => (0, String::new()),
+        Err(e) => match e.kind() {
+            ErrorKind::NotFound => (1, String::new()),
+            ErrorKind::PermissionDenied => (2, String::new()),
+            _ => (3, e.to_string()),
+        },
+    };
+    FILE_FAILURE.set(failure);
+    result.ok()
+}
+
+/// The bytes of a `list[byte]`.
+///
+/// # Safety
+///
+/// `list` must point to a live list with slots of one byte.
+unsafe fn list_bytes<'a>(list: *const List) -> &'a [u8] {
+    // SAFETY: the caller guarantees the list, and its `len` slots are bytes.
+    unsafe { std::slice::from_raw_parts(list.add(1).cast(), (*list).len) }
+}
+
+/// A new `list[byte]`.
+fn byte_list(bytes: &[u8]) -> *mut List {
+    let list = list_alloc(bytes.len(), false, true);
+    // SAFETY: `list_alloc` made room for `len` slots of one byte.
+    unsafe {
+        (*list).len = bytes.len();
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), list.add(1).cast(), bytes.len());
+    }
+    list
+}
+
+/// Reads a whole file, or gives an empty list and keeps the failure.
+///
+/// # Safety
+///
+/// `path` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_fs_read(path: *const Text) -> *mut List {
+    // SAFETY: the caller guarantees a live text.
+    let data = file_result(std::fs::read(unsafe { system_text(path) }));
+    byte_list(&data.unwrap_or_default())
+}
+
+/// Replaces a file, or adds to its end.
+///
+/// # Safety
+///
+/// `path` must point to a live text, and `data` to a live `list[byte]`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_fs_write(path: *const Text, data: *const List, append: bool) {
+    // SAFETY: the caller guarantees both.
+    let (path, data) = unsafe { (system_text(path), list_bytes(data)) };
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).write(!append).truncate(!append).append(append);
+    file_result(options.open(path).and_then(|mut file| file.write_all(data)));
+}
+
+/// True if a path reaches anything.
+///
+/// # Safety
+///
+/// `path` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_fs_exists(path: *const Text) -> bool {
+    // SAFETY: the caller guarantees a live text.
+    std::path::Path::new(unsafe { system_text(path) }).exists()
+}
+
+/// The sorted names in a directory, or an empty list and the failure kept. A
+/// name that is not Unicode has its bad parts replaced.
+///
+/// # Safety
+///
+/// `path` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_fs_list(path: *const Text) -> *mut List {
+    // SAFETY: the caller guarantees a live text.
+    let found = std::fs::read_dir(unsafe { system_text(path) });
+    let names = found.and_then(|entries| {
+        let names = entries.map(|e| Ok(e?.file_name().to_string_lossy().into_owned()));
+        names.collect::<std::io::Result<Vec<String>>>()
+    });
+    let mut names = file_result(names).unwrap_or_default();
+    names.sort();
+    text_list(names.iter().map(String::as_str))
+}
+
+/// Makes a directory and its parents.
+///
+/// # Safety
+///
+/// `path` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_fs_make_dir(path: *const Text) {
+    // SAFETY: the caller guarantees a live text.
+    file_result(std::fs::create_dir_all(unsafe { system_text(path) }));
+}
+
+/// Removes a file or an empty directory.
+///
+/// # Safety
+///
+/// `path` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_fs_remove(path: *const Text) {
+    // SAFETY: the caller guarantees a live text.
+    let path = unsafe { system_text(path) };
+    let is_dir = std::fs::symlink_metadata(path).is_ok_and(|found| found.is_dir());
+    file_result(if is_dir { std::fs::remove_dir(path) } else { std::fs::remove_file(path) });
+}
+
+/// Moves a file, replacing what is at `to`.
+///
+/// # Safety
+///
+/// `from` and `to` must point to live texts.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_fs_rename(from: *const Text, to: *const Text) {
+    // SAFETY: the caller guarantees both.
+    file_result(std::fs::rename(unsafe { system_text(from) }, unsafe { system_text(to) }));
+}
+
+/// The kind of the last failure on this thread. See `FILE_FAILURE`.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_fs_failure() -> i64 {
+    FILE_FAILURE.with_borrow(|failure| failure.0)
+}
+
+/// The system's words for the last failure on this thread.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_fs_detail() -> *mut Text {
+    FILE_FAILURE.with_borrow(|failure| text_from(failure.1.as_bytes()))
+}
+
+/// True if these bytes are UTF-8.
+///
+/// # Safety
+///
+/// `data` must point to a live `list[byte]`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_bytes_valid(data: *const List) -> bool {
+    // SAFETY: the caller guarantees a live list.
+    std::str::from_utf8(unsafe { list_bytes(data) }).is_ok()
+}
+
+/// A new text of these bytes, with bad parts replaced, so a text is always UTF-8.
+///
+/// # Safety
+///
+/// `data` must point to a live `list[byte]`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_bytes_text(data: *const List) -> *mut Text {
+    // SAFETY: the caller guarantees a live list.
+    text_from(String::from_utf8_lossy(unsafe { list_bytes(data) }).as_bytes())
 }
 
 #[cfg(test)]

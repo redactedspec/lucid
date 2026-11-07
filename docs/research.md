@@ -444,9 +444,10 @@ Sources: [Cargo, specifying dependencies](https://doc.rust-lang.org/cargo/refere
 
 ## Standard library
 
-Decisions 128 to 130.
+Decisions 128 to 132.
 
 - **Go and Rust.** Both ship their standard library with the toolchain, and both pin it to the compiler version. This is from memory of their install layouts, not read for this entry.
+- **Whole-file reads.** Python has `Path.read_text`, Go has `os.ReadFile`, and Rust has `std::fs::read_to_string`. All are from memory, not read for this entry.
 - **Weak ground.** These are judgment calls with no study behind them. The test is M5's exit, a standalone `.exe`.
 
 ## Open research
