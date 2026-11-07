@@ -1,0 +1,4 @@
+name_similar.lcd:3:7: error E0301: name `totl` is not defined
+  fix: rename to `total`
+name_similar.lcd:6:7: error E0301: name `coun` is not defined
+name_similar.lcd:7:7: error E0301: name `x` is not defined

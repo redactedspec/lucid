@@ -1,1 +1,2 @@
 tab_indent.lcd:2:1: error E0101: tab in indentation; indent with 4 spaces
+  fix: replace each tab with 4 spaces

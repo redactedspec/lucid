@@ -21,7 +21,7 @@ Every tool has a stable `--json` output.
 | --- | --- |
 | `lucid check --json` | Fast diagnostics, no code generation |
 | `lucid build --json` | A standalone executable, or the diagnostics that `lucid check --json` gives |
-| `lucid fix` | Apply machine-suggested fixes |
+| `lucid fix [--json] [PATH]` | Make the fix of each error that has one, in place, and list each as `file:line:column: fixed CODE: description`, or `code`, `description`, `file`, `line`, and `column` with `--json`. If two fixes touch the same text, only the first is made, and a second run makes the next. A lexer error stops checking, so its fixes come a run before those of the checker. `std` is never changed |
 | `lucid explain [--json] CODE` | Cause, example, and fix for an error code, from `errors.md`. `--json` gives `code`, `title`, `cause`, `example`, and `fix` |
 | `lucid test --json` | Per-test results of a file, or of every file in a package's `src`, with values on failure: `name`, `passed`, `file`, `line`, `column`, and `output`, which holds what the test printed and, on failure, the trap message and trace |
 | `lucid context [--json] MODULE` | Compact public API of a file, a package directory, or `std.NAME`: each public header with its `##` doc comments, and the fields, variants, or tasks of a type, choice, or trait, with no bodies. `--json` gives `module`, `line`, `kind`, `name`, `signature`, and `doc` |
@@ -43,7 +43,7 @@ Every diagnostic has this shape:
   "column": 9,
   "end_line": 12,
   "end_column": 13,
-  "notes": ["a variable named `total` exists in this scope"],
+  "notes": [],
   "fixes": [
     {
       "description": "rename to `total`",
@@ -57,7 +57,7 @@ Rules:
 
 - Codes never change meaning once released.
 - The compiler reports all errors it can find in one run, not just the first.
-- Each error says what to do next, where a likely fix exists.
+- Each error says what to do next, where a likely fix exists. A fix that is near certain also goes in `fixes`, which `lucid fix` makes, and text output shows it as `  fix: description`. Fixes exist now for E0101, E0106, and E0301 with one close spelling: one edit away per three characters, as in rustc, with no other name at the same distance.
 - Output order is deterministic: by source position.
 - `column` counts Unicode characters, from 1. `end_column` is exclusive.
 

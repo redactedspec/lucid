@@ -194,7 +194,7 @@ ROUNDS=3 sh benchmarks/run.sh                 # fewer rounds
 | `lucid build --target web` | Produce WebAssembly and a loader | Planned |
 | `lucid test [--json] [PATH]` | Run `test` blocks | Works, for a file, or every file in a package's `src` |
 | `lucid fmt` | Format, no options | Planned |
-| `lucid fix` | Apply suggested fixes | Planned |
+| `lucid fix [--json] [PATH]` | Apply suggested fixes | Works. A `Diagnostic` holds `fixes`, each a set of edits. The command writes the edited text of each file back with its own line endings, from the text that `Source` holds |
 | `lucid explain [--json] CODE` | Explain an error code | Works, from `docs/errors.md`, which the compiler holds through `include_str!` |
 | `lucid context [--json] MODULE` | Print a compact API | Works for a file, a package directory, which means every file in its `src`, or `std.NAME`. `context.rs` reads tokens, not the tree, so a file with errors still shows its API |
 | `lucid doc` | Generate docs | Planned |

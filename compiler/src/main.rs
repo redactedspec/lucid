@@ -20,7 +20,7 @@ use resolve::{load, package_files, package_root};
 use std::io::Write;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\n       lucid explain [--json] CODE\n       lucid context [--json] MODULE\nPATH is a file or a package directory, by default the current directory.";
+const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\n       lucid fix [--json] [PATH]\n       lucid explain [--json] CODE\n       lucid context [--json] MODULE\nPATH is a file or a package directory, by default the current directory.";
 
 /// Set for the child process of `lucid test`, to the place of its first test.
 const TEST_FROM: &str = "LUCID_TEST_FROM";
@@ -65,6 +65,8 @@ fn cli(args: &[String]) -> ExitCode {
     let (run, json, costs) = match (command, rest) {
         ("test", []) => return test(path, false),
         ("test", ["--json"]) => return test(path, true),
+        ("fix", []) => return fix(path, false),
+        ("fix", ["--json"]) => return fix(path, true),
         ("check", ["--unsafe"]) => return unsafe_sites(path, false),
         ("check", ["--json", "--unsafe"]) => return unsafe_sites(path, true),
         ("run" | "build", []) => (true, false, false),
@@ -246,6 +248,82 @@ fn explain(code: &str, json: bool) -> ExitCode {
             field(fix),
         ),
     );
+    ExitCode::SUCCESS
+}
+
+/// `lucid fix`: makes the fix of every error that has one, and lists them. Two
+/// fixes that touch the same text would conflict, so only the first is made,
+/// and another run makes the next. `std` belongs to the compiler, so it stays.
+fn fix(path: &str, json: bool) -> ExitCode {
+    let (source, file, mut diags) = load(path, false);
+    if diags.is_empty()
+        && let Some(file) = &file
+    {
+        let (mut program, errors) = check::check(file, &source, true);
+        diags = errors;
+        if diags.is_empty() {
+            diags = mono::run(&mut program);
+        }
+    }
+    diags.sort_by_key(|d| d.span.start);
+    let files = &source.files;
+    let mut taken: Vec<diag::Span> = Vec::new();
+    let mut made = Vec::new();
+    for d in &diags {
+        let Some(fix) = d.fixes.first() else { continue };
+        let file = diag::file_index(files, fix.edits[0].0.start);
+        let clash = |span: &diag::Span| {
+            let overlap = |other: &diag::Span| {
+                span.start == other.start || (span.start < other.end && other.start < span.end)
+            };
+            taken.iter().any(overlap)
+        };
+        if files[file].path.starts_with("@std/") || fix.edits.iter().any(|(span, _)| clash(span)) {
+            continue;
+        }
+        taken.extend(fix.edits.iter().map(|(span, _)| *span));
+        made.push((d, fix, file));
+    }
+    // Each file's text ends with the line break that `Source::add` put after it.
+    let mut edits: Vec<(usize, diag::Span, &str)> = made
+        .iter()
+        .flat_map(|(_, fix, file)| {
+            fix.edits.iter().map(|(span, text)| (*file, *span, text.as_str()))
+        })
+        .collect();
+    edits.sort_by_key(|&(file, span, _)| (file, std::cmp::Reverse(span.start)));
+    let mut at = 0;
+    while at < edits.len() {
+        let file = edits[at].0;
+        let start = files[file].start;
+        let end = files.get(file + 1).map_or(source.text.len(), |next| next.start) - 1;
+        let mut text = source.text[start..end].to_string();
+        while let Some(&(_, span, new)) = edits.get(at).filter(|edit| edit.0 == file) {
+            text.replace_range(span.start - start..span.end - start, new);
+            at += 1;
+        }
+        if let Err(e) = std::fs::write(files[file].path, text) {
+            emit(std::io::stderr(), &format!("lucid: cannot write `{}`: {e}\n", files[file].path));
+            return ExitCode::FAILURE;
+        }
+    }
+    let lines = diag::Lines::new(&source);
+    let items = made.iter().map(|(d, fix, _)| {
+        let (file, line, column) = lines.place(d.span.start);
+        let description = diag::plain(&fix.description);
+        if json {
+            let (file, description) = (diag::json_string(file), diag::json_string(&description));
+            format!(
+                "{{\"code\":\"{}\",\"description\":{description},\"file\":{file},\"line\":{line},\"column\":{column}}}",
+                d.code
+            )
+        } else {
+            format!("{file}:{line}:{column}: fixed {}: {description}\n", d.code)
+        }
+    });
+    let report: String =
+        if json { format!("[{}]\n", items.collect::<Vec<_>>().join(",")) } else { items.collect() };
+    emit(std::io::stdout(), &report);
     ExitCode::SUCCESS
 }
 

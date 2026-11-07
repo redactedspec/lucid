@@ -20,7 +20,7 @@ Fix: save the file as UTF-8.
 
 Indentation is spaces only, so that every tool sees the same depth.
 
-Fix: replace each tab at the start of a line with 4 spaces.
+Fix: replace each tab at the start of a line with 4 spaces. `lucid fix` does this.
 
 ## E0102: Indentation width is wrong
 
@@ -71,7 +71,7 @@ Fix: write `\\` for a backslash, or use one of the known escapes.
 print "a}b"
 ```
 
-Fix: write `}}` for a literal `}`, and `{{` for a literal `{`.
+Fix: write `}}` for a literal `}`, and `{{` for a literal `{`. `lucid fix` writes `}}`.
 
 ## E0107: Malformed number
 
@@ -163,7 +163,7 @@ let total = 1
 print totl
 ```
 
-Fix: correct the spelling, or define the name before its use.
+Fix: correct the spelling, or define the name before its use. If one name in sight is a close spelling, `lucid fix` renames to it.
 
 ## E0302: Type is not defined
 

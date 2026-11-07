@@ -192,7 +192,10 @@ impl Lexer<'_> {
             return;
         }
         if tab {
-            self.error("E0101", "tab in indentation; indent with 4 spaces", start);
+            let span = self.span(start);
+            let spaces = self.src[start..self.pos].replace('\t', "    ");
+            let diag = Diagnostic::new("E0101", "tab in indentation; indent with 4 spaces", span);
+            self.diags.push(diag.fix("replace each tab with 4 spaces", span, spaces));
         }
         let top = self.indents.last().copied().unwrap_or(0);
         if width > top {
@@ -336,7 +339,13 @@ impl Lexer<'_> {
                 }
                 '}' => {
                     self.pos += 1;
-                    self.error("E0106", "`}` in text; write `}}` for a literal brace", at);
+                    let span = self.span(at);
+                    let message = "`}` in text; write `}}` for a literal brace";
+                    self.diags.push(Diagnostic::new("E0106", message, span).fix(
+                        "write `}}`",
+                        span,
+                        "}}",
+                    ));
                 }
                 '{' => {
                     raw.push('\0');

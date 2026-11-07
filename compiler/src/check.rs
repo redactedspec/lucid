@@ -1993,6 +1993,33 @@ impl<'a> Checker<'a> {
         local
     }
 
+    /// Adds a fix to E0301 if one name in sight is a close spelling. Two names
+    /// at the same distance make the guess unsure, so neither is offered.
+    fn similar(&self, diag: Diagnostic, name: &str, span: Span) -> Diagnostic {
+        let locals = self.frame.scopes.iter().flat_map(|scope| scope.keys().copied());
+        let names = locals.chain(self.top.keys().copied()).chain(self.task_ids.keys().copied());
+        let names = names.chain(self.constructors.keys().copied());
+        // As rustc does: a third of the length, and at least one. A change to
+        // every character is no longer a spelling.
+        let length = name.chars().count();
+        let limit = (length.max(3) / 3).min(length - 1);
+        let mut best: Vec<(usize, &str)> = names
+            .filter(|other| other.chars().all(|c| c.is_alphanumeric() || c == '_'))
+            .map(|other| (crate::diag::edit_distance(name, other), other))
+            .filter(|&(distance, _)| distance <= limit)
+            .collect();
+        best.sort();
+        best.dedup();
+        match best.as_slice() {
+            [(distance, other), rest @ ..]
+                if rest.first().is_none_or(|next| next.0 > *distance) =>
+            {
+                diag.fix(format!("rename to `{other}`"), span, *other)
+            }
+            _ => diag,
+        }
+    }
+
     fn lookup(&self, name: &str) -> Option<Local> {
         self.frame.scopes.iter().rev().find_map(|scope| scope.get(name).copied())
     }
@@ -3935,7 +3962,8 @@ impl<'a> Checker<'a> {
         let diag = Diagnostic::new("E0301", format!("name `{name}` is not defined"), span);
         let dotted = self.methods.contains_key(name);
         let note = format!("`{name}` has `self`, so it has no value form: write a lambda");
-        self.report(if dotted { diag.note(note) } else { diag })
+        let diag = if dotted { diag.note(note) } else { self.similar(diag, name, span) };
+        self.report(diag)
     }
 
     /// A literal has `want` if that is an integer type, or else `int`.
@@ -4721,7 +4749,9 @@ impl<'a> Checker<'a> {
                     Diagnostic::new("E0301", format!("name `{name}` is not defined"), callee.span);
                 let dotted = self.methods.contains_key(name.as_str());
                 let note = format!("`{name}` has `self`, so call it with a dot: `x.{name}()`");
-                self.report(if dotted { diag.note(note) } else { diag })
+                let diag =
+                    if dotted { diag.note(note) } else { self.similar(diag, name, callee.span) };
+                self.report(diag)
             }
             _ => {
                 let value = self.expr(callee);

@@ -1,1 +1,2 @@
 lone_brace.lcd:1:9: error E0106: `}` in text; write `}}` for a literal brace
+  fix: write `}}`

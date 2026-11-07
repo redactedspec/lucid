@@ -478,6 +478,15 @@ Decision 141.
 
 Sources: [Rust error codes index](https://doc.rust-lang.org/error_codes/error-index.html).
 
+## Fixes
+
+Decision 143.
+
+- **rustc and cargo fix.** rustc tags each suggestion with an applicability, and `cargo fix` applies only those marked machine-applicable. Its name suggestions accept an edit distance of up to a third of the name's length. Both are from memory of the Rust compiler source, not read for this entry.
+- **Weak ground.** The fixes chosen here are the obvious ones. No measurement yet shows how often agents hit them. The full agent benchmark at M5 can count it.
+
+Sources: [cargo fix](https://doc.rust-lang.org/cargo/commands/cargo-fix.html), [rustc edit_distance](https://doc.rust-lang.org/nightly/nightly-rustc/rustc_span/edit_distance/index.html).
+
 ## Open research
 
 | Topic | Needed by |

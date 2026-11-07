@@ -606,6 +606,30 @@ fn error_examples_give_their_code() {
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
 
+/// Lexer fixes come first, since a lexer error stops the checker. A second
+/// run then makes the fixes that checking finds.
+#[test]
+fn fix_applies_fixes() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fix");
+    fs::create_dir_all(&dir).expect("cannot make directory");
+    let program = "let total = 1\r\nprint totl\r\nprint \"a}b\"\r\nif true\r\n\tprint totl\r\n";
+    fs::write(dir.join("f.lcd"), program).expect("cannot write");
+    let first = lucid(&dir, &["fix", "f.lcd"]);
+    assert_eq!(first.status.code(), Some(0));
+    assert_eq!(
+        text(&first.stdout),
+        "f.lcd:3:9: fixed E0106: write `}}`\nf.lcd:5:1: fixed E0101: replace each tab with 4 spaces\n"
+    );
+    let second = text(&lucid(&dir, &["fix", "--json", "f.lcd"]).stdout);
+    assert!(second.starts_with("[{\"code\":\"E0301\",\"description\":\"rename to `total`\""));
+    let fixed = fs::read_to_string(dir.join("f.lcd")).expect("cannot read");
+    assert_eq!(
+        fixed,
+        "let total = 1\r\nprint total\r\nprint \"a}}b\"\r\nif true\r\n    print total\r\n"
+    );
+    assert_eq!(text(&lucid(&dir, &["fix", "f.lcd"]).stdout), "");
+}
+
 #[test]
 fn context_shows_public_api() {
     let dir = repo().join("tests/package");

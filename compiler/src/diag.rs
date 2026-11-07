@@ -12,6 +12,14 @@ pub struct Diagnostic {
     pub message: String,
     pub span: Span,
     pub notes: Vec<String>,
+    /// Changes that remove the error with near certainty. `lucid fix` applies them.
+    pub fixes: Vec<Fix>,
+}
+
+/// Edits to make together: each replaces a span with text.
+pub struct Fix {
+    pub description: String,
+    pub edits: Vec<(Span, String)>,
 }
 
 impl Span {
@@ -23,8 +31,20 @@ impl Span {
 
 impl Diagnostic {
     pub fn new(code: &'static str, message: impl Into<String>, span: Span) -> Self {
-        let (message, notes) = (message.into(), Vec::new());
-        Self { code, message, span, notes }
+        let (message, notes, fixes) = (message.into(), Vec::new(), Vec::new());
+        Self { code, message, span, notes, fixes }
+    }
+
+    /// Adds a fix of one edit.
+    pub fn fix(
+        mut self,
+        description: impl Into<String>,
+        span: Span,
+        text: impl Into<String>,
+    ) -> Self {
+        let description = description.into();
+        self.fixes.push(Fix { description, edits: vec![(span, text.into())] });
+        self
     }
 
     pub fn note(mut self, note: impl Into<String>) -> Self {
@@ -139,6 +159,9 @@ pub fn render_text(source: &Source, diags: &[Diagnostic]) -> String {
         for note in &d.notes {
             out += &format!("  note: {}\n", plain(note));
         }
+        for fix in &d.fixes {
+            out += &format!("  fix: {}\n", plain(&fix.description));
+        }
     }
     out
 }
@@ -151,18 +174,59 @@ pub fn render_json(source: &Source, diags: &[Diagnostic]) -> String {
             let (file, line, column) = lines.place(d.span.start);
             let (_, end_line, end_column) = lines.place(d.span.end);
             let notes: Vec<String> = d.notes.iter().map(|n| json_string(&plain(n))).collect();
+            let fixes: Vec<String> = d.fixes.iter().map(|fix| fix_json(&lines, fix)).collect();
             format!(
                 "{{\"code\":{},\"severity\":\"error\",\"message\":{},\"file\":{},\"line\":{line},\
                  \"column\":{column},\"end_line\":{end_line},\"end_column\":{end_column},\
-                 \"notes\":[{}],\"fixes\":[]}}",
+                 \"notes\":[{}],\"fixes\":[{}]}}",
                 json_string(d.code),
                 json_string(&plain(&d.message)),
                 json_string(file),
                 notes.join(","),
+                fixes.join(","),
             )
         })
         .collect();
     format!("[{}]\n", items.join(","))
+}
+
+fn fix_json(lines: &Lines, fix: &Fix) -> String {
+    let edits: Vec<String> = fix
+        .edits
+        .iter()
+        .map(|(span, text)| {
+            let (_, line, column) = lines.place(span.start);
+            let (_, end_line, end_column) = lines.place(span.end);
+            format!(
+                "{{\"line\":{line},\"column\":{column},\"end_line\":{end_line},\
+                 \"end_column\":{end_column},\"text\":{}}}",
+                json_string(text)
+            )
+        })
+        .collect();
+    let description = json_string(&plain(&fix.description));
+    format!("{{\"description\":{description},\"edits\":[{}]}}", edits.join(","))
+}
+
+/// How many single-character changes turn `a` into `b`: insertions,
+/// deletions, replacements, and swaps of neighbors.
+pub fn edit_distance(a: &str, b: &str) -> usize {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    // Rows for the last two prefixes of `a`, and this one.
+    let mut before: Vec<usize> = Vec::new();
+    let mut last: Vec<usize> = (0..=b.len()).collect();
+    for i in 1..=a.len() {
+        let mut row = vec![i; b.len() + 1];
+        for j in 1..=b.len() {
+            let replace = last[j - 1] + usize::from(a[i - 1] != b[j - 1]);
+            row[j] = replace.min(last[j] + 1).min(row[j - 1] + 1);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                row[j] = row[j].min(before[j - 2] + 1);
+            }
+        }
+        before = std::mem::replace(&mut last, row);
+    }
+    last[b.len()]
 }
 
 pub fn json_string(s: &str) -> String {
@@ -221,6 +285,14 @@ mod tests {
              \"file\":\"a\\\\b.lcd\",\"line\":1,\"column\":1,\"end_line\":1,\"end_column\":3,\
              \"notes\":[\"a\\nb\"],\"fixes\":[]}]\n"
         );
+    }
+
+    #[test]
+    fn edit_distance_counts_each_change() {
+        assert_eq!(edit_distance("totl", "total"), 1);
+        assert_eq!(edit_distance("ttoal", "total"), 1);
+        assert_eq!(edit_distance("cat", "dog"), 3);
+        assert_eq!(edit_distance("", "ab"), 2);
     }
 
     #[test]

@@ -79,7 +79,7 @@ Build a thin end-to-end path first. Depth comes later.
 - [x] `lucid build`, `lucid test`
 - [x] `lucid explain`
 - [x] `lucid context`
-- [ ] `lucid fix`
+- [x] `lucid fix`
 - [ ] `lucid fmt`, written in Lucid as first dogfooding test
 - [ ] Permission checks
 - [ ] Full agent benchmark
