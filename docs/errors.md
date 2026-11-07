@@ -571,7 +571,7 @@ Fix: add the dependency to `lucid.toml`, or write `./` for a local file.
 
 ## E0338: `lucid.toml` is not valid
 
-The manifest has bad syntax, a form outside the supported TOML, an unknown key, or a bad name or version.
+The manifest has bad syntax, a form outside the supported TOML, an unknown key, a bad name or version, or a `files` or `env` item that is empty or holds a control character, such as the line break that `"\n"` makes.
 
 Fix: correct the line the message names. A manifest holds `[package]` with `name` and `version`, and `[dependencies]`.
 

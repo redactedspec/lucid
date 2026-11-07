@@ -1626,11 +1626,16 @@ pub fn set_grants(text: &str) {
     let _ = GRANTS.set(Grants { files, env, start });
 }
 
-/// A path made absolute from `start`, with each link that exists followed.
-/// A `..` takes away the real directory before it.
-fn real_path(start: &Path, path: &str) -> PathBuf {
+/// A path made absolute from `start`, with each link that exists followed,
+/// except the last part when `follow_last` is false. A `..` takes away the
+/// real directory before it. `None` for a link that cannot be followed, such
+/// as one whose target does not exist yet, since opening it could create a
+/// file anywhere.
+fn real_path(start: &Path, path: &str, follow_last: bool) -> Option<PathBuf> {
     let mut real = PathBuf::new();
-    for part in start.join(path).components() {
+    let full = start.join(path);
+    let parts: Vec<Component> = full.components().collect();
+    for (at, part) in parts.iter().enumerate() {
         match part {
             Component::CurDir => {}
             Component::ParentDir => {
@@ -1638,22 +1643,39 @@ fn real_path(start: &Path, path: &str) -> PathBuf {
             }
             Component::Normal(_) => {
                 real.push(part);
-                if let Ok(found) = std::fs::canonicalize(&real) {
-                    real = found;
+                if !follow_last && at == parts.len() - 1 {
+                    break;
+                }
+                match std::fs::canonicalize(&real) {
+                    Ok(found) => real = found,
+                    Err(_) if std::fs::symlink_metadata(&real).is_ok_and(|m| m.is_symlink()) => {
+                        return None;
+                    }
+                    Err(_) => {}
                 }
             }
             _ => real.push(part),
         }
     }
-    real
+    Some(real)
+}
+
+/// True if `path` and, when it is a link, the link itself both lie under
+/// one of `roots`. The link is checked too because `remove` and `rename`
+/// act on it, not on its target.
+fn inside(start: &Path, roots: &[String], path: &str) -> bool {
+    let forms = |path: &str| [real_path(start, path, true), real_path(start, path, false)];
+    let roots: Vec<PathBuf> = roots.iter().flat_map(|root| forms(root)).flatten().collect();
+    forms(path)
+        .iter()
+        .all(|form| form.as_ref().is_some_and(|form| roots.iter().any(|r| form.starts_with(r))))
 }
 
 /// True if the `files` permission reaches `path`. If not, the next
 /// `lucid_fs_failure` says so.
 fn file_allowed(path: &str) -> bool {
     let Some(Grants { files: Some(roots), start, .. }) = GRANTS.get() else { return true };
-    let real = real_path(start, path);
-    let allowed = roots.iter().any(|root| real.starts_with(real_path(start, root)));
+    let allowed = inside(start, roots, path);
     if !allowed {
         let detail = "outside the `files` permission in `lucid.toml`".to_string();
         FILE_FAILURE.set((3, detail));
@@ -2115,6 +2137,38 @@ mod tests {
             assert!(lucid_map_find(map, 8).is_null());
             lucid_release(map.cast());
         }
+    }
+
+    #[test]
+    fn links_cannot_leave_the_files_permission() {
+        #[cfg(unix)]
+        use std::os::unix::fs::symlink as link;
+        #[cfg(windows)]
+        use std::os::windows::fs::symlink_file as link;
+        let start = std::env::temp_dir().join(format!("lucid-links-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&start);
+        std::fs::create_dir_all(start.join("data")).unwrap();
+        std::fs::write(start.join("data/in"), "x").unwrap();
+        std::fs::write(start.join("secret"), "x").unwrap();
+        let made = [
+            ("data/dangling", start.join("missing")),
+            ("data/out", start.join("secret")),
+            ("into", start.join("data/in")),
+        ]
+        .iter()
+        .all(|(at, target)| link(target, start.join(at)).is_ok());
+        let roots = ["data".to_string()];
+        let allowed = |path| inside(&start, &roots, path);
+        assert!(allowed("data/in") && allowed("data/new") && allowed("data"));
+        assert!(!allowed("secret") && !allowed("data/../secret") && !allowed("."));
+        // Making a link can need a privilege on Windows, so the link checks
+        // run only where the links were made.
+        if made {
+            assert!(!allowed("data/dangling"), "a dangling link could create a file outside");
+            assert!(!allowed("data/out"), "a link inside may not reach a file outside");
+            assert!(!allowed("into"), "a link outside may not be removed or renamed");
+        }
+        let _ = std::fs::remove_dir_all(&start);
     }
 
     #[test]

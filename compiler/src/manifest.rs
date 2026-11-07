@@ -441,6 +441,14 @@ fn read_permissions(table: &Table, diags: &mut Vec<Diagnostic>) -> Vec<Grant> {
                 if items.iter().any(String::is_empty) {
                     diags.push(error(format!("`{key}` cannot list an empty string"), entry.span));
                 }
+                // The runtime reads grants one per line, so a line break in
+                // an item would split it into other grants. See `runtime_grants`.
+                if items.iter().any(|item| item.chars().any(char::is_control)) {
+                    let message = format!(
+                        "`{key}` cannot list a control character. In a \"...\" string, write `\\` as `\\\\`"
+                    );
+                    diags.push(error(message, entry.span));
+                }
                 Grant::List(items)
             }
             _ if listed => {
@@ -569,6 +577,8 @@ mod tests {
         bad(&format!("{HEAD}[permissions]\nnet = \"yes\"\n"), "must be `true`");
         bad(&format!("{HEAD}[permissions]\nfiles = [true]\n"), "list of strings");
         bad(&format!("{HEAD}[permissions]\nenv = [\"\"]\n"), "empty string");
+        bad(&format!("{HEAD}[permissions]\nfiles = [\"\\new\"]\n"), "control character");
+        bad(&format!("{HEAD}[permissions]\nenv = [\"A\\tB\"]\n"), "control character");
         bad(&format!("{HEAD}[dependencies]\nx = \"1.2\"\n"), "needs a `path`");
         bad(&format!("{HEAD}[dependencies]\nx = {{ path = \"a\", }}\n"), "expected a key");
         bad(&format!("{HEAD}[dependencies]\nx = {{ path = \"a\"\n"), "expected `,` or `}`");
@@ -593,10 +603,12 @@ mod tests {
         assert!(!list(&["/"]).covers(&Grant::All, "files"));
         assert!(!list(&["PORT"]).covers(&list(&["PORT", "HOME"]), "env"));
         assert!(!NOTHING.held() && list(&["x"]).held());
-        let (manifest, _) = parse(&format!("{HEAD}[permissions]
+        let (manifest, _) = parse(&format!(
+            "{HEAD}[permissions]
 files = true
 net = false
-"));
+"
+        ));
         let permissions = manifest.expect("a manifest").permissions;
         assert_eq!(permissions[..2], [NOTHING, Grant::All]);
     }
