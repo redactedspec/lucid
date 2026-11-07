@@ -96,7 +96,7 @@ Designed by decisions 156 to 164, see "WebAssembly" in `compiler.md`. Build in t
 - [x] WebAssembly backend from MIR: numbers, control flow, calls, `print`, the loader, `--target web`
 - [x] WebAssembly backend: heap values, task values, `change`, `std`, traces. All run and trap tests pass under Node
 - [x] `std.dom` and `dom.app`, by decisions 163 and 168
-- [ ] Example page, checked in a browser
+- [x] Example page, checked in a browser: `examples/web`
 
 **Exit:** an interactive page written only in Lucid runs in a browser.
 

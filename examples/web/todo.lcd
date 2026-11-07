@@ -1,0 +1,73 @@
+# A to-do list page, written only in Lucid.
+# Build: lucid build --target web todo.lcd, then open index.html.
+use std.dom
+
+type Todo
+    title: text
+    done: bool = false
+
+type Model
+    draft: text
+    todos: list[Todo]
+
+choice Message
+    Typed(value: text)
+    Key(key: text)
+    Save
+    Toggle(index: int)
+    Delete(index: int)
+
+task update(model: Model, message: Message) -> Model
+    var next = model
+    match message
+        Typed(value) ->
+            next.draft = value
+        Key(key) ->
+            if key == "Enter"
+                next = add(next)
+        Save ->
+            next = add(next)
+        Toggle(index) ->
+            next.todos[index].done = not next.todos[index].done
+        Delete(index) ->
+            var kept: list[Todo] = []
+            for i in 0..next.todos.len()
+                if i != index
+                    kept.push(next.todos[i])
+            next.todos = kept
+    return next
+
+task add(model: Model) -> Model
+    var next = model
+    if next.draft is not empty
+        next.todos.push(Todo(title: next.draft))
+        next.draft = ""
+    return next
+
+task row(todo: Todo, index: int) -> dom.Node[Message]
+    let style = if todo.done then "text-decoration: line-through" else ""
+    var box: list[dom.Attr[Message]] = [dom.Attribute(name: "type", value: "checkbox"), dom.On(event: "change", message: _ => Toggle(index: index))]
+    if todo.done
+        box.push(dom.Attribute(name: "checked", value: ""))
+    return dom.Element(tag: "li", children: [
+        dom.Element(tag: "input", attrs: box),
+        dom.Element(tag: "span", attrs: [dom.Attribute(name: "style", value: style)], children: [dom.Text(content: todo.title)]),
+        dom.Element(tag: "button", attrs: [dom.On(event: "click", message: _ => Delete(index: index))], children: [dom.Text(content: "Delete")]),
+    ])
+
+task view(model: Model) -> dom.Node[Message]
+    var rows: list[dom.Node[Message]] = []
+    var left = 0
+    for i in 0..model.todos.len()
+        rows.push(row(model.todos[i], i))
+        if not model.todos[i].done
+            left += 1
+    return dom.Element(tag: "main", children: [
+        dom.Element(tag: "h1", children: [dom.Text(content: "To do")]),
+        dom.Element(tag: "input", attrs: [dom.Attribute(name: "placeholder", value: "What next?"), dom.Attribute(name: "value", value: model.draft), dom.On(event: "input", message: value => Typed(value: value)), dom.On(event: "keydown", message: key => Key(key: key))]),
+        dom.Element(tag: "button", attrs: [dom.On(event: "click", message: _ => Save)], children: [dom.Text(content: "Add")]),
+        dom.Element(tag: "ul", children: rows),
+        dom.Element(tag: "p", children: [dom.Text(content: "{left} left")]),
+    ])
+
+dom.app(Model(draft: "", todos: []), view, update)
