@@ -210,7 +210,7 @@ Level: **Snippet**.
 - Node.js states that it does not provide a sandbox, and that child processes do not inherit restrictions.
 - Capslock analyzes Go packages by following transitive calls into privileged functions, and it is designed for review, not containment.
 
-**For Lucid:** the first design had two holes. `process` could also bypass all limits, and a package could reach the network indirectly through a permitted dependency. Both are fixed in `security.md`. Permissions limit careless and casual misuse of dependencies. They are not a sandbox.
+**For Lucid:** the first design had two holes. `process` could also bypass all limits, and a package could reach the network indirectly through a permitted dependency. Both are fixed in `security.md`. Deno checks `--allow-read` paths for the whole process, not per module, and decision 146 does the same at run time. Permissions limit careless and casual misuse of dependencies. They are not a sandbox.
 
 Sources: [Deno security](https://docs.deno.com/runtime/fundamentals/security), [Node.js security model](https://github.com/nodejs/node/blob/master/doc/contributing/security-model-strategy.md), [Capslock](https://security.googleblog.com/2023/09/capslock-what-is-your-code-really.html).
 

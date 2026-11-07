@@ -577,6 +577,14 @@ A package has `src/main.lcd` or `src/lib.lcd`, not both. A dependency must exist
 
 Fix: follow the message: add or remove an entry file, or correct the dependency's `path` or name.
 
+## E0340: A package uses a permission it does not hold (planned)
+
+Planned for M5, by decision 146. A package's `use` of a `std` module, its `unsafe` block or `extern`, or a dependency's permissions go beyond what its `lucid.toml` grants. See "Package permissions" in `docs/security.md`.
+
+An example, with its test, comes when the check is built.
+
+Fix: add the permission to `[permissions]` in the package's `lucid.toml`, as `files = ["./notes"]`, or to the `allow` entry of the dependency that needs it.
+
 ## E0901: Parses, but cannot run at this milestone
 
 The feature is in the language, but not built yet. `lucid check` does not report this code.
