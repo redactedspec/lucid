@@ -2,6 +2,7 @@
 name = "lucid_rt"
 version = "0.1.0"
 edition = "2024"
+license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
 
 [dependencies]
 

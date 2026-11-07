@@ -2,6 +2,7 @@
 name = "lucid"
 version = "0.1.0"
 edition = "2024"
+license = "GPL-3.0-or-later"
 
 [features]
 # Removes overflow checks, only to measure their cost. See docs/compiler.md.

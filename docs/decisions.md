@@ -159,6 +159,7 @@ Add new entries at the end of the list. To reverse a decision, add a new entry t
 | 151 | 2026-11-07 | Decision 27 stays: a task reads a top-level `let` only if its value is a literal. No initialization order is defined | Go orders package variables by their dependencies, and Swift makes each global lazy behind a one-time check. Both add rules or run-time cost. Rust allows only constant initializers in a `static`, which is close to Lucid's rule. In the M5 agent benchmark, no Lucid solution of 100 hit the limit, and the only top-level values subjects wanted were literals. See "M5 open questions" in `research.md`. |
 | 152 | 2026-11-07 | No literal types, such as `"open" or "closed"`, in version 1. A `choice` covers the job | A second way to name a fixed set of cases breaks rule 1 in `agents.md`. TypeScript needs them because JavaScript passes such values as plain strings. Lucid has `choice`. Across 50 TypeScript solutions in the M5 benchmark, subjects wrote no literal union. See "M5 open questions" in `research.md`. |
 | 153 | 2026-11-07 | Bit operations are operators, `&` `\|` `^` `~` `<<` `>>`, on integer types, with Python's precedence: all bind tighter than comparisons and looser than `+`. A shift count below 0 or not less than the width traps. `>>` keeps the sign of a signed type. Planned for M7 | Python, TypeScript, Rust, Go, and C all spell them this way, so rule 6 in `agents.md` wins over rule 7. Tasks would be a form no model has seen, unlike `wrapping_add` in decision 80, which follows Rust. Python and TypeScript subjects of the M5 benchmark reached for `&`, `>>`, and `>>>` in hashing and checksum tasks. Python's precedence avoids C's trap, where `x & 1 == 0` means `x & (1 == 0)`. Rust traps on an oversized shift in debug builds, and Lucid traps in all builds, as with overflow. |
+| 154 | 2026-11-07 | Lucid is GPL-3.0-or-later. `runtime/` and `std/` add the Classpath exception, which `LICENSE-EXCEPTION` extends to compiling `std` into a program and to code the compiler writes into it | The owner chose GPL version 3, the runtime exception, and "or later". Every built program holds `lucid_rt`, `std`, and generated code, so without an exception each one would be covered by the GPL. GCC solves this with its Runtime Library Exception, but that text defines GCC by name and may not be changed. The Classpath exception is generic, and has an SPDX identifier. OpenJDK uses it with GPL version 2. See "License" in `research.md`. |
 
 ## Open questions
 
@@ -167,7 +168,6 @@ Decide each one by the milestone shown.
 | Question | Default if undecided | Decide by |
 | --- | --- | --- |
 | Add an LLVM backend for release builds? | No, by decision 101. Look again if real programs show tight numeric loops as a problem. | M8 |
-| License | Choose before first public release. | M5 |
 | Orphan rule for tasks with `self` across packages | None: a clash is E0304, by decision 126. | M8 |
 | May a `path` dependency stay in a package that comes from the registry? It can name any local directory. | No: reject it, as crates.io rejects code from outside. | M8 |
 | Browser UI framework shape | Decide from real programs. | M6 |

@@ -563,6 +563,19 @@ Decisions 151, 152, and 153. Evidence is the M5 agent benchmark logs, plus langu
 
 Sources: [Go spec, Package initialization](https://go.dev/ref/spec#Package_initialization), [Swift, Global and Local Variables](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/properties/#Global-and-Local-Variables), [Rust reference, Static items](https://doc.rust-lang.org/reference/items/static-items.html), [Python, Operator precedence](https://docs.python.org/3/reference/expressions.html#operator-precedence).
 
+## License
+
+Decision 154.
+
+- **The problem.** GCC's exception says GCC may combine its runtime libraries with a compiled program, and that the exception exists to let non-GPL programs use them. Lucid has the same shape: `lucid build` puts `lucid_rt`, `std`, and derived tasks into every program.
+- **Why not GCC's text.** It defines "GCC" as the GNU Compiler Collection, and the document may be copied only verbatim. Using it would need a rewritten exception, which is new legal text.
+- **The Classpath exception.** It permits linking the library with independent modules into an executable under any terms. It speaks of linking, so `LICENSE-EXCEPTION` states that compiling `std` into a program counts, and covers generated code too. That added notice is the owner's grant, and has not had legal review.
+- **Weak ground.** No lawyer read this. Have it checked before the first public release.
+
+Level: **Read** for both exception texts, through SPDX's copies.
+
+Sources: [GCC Runtime Library Exception 3.1](https://www.gnu.org/licenses/gcc-exception-3.1.html), [SPDX GCC-exception-3.1](https://spdx.org/licenses/GCC-exception-3.1.html), [SPDX Classpath-exception-2.0](https://spdx.org/licenses/Classpath-exception-2.0.html), [GPL version 3](https://www.gnu.org/licenses/gpl-3.0.html).
+
 ## Open research
 
 | Topic | Needed by |

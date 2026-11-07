@@ -1,0 +1,22 @@
+Lucid runtime exception
+
+The files under runtime/ and std/ in this repository are licensed under
+the GNU General Public License, version 3 or (at your option) any later
+version, with the Classpath exception below. The rest of Lucid, including
+the compiler, is licensed under the GPL without this exception. See
+LICENSE for the GPL.
+
+For this exception, "this library" means the files under runtime/ and
+std/. Compiling those files into a program, as `lucid build` and
+`lucid run` do, counts as linking them. Code that the Lucid compiler
+writes into a program, such as derived tasks and trap handling, is
+covered by the same permission.
+
+The aim: a program built with Lucid may use any license. Changes to
+Lucid itself stay under the GPL.
+
+Copyright (C) 2026 adezdev
+
+Linking this library statically or dynamically with other modules is making a combined work based on this library. Thus, the terms and conditions of the GNU General Public License cover the whole combination.
+
+As a special exception, the copyright holders of this library give you permission to link this library with independent modules to produce an executable, regardless of the license terms of these independent modules, and to copy and distribute the resulting executable under terms of your choice, provided that you also meet, for each linked independent module, the terms and conditions of the license of that module. An independent module is a module which is not derived from or based on this library. If you modify this library, you may extend this exception to your version of the library, but you are not obligated to do so. If you do not wish to do so, delete this exception statement from your version.

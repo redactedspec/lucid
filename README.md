@@ -36,3 +36,7 @@ Read in this order:
 | [claude-code.md](docs/claude-code.md) | How Claude Code is used to build Lucid |
 
 [examples/](examples/) holds target programs. They become the first compiler tests.
+
+## License
+
+Lucid is licensed under the GNU General Public License, version 3 or later: see [LICENSE](LICENSE). The runtime and standard library, which every built program contains, add the Classpath exception in [LICENSE-EXCEPTION](LICENSE-EXCEPTION), so a program built with Lucid may use any license.
