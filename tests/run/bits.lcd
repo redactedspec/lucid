@@ -1,0 +1,37 @@
+# Bit operators, by decision 153.
+print 12 & 10
+print 12 | 10
+print 12 ^ 10
+print ~0
+print ~5
+print 1 << 62
+print -8 >> 1
+print -1 >> 63
+print 9223372036854775807 >> 62
+
+# Python's precedence: looser than `+`, tighter than comparisons.
+print 1 << 2 + 1
+print 6 & 3 == 2
+print 1 | 2 ^ 3 & 4 << 1
+
+# Sized types keep their width and sign.
+let a: byte = 200
+print ~a
+print a << 1
+print a >> 7
+let b: i8 = -128
+print b >> 7
+print ~b
+let c: u64 = 18446744073709551615
+print c >> 60
+print ~c
+let d: i32 = 1
+print d << 31
+let e: u32 = 1
+print e << 31
+
+# A hash in the style of FNV-1a, with wrapping multiply.
+var hash: u64 = 14695981039346656037
+for x in "hi".bytes()
+    hash = (hash ^ x.to_u64()).wrapping_mul(1099511628211)
+print hash

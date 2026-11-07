@@ -542,7 +542,7 @@ fn repeatable(value: &Expr) -> bool {
 fn literal_math(expr: &ast::Expr) -> bool {
     match &expr.kind {
         Ast::Int(_) | Ast::Float(_) => true,
-        Ast::Unary(UnaryOp::Neg, value) => literal_math(value),
+        Ast::Unary(UnaryOp::Neg | UnaryOp::BitNot, value) => literal_math(value),
         Ast::Binary(op, left, right) => is_math(*op) && literal_math(left) && literal_math(right),
         _ => false,
     }
@@ -557,6 +557,11 @@ fn is_math(op: BinaryOp) -> bool {
             | BinaryOp::Div
             | BinaryOp::FloorDiv
             | BinaryOp::Rem
+            | BinaryOp::BitAnd
+            | BinaryOp::BitOr
+            | BinaryOp::BitXor
+            | BinaryOp::Shl
+            | BinaryOp::Shr
     )
 }
 
@@ -582,6 +587,11 @@ fn symbol(op: BinaryOp) -> &'static str {
         BinaryOp::Div => "/",
         BinaryOp::FloorDiv => "//",
         BinaryOp::Rem => "%",
+        BinaryOp::BitAnd => "&",
+        BinaryOp::BitOr => "|",
+        BinaryOp::BitXor => "^",
+        BinaryOp::Shl => "<<",
+        BinaryOp::Shr => ">>",
         BinaryOp::Eq => "==",
         BinaryOp::Ne => "!=",
         BinaryOp::Lt => "<",
@@ -4112,7 +4122,9 @@ impl<'a> Checker<'a> {
         match &expr.kind {
             Ast::Int(lexeme) => self.int(lexeme, number, span),
             Ast::Float(lexeme) => self.float(lexeme, number, span),
-            Ast::Unary(op @ UnaryOp::Neg, value) => self.unary(*op, value, number, span),
+            Ast::Unary(op @ (UnaryOp::Neg | UnaryOp::BitNot), value) => {
+                self.unary(*op, value, number, span)
+            }
             Ast::Binary(BinaryOp::Fallback, left, right) => self.fallback(left, right, want, span),
             Ast::Binary(op, left, right) if is_math(*op) => {
                 self.binary(*op, left, right, number, span)
@@ -4606,6 +4618,23 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            // All bits set, in the width and extension of the type.
+            UnaryOp::BitNot => {
+                let value = self.lower(value, hint);
+                match value.ty {
+                    Ty::Error => poisoned(span),
+                    ty if ty.is_integer() => {
+                        let ones = if ty.int_range().0 < 0 { -1 } else { ty.int_range().1 as u64 as i64 };
+                        let ones = Expr { kind: ExprKind::Int(ones), ty, span };
+                        let kind = ExprKind::Binary(BinaryOp::BitXor, value.into(), ones.into());
+                        Expr { kind, ty, span }
+                    }
+                    ty => {
+                        let message = format!("`~` needs an integer, found `{}`", ty.name());
+                        self.fail("E0303", message, value.span)
+                    }
+                }
+            }
             UnaryOp::Not => {
                 let value = self.condition(value, "`not`");
                 Expr { kind: ExprKind::Not(value.into()), ty: Ty::Bool, span }
@@ -4759,7 +4788,7 @@ impl<'a> Checker<'a> {
         let ty = left.ty;
         let equality = matches!(op, BinaryOp::Eq | BinaryOp::Ne);
         let order = matches!(op, BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge);
-        let int_only = matches!(op, BinaryOp::FloorDiv | BinaryOp::Rem);
+        let int_only = is_math(op) && !matches!(op, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div);
         let valid = match ty {
             ty if ty.is_integer() => true,
             ty if ty.is_float() => !int_only,

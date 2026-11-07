@@ -1,0 +1,3 @@
+let a: byte = 1
+let n: byte = 8
+print a << n

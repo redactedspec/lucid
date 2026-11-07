@@ -908,7 +908,7 @@ impl Parser {
 
     fn range(&mut self) -> Parsed<Expr> {
         let start = self.start();
-        let left = self.sum()?;
+        let left = self.bit_or()?;
         let op = if self.eat("..") {
             BinaryOp::Range
         } else if self.eat("..=") {
@@ -916,12 +916,44 @@ impl Parser {
         } else {
             return Ok(left);
         };
-        let right = self.sum()?;
+        let right = self.bit_or()?;
         if self.at_any(&["..", "..="]) {
             let span = self.token().span;
             return self.chained(span, "ranges cannot be chained", "use one `..` or `..=`");
         }
         Ok(self.binary(op, left, right, start))
+    }
+
+    fn bit_or(&mut self) -> Parsed<Expr> {
+        self.left_assoc(&[("|", BinaryOp::BitOr)], Self::bit_xor)
+    }
+
+    fn bit_xor(&mut self) -> Parsed<Expr> {
+        self.left_assoc(&[("^", BinaryOp::BitXor)], Self::bit_and)
+    }
+
+    fn bit_and(&mut self) -> Parsed<Expr> {
+        self.left_assoc(&[("&", BinaryOp::BitAnd)], Self::shift)
+    }
+
+    fn shift(&mut self) -> Parsed<Expr> {
+        self.left_assoc(&[("<<", BinaryOp::Shl), (">>", BinaryOp::Shr)], Self::sum)
+    }
+
+    fn left_assoc(
+        &mut self,
+        ops: &[(&str, BinaryOp)],
+        next: fn(&mut Self) -> Parsed<Expr>,
+    ) -> Parsed<Expr> {
+        let start = self.start();
+        let mut left = next(self)?;
+        while let Some(&(_, op)) = ops.iter().find(|(sym, _)| self.at(sym)) {
+            self.link()?;
+            self.advance();
+            let right = next(self)?;
+            left = self.binary(op, left, right, start);
+        }
+        Ok(left)
     }
 
     fn sum(&mut self) -> Parsed<Expr> {
@@ -967,6 +999,7 @@ impl Parser {
         }
         let op = match self.kind() {
             TokenKind::Sym("-") => UnaryOp::Neg,
+            TokenKind::Sym("~") => UnaryOp::BitNot,
             TokenKind::Sym("try") => UnaryOp::Try,
             TokenKind::Sym("spawn") => UnaryOp::Spawn,
             TokenKind::Sym("shared") => UnaryOp::Shared,
@@ -1225,6 +1258,11 @@ mod tests {
         assert_eq!(expr("(a + b) * c"), "(Mul (Add a b) c)");
         assert_eq!(expr("a - b - c"), "(Sub (Sub a b) c)");
         assert_eq!(expr("a // b % c"), "(Rem (FloorDiv a b) c)");
+        assert_eq!(expr("a | b ^ c & d << e + f"), "(BitOr a (BitXor b (BitAnd c (Shl d (Add e f)))))");
+        assert_eq!(expr("a & 1 == 0"), "(Eq (BitAnd a 1) 0)");
+        assert_eq!(expr("a >> b << c"), "(Shl (Shr a b) c)");
+        assert_eq!(expr("0..a | b"), "(Range 0 (BitOr a b))");
+        assert_eq!(expr("~a & b"), "(BitAnd (BitNot a) b)");
         assert_eq!(expr("a or b and c"), "(Or a (And b c))");
         assert_eq!(expr("not a == b"), "(Not (Eq a b))");
         assert_eq!(expr("a + 1 < b * 2"), "(Lt (Add a 1) (Mul b 2))");

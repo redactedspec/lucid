@@ -417,6 +417,7 @@ pub enum UnaryOp {
     Spawn,
     Shared,
     Weak,
+    BitNot,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -441,6 +442,11 @@ pub enum BinaryOp {
     Div,
     FloorDiv,
     Rem,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
 }
 
 pub enum IsTarget {

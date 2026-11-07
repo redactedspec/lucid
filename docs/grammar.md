@@ -133,10 +133,14 @@ Precedence, lowest first:
 | 5 | `not` | prefix |
 | 6 | `==` `!=` `<` `<=` `>` `>=` `is` `is not` `in` `not in` | none (no chaining) |
 | 7 | `..` `..=` | none |
-| 8 | `+` `-` | left |
-| 9 | `*` `/` `//` `%` | left |
-| 10 | `-` `try` `spawn` `shared` `weak` | prefix |
-| 11 | call, index, field | left |
+| 8 | `\|` | left |
+| 9 | `^` | left |
+| 10 | `&` | left |
+| 11 | `<<` `>>` | left |
+| 12 | `+` `-` | left |
+| 13 | `*` `/` `//` `%` | left |
+| 14 | `-` `~` `try` `spawn` `shared` `weak` | prefix |
+| 15 | call, index, field | left |
 
 ```ebnf
 expression  = lambda | if_expr | fallback ;
@@ -149,11 +153,15 @@ logic_not   = "not" logic_not | compare ;
 compare     = range [ compare_op range | "is" [ "not" ] is_target ] ;
 compare_op  = "==" | "!=" | "<" | "<=" | ">" | ">=" | "in" | "not" "in" ;
 is_target   = "none" | "empty" | type_term ;
-range       = sum [ ( ".." | "..=" ) sum ] ;
+range       = bit_or [ ( ".." | "..=" ) bit_or ] ;
+bit_or      = bit_xor { "|" bit_xor } ;
+bit_xor     = bit_and { "^" bit_and } ;
+bit_and     = shift { "&" shift } ;
+shift       = sum { ( "<<" | ">>" ) sum } ;
 sum         = product { ( "+" | "-" ) product } ;
 product     = typed { ( "*" | "/" | "//" | "%" ) typed } ;
 typed       = unary [ "?" ] ;
-unary       = ( "-" | "try" | "spawn" | "shared" | "weak" ) unary | postfix ;
+unary       = ( "-" | "~" | "try" | "spawn" | "shared" | "weak" ) unary | postfix ;
 postfix     = primary { "(" [ args ] ")" | "[" expression { "," expression } "]" | "." NAME } ;
 args        = arg { "," arg } [ "," ] ;
 arg         = [ "change" ] expression | NAME ":" expression ;

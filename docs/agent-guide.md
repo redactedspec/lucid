@@ -39,7 +39,8 @@ Every value starts with a value. Shadowing a name in the same scope is an error,
 - Integer overflow traps. `a.wrapping_add(b)`, `.wrapping_sub`, and `.wrapping_mul` wrap at the width of `a`, and `b` has the same type.
 - `.to_int()` rounds a `float` toward zero. A value that does not fit traps.
 - A number literal takes a sized type from its context: `let a: u8 = 200`, and `a + 1` is a `u8`. An integer literal never becomes a `float`: write `2.0`.
-- Operators: `+ - * / // %`, unary `-`, `== != < <= > >=`, `and or not`, `+= -= *=`. There is no `**`, `&`, `|`, `^`, `<<`, or `>>`. A chain such as `a < b < c` is an error.
+- Operators: `+ - * / // %`, unary `-`, `== != < <= > >=`, `and or not`, `+= -= *=`. There is no `**`. A chain such as `a < b < c` is an error.
+- Bit operators `& | ^ ~ << >>` take any integer type, with Python's precedence, so `x & 1 == 0` works. Both sides of a shift have one type. A count below 0 or not less than the width traps, and `<<` drops the bits shifted out. `~a` on a `byte` stays a `byte`.
 - A `float` prints as `3.0`, `0.1`, or `1.0e21`.
 
 ## Text

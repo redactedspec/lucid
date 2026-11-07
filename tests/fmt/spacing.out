@@ -17,3 +17,4 @@ print "t"[0..1]
 print true - 1
 print x? - 1
 use ./a.b
+let i = ~a & b | c ^ d << 1 >> 2

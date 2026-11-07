@@ -1409,6 +1409,10 @@ impl<'a, 'b> Lower<'a, 'b> {
             return match op {
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul => self.checked_math(op, ty, span),
                 BinaryOp::FloorDiv | BinaryOp::Rem => self.divide(op, ty, span),
+                BinaryOp::BitAnd => _ = self.ins().i64_and(),
+                BinaryOp::BitOr => _ = self.ins().i64_or(),
+                BinaryOp::BitXor => _ = self.ins().i64_xor(),
+                BinaryOp::Shl | BinaryOp::Shr => self.shift(op, ty, span),
                 _ => unreachable!("the checker allows only these operators"),
             };
         }
@@ -1564,6 +1568,22 @@ impl<'a, 'b> Lower<'a, 'b> {
         }
         self.trap_if("integer overflow", span);
         self.ins().local_get(result);
+    }
+
+    /// `<<` and `>>`, with the count checked as on native.
+    fn shift(&mut self, op: BinaryOp, ty: Ty, span: Span) {
+        let (a, b) = self.operands();
+        self.ins().local_get(b).i64_const(ty.bits()).i64_ge_u();
+        self.trap_if("shift count out of range", span);
+        self.ins().local_get(a).local_get(b);
+        if op == BinaryOp::Shl {
+            self.ins().i64_shl();
+            self.extended(ty);
+        } else if ty.int_range().0 < 0 {
+            self.ins().i64_shr_s();
+        } else {
+            self.ins().i64_shr_u();
+        }
     }
 
     /// `//` and `%`, which round down. As on native.

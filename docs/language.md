@@ -60,7 +60,7 @@ There are no implicit conversions. Every number type has a task for each other o
 
 Integer overflow traps in every build. Wrapping math uses explicit tasks: `a.wrapping_add(b)`, `a.wrapping_sub(b)`, and `a.wrapping_mul(b)`, on any integer type, wrap at the width of that type. The argument has the same type as `a`.
 
-Planned for M7, by decision 153: bit operators `&`, `|`, `^`, `~`, `<<`, and `>>` on integer types. They bind tighter than comparisons and looser than `+`, as in Python. A shift count below 0 or not less than the width traps.
+Bit operators `&`, `|`, `^`, `~`, `<<`, and `>>` work on any integer type, by decisions 153 and 181. They bind tighter than comparisons and looser than `+`, as in Python, so `x & 1 == 0` tests the low bit. `~x` flips every bit of the type's width, so `~a` is `55` for a `byte` of `200`. The shift count has the same type as the value. A count below 0, or not less than the width, traps. `<<` drops the bits shifted out, and does not trap on them. `>>` keeps the sign of a signed type, and fills with zeros on an unsigned one.
 
 `/` always yields a `float` type, and follows IEEE 754, so `1 / 0` is `inf`. Two integers of any type are converted to `float` first. Two `f32` values give an `f32`.
 

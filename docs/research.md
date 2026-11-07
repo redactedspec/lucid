@@ -573,6 +573,17 @@ Decisions 151, 152, and 153. Evidence is the M5 agent benchmark logs, plus langu
 
 Sources: [Go spec, Package initialization](https://go.dev/ref/spec#Package_initialization), [Swift, Global and Local Variables](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/properties/#Global-and-Local-Variables), [Rust reference, Static items](https://doc.rust-lang.org/reference/items/static-items.html), [Python, Operator precedence](https://docs.python.org/3/reference/expressions.html#operator-precedence).
 
+## Bit operators
+
+Decision 181. Read 2026-11-07.
+
+- **Rust.** The reference lists as overflow, which panics in debug builds: "Using `<<` or `>>` where the right-hand argument is greater than or equal to the number of bits in the type of the left-hand argument, or is negative." Bits shifted out of `<<` are not in the list. `>>` is "Arithmetic right shift on signed integer types, logical right shift on unsigned integer types." Level: primary, verbatim.
+- **Go.** A negative count panics at run time, and there is no upper limit. For unsigned values `<<` is computed modulo 2^n, and signed overflow does not panic. Shifts are arithmetic on signed and logical on unsigned. Level: primary, read through a summary, so the exact wording is not checked.
+- **Python.** Precedence from loose to tight: comparisons, `|`, `^`, `&`, shifts, then `+` and `-`. Python ints have no width, so its shifts never drop bits. Level: primary, read through a summary.
+- **Weak ground.** No measurement shows which overflow rule for `<<` agents expect. The choice follows Rust and Go, and the hash code in the M5 logs.
+
+Sources: [Rust reference, Operator expressions](https://doc.rust-lang.org/reference/expressions/operator-expr.html), [Go spec, Arithmetic operators](https://go.dev/ref/spec#Arithmetic_operators), [Python, Operator precedence](https://docs.python.org/3/reference/expressions.html#operator-precedence).
+
 ## License
 
 Decision 154.

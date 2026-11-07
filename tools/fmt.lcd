@@ -60,9 +60,9 @@ task tables() -> Tables
         "true", "try", "type", "unsafe", "use", "var", "weak", "while",
     ]
     let symbols = [
-        "...", "..=", "..", "./", ".", "=>", "==", "=", "!=", "<=", "<", ">=", ">", "->", "-=",
-        "-", "+=", "+", "*=", "*", "//", "/=", "/", "%", "(", ")", "[", "]", "{{", "}}", ",", ":",
-        "?",
+        "...", "..=", "..", "./", ".", "=>", "==", "=", "!=", "<<", "<=", "<", ">>", ">=", ">",
+        "->", "-=", "-", "+=", "+", "*=", "*", "//", "/=", "/", "%", "&", "|", "^", "~", "(", ")",
+        "[", "]", "{{", "}}", ",", ":", "?",
     ]
     var keyword_bytes: list[list[byte]] = []
     for word in keywords
@@ -274,7 +274,7 @@ task token(change self: Formatter)
     self.copy(start, self.at)
     if kind == SYMBOL
         let prefix = word == "-" and self.starts_operand()
-        self.prefix = prefix
+        self.prefix = prefix or word == "~"
         if word == "(" or word == "[" or word == "{{"
             self.opened.push(self.indent)
         else if (word == ")" or word == "]" or word == "}}") and self.opened is not empty

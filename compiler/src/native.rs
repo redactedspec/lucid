@@ -1697,6 +1697,23 @@ impl Lower<'_, '_> {
                 value
             }
             (BinaryOp::Rem, false) => self.floor_rem(a, b, span),
+            (BinaryOp::BitAnd, false) => self.body.ins().band(a, b),
+            (BinaryOp::BitOr, false) => self.body.ins().bor(a, b),
+            (BinaryOp::BitXor, false) => self.body.ins().bxor(a, b),
+            (BinaryOp::Shl | BinaryOp::Shr, false) => {
+                // Unsigned, so a count below zero is also too large.
+                let cc = IntCC::UnsignedGreaterThanOrEqual;
+                let outside = self.body.ins().icmp_imm_s(cc, b, ty.bits());
+                self.trap_if(outside, "shift count out of range", span);
+                if op == BinaryOp::Shl {
+                    let value = self.body.ins().ishl(a, b);
+                    self.extended(value, ty)
+                } else if ty.int_range().0 < 0 {
+                    self.body.ins().sshr(a, b)
+                } else {
+                    self.body.ins().ushr(a, b)
+                }
+            }
             _ => unreachable!("the checker allows only these operators"),
         }
     }

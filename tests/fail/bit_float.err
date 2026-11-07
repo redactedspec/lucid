@@ -1,0 +1,2 @@
+bit_float.lcd:1:7: error E0303: `&` needs `int`, found `float`
+bit_float.lcd:2:8: error E0303: `~` needs an integer, found `bool`

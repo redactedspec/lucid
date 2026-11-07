@@ -250,6 +250,16 @@ impl Ty {
             _ => (i64::MIN.into(), i64::MAX.into()),
         }
     }
+
+    /// The number of bits in an integer type.
+    pub fn bits(self) -> i64 {
+        match self {
+            Ty::Byte | Ty::I8 => 8,
+            Ty::I16 | Ty::U16 => 16,
+            Ty::I32 | Ty::U32 => 32,
+            _ => 64,
+        }
+    }
 }
 
 /// The table of union members, and the operations that need it, since a union
