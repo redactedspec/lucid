@@ -1,0 +1,37 @@
+use std.dom
+
+# A box that a click checked stays checked after its row is reused, unless
+# the program sets `checked` again.
+type Model
+    done: list[bool]
+
+choice Message
+    Flip(index: int)
+    Drop(index: int)
+
+task update(model: Model, message: Message) -> Model
+    var next = model
+    match message
+        Flip(index) ->
+            next.done[index] = not next.done[index]
+        Drop(index) ->
+            var kept: list[bool] = []
+            for i in 0..next.done.len()
+                if i != index
+                    kept.push(next.done[i])
+            next.done = kept
+    return next
+
+task view(model: Model) -> dom.Node[Message]
+    var rows: list[dom.Node[Message]] = []
+    for i in 0..model.done.len()
+        var attrs: list[dom.Attr[Message]] = [dom.Attribute(name: "id", value: "box{i}"), dom.On(event: "change", message: _ => Flip(index: i))]
+        if model.done[i]
+            attrs.push(dom.Attribute(name: "checked", value: ""))
+        rows.push(dom.Element(tag: "li", children: [
+            dom.Element(tag: "input", attrs: attrs),
+            dom.Element(tag: "button", attrs: [dom.Attribute(name: "id", value: "drop{i}"), dom.On(event: "click", message: _ => Drop(index: i))]),
+        ]))
+    return dom.Element(tag: "ul", children: rows)
+
+dom.app(Model(done: [false, false]), view, update)

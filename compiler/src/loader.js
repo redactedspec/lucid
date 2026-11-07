@@ -94,12 +94,21 @@
             const element = nodes.get(node);
             const name = read(at, len);
             element.setAttribute(name, read(value, valueLen));
-            // The attribute is only where an <input> starts: typing changes the property.
+            // The attribute is only where an <input> starts: typing or a click changes the property.
             if (name === "value") {
                 element.value = read(value, valueLen);
+            } else if (name === "checked") {
+                element.checked = true;
             }
         },
-        dom_unset: (node, at, len) => nodes.get(node).removeAttribute(read(at, len)),
+        dom_unset: (node, at, len) => {
+            const element = nodes.get(node);
+            const name = read(at, len);
+            element.removeAttribute(name);
+            if (name === "checked") {
+                element.checked = false;
+            }
+        },
         dom_on: (node, at, len, handler) => {
             const element = nodes.get(node);
             const name = read(at, len);

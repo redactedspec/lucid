@@ -1,0 +1,5 @@
+<body><ul><li><input id="box0" .value=""></input><button id="drop0"></button></li><li><input id="box1" .value=""></input><button id="drop1"></button></li></ul></body>
+> check box0
+<body><ul><li><input id="box0" checked="" .value="" .checked></input><button id="drop0"></button></li><li><input id="box1" .value=""></input><button id="drop1"></button></li></ul></body> made 0
+> click drop0
+<body><ul><li><input id="box0" .value=""></input><button id="drop0"></button></li></ul></body> made 0

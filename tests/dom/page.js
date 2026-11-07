@@ -2,10 +2,12 @@
 // A small fake `document` for the `std.dom` tests, by decision 164. Usage:
 // `node page.js NAME.js NAME.events`. It loads the built program, then runs
 // each line of the events file once the page is shown, and prints the line
-// and then the page. A line is `click ID`, `input ID TEXT`, `key ID KEY`, or
-// `focus ID`, where ID is an element's `id` attribute. As in a browser, a
-// focused element that leaves the page gets "blur" at once. After each line it also prints how
-// many nodes the program made, so a test shows that a patch keeps nodes.
+// and then the page. A line is `click ID`, `input ID TEXT`, `key ID KEY`,
+// `check ID`, which flips a checkbox and fires "change", or `focus ID`,
+// where ID is an element's `id` attribute. As in a browser, a focused
+// element that leaves the page gets "blur" at once. After each line it also
+// prints how many nodes the program made, so a test shows that a patch keeps
+// nodes.
 const fs = require("fs");
 const path = require("path");
 
@@ -43,6 +45,7 @@ class Element extends Node {
         this.attributes = new Map();
         this.listeners = new Map();
         this.value = "";
+        this.checked = false;
     }
     setAttribute(name, value) {
         this.attributes.set(name, String(value));
@@ -96,7 +99,7 @@ const html = node => {
         return node.data;
     }
     const attributes = [...node.attributes].map(([name, value]) => ` ${name}="${value}"`).join("");
-    const value = node.tag === "input" ? ` .value="${node.value}"` : "";
+    const value = node.tag === "input" ? ` .value="${node.value}"${node.checked ? " .checked" : ""}` : "";
     return `<${node.tag}${attributes}${value}>${node.childNodes.map(html).join("")}</${node.tag}>`;
 };
 const find = (node, id) => {
@@ -125,9 +128,11 @@ mounted.then(() => {
             say("no such element");
             continue;
         }
-        const listener = target.listeners.get(kind === "key" ? "keydown" : kind);
+        const listener = target.listeners.get({ key: "keydown", check: "change" }[kind] ?? kind);
         if (kind === "input") {
             target.value = rest.join(" ");
+        } else if (kind === "check") {
+            target.checked = !target.checked;
         }
         made = 0;
         if (kind === "focus") {

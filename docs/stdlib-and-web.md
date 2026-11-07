@@ -76,7 +76,7 @@ A page is built in the Elm architecture, by decisions 163 and 168:
 | --- | --- |
 | `dom.Element(tag:, attrs: [], children: [])` | an element |
 | `dom.Text(content:)` | text, never read as HTML |
-| `dom.Attribute(name:, value:)` | an attribute. `value` also sets an `<input>`'s value |
+| `dom.Attribute(name:, value:)` | an attribute. `value` also sets an `<input>`'s value, and `checked` whether it is checked, so a reused checkbox shows the model |
 | `dom.On(event:, message:)` | a handler. `message` is a `task(text) -> Msg`, given the event's key for a key event, else the element's value, as an `<input>` has, else `""` |
 
 Events run one at a time. An event that a change to the page starts, such as `blur` when a focused node goes, waits for the handler that runs now, and is dropped if its node has left the page. A handler cannot hold state itself, since a capture cannot change. A page traps on a `script` element, an attribute whose name starts with `on`, `formaction`, `srcdoc`, and a `javascript:` or `data:text/html` value, since each would run code that the program did not write. A keyed diff, for lists that reorder, waits for a program that needs it.
