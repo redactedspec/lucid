@@ -441,6 +441,25 @@ fn decode(raw: &str) -> String {
 mod tests {
     use super::*;
 
+    /// `tools/fmt.lcd` keeps its own copy of the tables, since it is a Lucid
+    /// program. A word or symbol missing there would get the wrong spaces.
+    #[test]
+    fn formatter_tables_match() {
+        let fmt = include_str!("../../tools/fmt.lcd");
+        let list = |name: &str| -> Vec<String> {
+            let start = fmt.find(&format!("let {name} = [")).expect("list in fmt.lcd");
+            let body = &fmt[start..][..fmt[start..].find("\n    ]").expect("list end")];
+            let body = &body[body.find('[').expect("list start") + 1..];
+            body.split('"')
+                .skip(1)
+                .step_by(2)
+                .map(|s| s.replace("{{", "{").replace("}}", "}"))
+                .collect()
+        };
+        assert_eq!(list("keywords"), KEYWORDS);
+        assert_eq!(list("symbols"), SYMBOLS);
+    }
+
     fn show(tokens: &[Token]) -> String {
         let words: Vec<String> = tokens
             .iter()
