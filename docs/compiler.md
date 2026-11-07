@@ -4,13 +4,13 @@ The compiler is written in Rust until M9, when its front end moves to Lucid (dec
 
 ## Status
 
-M4 is done, and M5 is in progress. `lucid run` runs a file or a package, and compiles `int`, `float`, the sized numbers and wrapping math, `bool`, `none`, `text`, `list`, `map`, `set`, `type`, `choice`, `match`, unions, `is` with narrowing, interpolation, text slices, `let`, `var`, `if`, `while`, `for` over ranges, text, and collections, tasks with recursion and defaults, `change` and `take` parameters, `for change` over lists, lambdas, nested tasks, and task values, generic tasks, types, and aliases, traits with bounds, `any` values, `self` with dot calls, `try` and `else`, and `expect`, `test`, `unsafe`, `print`, modules with `use ./` and `public`, packages with path dependencies, and the M5 modules of `std`. It reports E0901 for anything else. `check.rs` binds names, checks types, and lowers to MIR in one pass, since `resolve.rs` leaves it one tree. A generic body is checked once, with each parameter as an opaque `Ty::Param`. Flattening means that only the real type arguments show what is a union and what is counted, so `check.rs` records intent as `Wrap`, `View`, `Member`, and `Holds`, and `mono.rs` picks the code for each, starting from every task with no type parameters. `Ty` keeps compound types behind leaked references, so it stays `Copy`. `Ty::Data` holds a name, an index into the checker's table, and type arguments, so a recursive type needs no cycle in `Ty`. A `match` lowers to an `if` chain on a hidden local, and the last arm has no test, since the exhaustiveness check proves what remains. `Ty::Union` holds flat members in a fixed order, so two spellings are equal. Narrowing is a stack of facts in the checker, cut back at the end of each block. An assignment resets entries in place, and a loop first resets each name its body assigns. List, map, and set tasks stay built into `check.rs`. They can move to Lucid now that `change` parameters exist. `mono.rs` also replaces `==`, `<`, showing, and `in` on a compound value with a call: to a hand-written task if the type has one, or else to a task from `derive.rs`. It also gives each new map or set with a compound key its hash and equal tasks. `mono.rs` lists the types that reach each `any`. A task on an `any` tests its tag against that list, so `run` builds these tasks last, and again if building them boxed a new type. A task of a trait has a signature in `check.rs` and no body, and a call to one is `ExprKind::Method` until `mono.rs` knows the receiver. Trait checks are structural, so `Checker::satisfied` runs at each use, and walks a type's fields for a derived trait. `ownership.rs` gives each new heap value an owner, makes every count explicit with `Move` and `Retain`, and finds moves with a backward walk of what is live. First it turns each local that can only hold a path into a read parameter into `Stmt::Bind`, which holds no count, so `Task::borrowed` lists what no exit releases. The walk repeats until each loop head settles, which takes a pass per level of nesting. "Counting" in `mir.rs` states the rules that a backend follows. `check.rs` lets go of the names in a block with `Stmt::Clear`, and `ownership.rs` does the same for temporaries after their statement.
+M4 is done, and M5 is in progress. `lucid run` runs a file or a package, and `lucid build` makes it a standalone `.exe`. Both compile `int`, `float`, the sized numbers and wrapping math, `bool`, `none`, `text`, `list`, `map`, `set`, `type`, `choice`, `match`, unions, `is` with narrowing, interpolation, text slices, `let`, `var`, `if`, `while`, `for` over ranges, text, and collections, tasks with recursion and defaults, `change` and `take` parameters, `for change` over lists, lambdas, nested tasks, and task values, generic tasks, types, and aliases, traits with bounds, `any` values, `self` with dot calls, `try` and `else`, and `expect`, `test`, `unsafe`, `print`, modules with `use ./` and `public`, packages with path dependencies, and the M5 modules of `std`. It reports E0901 for anything else. `check.rs` binds names, checks types, and lowers to MIR in one pass, since `resolve.rs` leaves it one tree. A generic body is checked once, with each parameter as an opaque `Ty::Param`. Flattening means that only the real type arguments show what is a union and what is counted, so `check.rs` records intent as `Wrap`, `View`, `Member`, and `Holds`, and `mono.rs` picks the code for each, starting from every task with no type parameters. `Ty` keeps compound types behind leaked references, so it stays `Copy`. `Ty::Data` holds a name, an index into the checker's table, and type arguments, so a recursive type needs no cycle in `Ty`. A `match` lowers to an `if` chain on a hidden local, and the last arm has no test, since the exhaustiveness check proves what remains. `Ty::Union` holds flat members in a fixed order, so two spellings are equal. Narrowing is a stack of facts in the checker, cut back at the end of each block. An assignment resets entries in place, and a loop first resets each name its body assigns. List, map, and set tasks stay built into `check.rs`. They can move to Lucid now that `change` parameters exist. `mono.rs` also replaces `==`, `<`, showing, and `in` on a compound value with a call: to a hand-written task if the type has one, or else to a task from `derive.rs`. It also gives each new map or set with a compound key its hash and equal tasks. `mono.rs` lists the types that reach each `any`. A task on an `any` tests its tag against that list, so `run` builds these tasks last, and again if building them boxed a new type. A task of a trait has a signature in `check.rs` and no body, and a call to one is `ExprKind::Method` until `mono.rs` knows the receiver. Trait checks are structural, so `Checker::satisfied` runs at each use, and walks a type's fields for a derived trait. `ownership.rs` gives each new heap value an owner, makes every count explicit with `Move` and `Retain`, and finds moves with a backward walk of what is live. First it turns each local that can only hold a path into a read parameter into `Stmt::Bind`, which holds no count, so `Task::borrowed` lists what no exit releases. The walk repeats until each loop head settles, which takes a pass per level of nesting. "Counting" in `mir.rs` states the rules that a backend follows. `check.rs` lets go of the names in a block with `Stmt::Clear`, and `ownership.rs` does the same for temporaries after their statement.
 
 ## `unsafe`
 
 An `extern` task has a signature and a place in `Program::tasks`, like any task, so calls need no new path. `check.rs` writes its body: one `return` of `ExprKind::Foreign`, which `native.rs` lowers to a call in the C ABI. Parameters stay 64-bit, since C reads the low part, and a result widens from its declared width. `find_symbol` looks in `ucrtbase` and `kernel32`, and `check.rs` calls it, so a missing name is E0904 under `lucid check` too, and not a panic in Cranelift. `.pointer()` needs a name so that the list outlives the statement: `Stmt::Clear` releases it at the end of its block, not at its last use.
 
-`lucid build` needs its own answer for finding symbols, and Linux and macOS need one at M8.
+`lucid build` links `kernel32.lib`, and `msvcrt.lib`, which brings `ucrt.lib`, so what `find_symbol` finds also links. Linux and macOS need their own answer at M8.
 
 ## `std`
 
@@ -36,6 +36,14 @@ A trap ends the process, and Cranelift frames have no unwind tables. So `lucid t
 ## `expect`
 
 `expect a == b` lowers to two hidden locals, an `if` on them, and `Stmt::Fail`, whose text is built only on the failing path. Any other condition uses `Stmt::Trap`.
+
+## `lucid build`
+
+`native::object` lowers the program through the same `compile` as `lucid run`, into a Cranelift object file instead of memory. The top level is `lucid_main`. `compiler/build.rs` builds `lucid_rt` a second time, as a release static library with the `exe` feature, which adds `exe.rs` and its C `main`. It runs its own `cargo` with a target directory of its own, so it waits on no lock of the outer build. The compiler holds that library through `include_bytes!`, writes it and the object file to a temporary directory, and runs the MSVC `link.exe`, which `find-msvc-tools` finds along with its library paths. The system libraries that the static library needs come from rustc's `--print native-static-libs`.
+
+`main` in `exe.rs` sets `lucid_stack_limit`, reads the call site table from the object file, runs `lucid_main`, and ends through `std::process::exit`, which flushes stdout. Each task loads the limit on entry, where the JIT has a constant. The table is `lucid_call_sites`: a count, then rows of `SITE_WORDS` words, with names in `lucid_call_names`. The task address in a row is a relocation, so the linker fills it in. The linker gives the main thread `EXE_STACK_BYTES`, 256 MiB, which is reserved, not committed, and the top level may use half of it, as under `lucid run`.
+
+The object file targets baseline x86-64, not the features of the machine that builds it, so the program runs on any x86-64 Windows. It is named after the file, or the package directory, and goes in the current directory. A failure to find or run the linker is not an error in the program, so it has no code: `lucid` prints the reason and exits with 1. A built program has no leak check, since its runtime is a release build.
 
 ## Early exits
 
@@ -79,7 +87,7 @@ Start with few files. Split a file only when it hurts.
 ```text
 compiler/          Rust crate `lucid`: the CLI and compiler
     src/
-        main.rs    CLI
+        main.rs    CLI, and linking for `lucid build`
         diag.rs    diagnostics
         lexer.rs
         manifest.rs    reads `lucid.toml`
@@ -93,8 +101,10 @@ compiler/          Rust crate `lucid`: the CLI and compiler
         ownership.rs   owners and counts of heap values, last-use moves
         native.rs  Cranelift backend
         wasm.rs        planned: WebAssembly backend
+    build.rs       builds `lucid_rt` as a static library for `lucid build`
     tests/golden.rs    runs everything in `tests/` and `examples/`
 runtime/           Rust crate `lucid_rt`: allocator, counting, text, traps
+    src/exe.rs     start of a built program, only in the static library
 std/               standard library in Lucid, held inside the compiler
 tests/             golden tests
 benchmarks/        Lucid and Rust versions of each program
@@ -139,7 +149,7 @@ A union value is a record with one slot, and its tag is a type id: a position in
 
 In a debug build of `lucid_rt`, which is what `cargo test` runs, a released value keeps its memory and is marked dead. So a double free, or a retain of a dead value, traps with `runtime bug`. `lucid run` also traps at exit if any value is still live.
 
-A trap site is a cold block that passes `lucid_trap` a message holding its source position, and its frame pointer. Every task keeps frame pointers (`preserve_frame_pointers`), so a trace walks saved pointers and return addresses. `native.rs` hands the runtime a table from each call's return address to its task, line, and column, built from Cranelift's call sites and source locations, and text is made only on a trap. A task with no name, which `derive.rs` wrote, has a row with no text, so the walk goes through it and prints nothing. An address that is not in the table is a Rust frame, whose saved pointer cannot be trusted, so the walk stops. Every task checks the stack pointer on entry, after its prologue, so its frame must fit in the 1 MiB margin. E0902 reads the compiled frame size, and rejects a task over half the margin. At M2 the limit is a constant in the code, because `lucid run` has one thread with a known stack. `lucid build` and `spawn` need a limit per thread.
+A trap site is a cold block that passes `lucid_trap` a message holding its source position, and its frame pointer. Every task keeps frame pointers (`preserve_frame_pointers`), so a trace walks saved pointers and return addresses. `native.rs` hands the runtime a table from each call's return address to its task, line, and column, built from Cranelift's call sites and source locations, and text is made only on a trap. A task with no name, which `derive.rs` wrote, has a row with no text, so the walk goes through it and prints nothing. An address that is not in the table is a Rust frame, whose saved pointer cannot be trusted, so the walk stops. Every task checks the stack pointer on entry, after its prologue, so its frame must fit in the 1 MiB margin. E0902 reads the compiled frame size, and rejects a task over half the margin. Under `lucid run` the limit is a constant in the code, because it has one thread with a known stack. A built program reads it from `lucid_stack_limit`, which its start sets. `spawn` needs a limit per thread.
 
 - `lucid run` links it directly, since the JIT runs inside the compiler process.
 - `lucid build` embeds a prebuilt `lucid_rt` static library in the compiler and passes it to the system linker.
@@ -151,7 +161,8 @@ A trap site is a cold block that passes `lucid_trap` a message holding its sourc
 | --- | --- |
 | `cranelift-codegen`, `cranelift-frontend`, `cranelift-module` | Native code generation |
 | `cranelift-jit` | `lucid run` |
-| `cranelift-object` | Object files for `lucid build` (added when needed) |
+| `cranelift-object` | Object files for `lucid build` |
+| `find-msvc-tools` | Finds the MSVC linker and its library paths for `lucid build`, on Windows only (decision 139) |
 | `target-lexicon` | Target descriptions (added when needed) |
 | `wasm-encoder` | WebAssembly output (added when needed) |
 
@@ -178,7 +189,7 @@ ROUNDS=3 sh benchmarks/run.sh                 # fewer rounds
 | `lucid check [--json] [PATH]` | Report diagnostics only | Syntax, name, and type errors, in the file or package and what it imports, see `agents.md` |
 | `lucid check [--json] --unsafe [PATH]` | List `unsafe` blocks and `extern` tasks | Works, for a program and all it imports, dependencies too |
 | `lucid check [--json] --costs [PATH]` | List copy and count sites | Works, from the MIR after `ownership.rs`. A task that `derive.rs` wrote stays out |
-| `lucid build` | Produce a native executable | Planned |
+| `lucid build [--json] [PATH]` | Produce a native executable | Works on Windows, for the features under "Status". Writes `NAME.exe` to the current directory |
 | `lucid build --target web` | Produce WebAssembly and a loader | Planned |
 | `lucid test [--json] [PATH]` | Run `test` blocks | Works, for a file, or every file in a package's `src` |
 | `lucid fmt` | Format, no options | Planned |
@@ -209,6 +220,7 @@ Exit codes: 0 for success, 1 for compile errors or a failed test, 2 for bad usag
 - **Agent guide:** every `lucid` block in `docs/agent-guide.md` must run with exit code 0, and the guide must stay under the token budget, at about 4 bytes per token.
 - **Ownership-off mode:** the run and trap tests run a second time with `LUCID_NAIVE` set, which turns ownership optimizations off. Output must match.
 - **Memory checks:** the debug runtime counts live values, so every golden test also fails on a leak or double free.
+- **Built programs:** `todo_example_works` and `built_programs_match_run` build with `lucid build`, and compare the program with `lucid run`. Every run and trap test gave the same output built, when checked by hand on 2026-11-07.
 - **Fuzzing:** add from M5. Parser and checker must never panic.
 
 ## Development machine
@@ -220,4 +232,4 @@ Checked on 2026-11-04, on Windows 11 x86-64:
 - `rust-lld` ships with the Rust toolchain.
 - The `wasm32-unknown-unknown` target is missing. Add it at M6: `rustup target add wasm32-unknown-unknown`.
 - clang, gcc, and LLVM are not installed. The compiler does not need them.
-- **Trap:** `/usr/bin/link.exe` in Git Bash is the GNU `link` tool, not the MSVC linker. `lucid build` must find the MSVC linker through `vswhere`, or use `rust-lld`.
+- **Trap:** `/usr/bin/link.exe` in Git Bash is the GNU `link` tool, not the MSVC linker. `lucid build` finds the MSVC linker through `find-msvc-tools`, so it never runs this one.

@@ -12,6 +12,23 @@ use std::mem::offset_of;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[cfg(feature = "exe")]
+mod exe;
+
+/// The stack of the main thread of a program that `lucid build` made. Most of
+/// it is only reserved, so it costs address space, not memory.
+pub const EXE_STACK_BYTES: usize = 256 * 1024 * 1024;
+
+/// Room kept below the stack limit that compiled code checks, for the frame of
+/// the task that checks and for runtime calls.
+pub const STACK_MARGIN: usize = 1024 * 1024;
+
+/// Words in each row of the call site table in a built program: the task's
+/// address, the return offset in it, the file's start and length in the names,
+/// the task name's start and length, the line, and the column. Line 0 means a
+/// task with no name, which a trace walks through and does not show.
+pub const SITE_WORDS: usize = 8;
+
 const STDOUT_FAILED: &[u8] = b"trap: cannot write to stdout";
 const OUT_OF_MEMORY: &[u8] = b"trap: out of memory";
 

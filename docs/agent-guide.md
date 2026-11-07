@@ -650,7 +650,8 @@ version = "0.1.0"
 markdown = { path = "../markdown" }
 ```
 
-- `lucid run`, `lucid check`, and `lucid test` take a file or a package directory. With no path they use the package around the current directory.
+- `lucid run`, `lucid build`, `lucid check`, and `lucid test` take a file or a package directory. With no path they use the package around the current directory.
+- `lucid build` writes a standalone program, `NAME.exe`, to the current directory.
 - `lucid test` on a package runs the tests of every file in `src`.
 - `use markdown` is the dependency's `src/lib.lcd`. `use markdown.render` reads `src/render.lcd`, or else takes `render` from `src/lib.lcd`. `use markdown.a.b` follows the rule of `./`, from `src`.
 - `use` needs a dependency in this package's own `lucid.toml`. A dependency of a dependency does not count. A local file needs `./`.

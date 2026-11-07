@@ -455,6 +455,20 @@ Decisions 128 to 138.
 
 Sources: [serde enum representations](https://serde.rs/enum-representations.html), [RFC 8259](https://datatracker.ietf.org/doc/html/rfc8259), [serde_stacker](https://docs.rs/serde_stacker/latest/src/serde_stacker/lib.rs.html), [a report on the limit](https://github.com/microsoft/pg_durable/pull/328).
 
+## Executables
+
+Decisions 139 and 140.
+
+Level: **Read** (own measurement), 2026-11-07, on the development machine.
+
+- **Same output.** Built with `lucid build`, all 89 run tests and 53 trap tests gave the output and exit code of `lucid run`, traces and stack overflows included. A stack overflow traps with its trace, and does not crash, so the 256 MiB reserve and the limit agree.
+- **Same speed.** A release compiler, best of 5, in seconds: `fib` 0.492 under `lucid run` and 0.474 built, `nbody` 0.258 and 0.241, `trees` 1.931 and 1.965. `lucid run` includes JIT compile time, about 7 ms. So loading the stack limit, and baseline x86-64 in place of the host's features, have no cost that this shows.
+- **Size.** `hello.exe` is 157 KB, and `todo.exe` 366 KB. The embedded runtime library is 12 MB, and the linker keeps only what the program reaches.
+- **Linker search.** The MSVC linker needs `LIB` set to the C runtime and Windows SDK library directories. Outside a developer prompt nothing sets it, and Git Bash puts GNU `link` first on `PATH`. `find-msvc-tools` 0.1.15 tries the environment of a developer prompt, then the setup API of Visual Studio 2017 and later, then the registry for 2015. It gives `link.exe` with `LIB` and `PATH` set, and has no dependencies. Read in its source, `find_tools.rs` and `Cargo.toml`.
+- **Weak ground.** That `/STACK` reserves and does not commit, and that `std::process::exit` flushes stdout, are from memory of the Microsoft and Rust documentation. The tests above show both behaviors, but on one machine.
+
+Sources: [find-msvc-tools](https://docs.rs/find-msvc-tools), [MSVC /STACK](https://learn.microsoft.com/en-us/cpp/build/reference/stack-stack-allocations), [rustc --print native-static-libs](https://doc.rust-lang.org/rustc/command-line-arguments.html#--print-print-compiler-information), [std::process::exit](https://doc.rust-lang.org/std/process/fn.exit.html).
+
 ## Open research
 
 | Topic | Needed by |

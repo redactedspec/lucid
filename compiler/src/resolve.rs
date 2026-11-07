@@ -129,7 +129,7 @@ fn package_above(file: &str) -> Option<String> {
 
 /// The package that a directory on the command line means: its own, or the one
 /// around it, so a command works from anywhere in a package.
-fn package_root(dir: &str) -> String {
+pub fn package_root(dir: &str) -> String {
     let dir = dir_prefix(dir);
     package_above(&format!("{dir}x")).unwrap_or(dir)
 }

@@ -423,16 +423,33 @@ fn run_passes_arguments() {
     assert_eq!(text(&output.stdout), "[\"add\", \"--json\", \"a b\"]\n");
 }
 
-/// Each run reads what the last one saved.
+/// Each run reads what the last one saved. Under `lucid run`, then as a
+/// built program, which is the exit of M5.
 #[test]
 fn todo_example_works() {
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("todo");
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).expect("cannot make directory");
-    fs::copy(repo().join("examples/todo.lcd"), dir.join("todo.lcd")).expect("cannot copy");
+    for built in [false, true] {
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("todo_{built}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("cannot make directory");
+        fs::copy(repo().join("examples/todo.lcd"), dir.join("todo.lcd")).expect("cannot copy");
+        if built {
+            let output = lucid(&dir, &["build", "todo.lcd"]);
+            assert!(output.status.success(), "{}", text(&output.stderr));
+            fs::remove_file(dir.join("todo.lcd")).expect("cannot remove");
+        }
+        todo_works(&dir, built);
+    }
+}
+
+fn todo_works(dir: &Path, built: bool) {
     let run = |args: &[&str]| {
-        let args: Vec<&str> = ["run", "todo.lcd"].iter().chain(args).copied().collect();
-        let output = lucid(&dir, &args);
+        let output = if built {
+            Command::new(dir.join("todo.exe")).args(args).current_dir(dir).output()
+        } else {
+            let args: Vec<&str> = ["run", "todo.lcd"].iter().chain(args).copied().collect();
+            Ok(lucid(dir, &args))
+        };
+        let output = output.expect("cannot start the program");
         assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
         text(&output.stdout)
     };
@@ -442,6 +459,32 @@ fn todo_example_works() {
     assert_eq!(run(&["list"]), "[ ] buy milk\n[ ] call \"Ada\"\n");
     assert_eq!(run(&["add"]), "Usage: todo add <title>\n");
     assert_eq!(run(&["nope"]), "Unknown command: nope\n");
+}
+
+/// A built program gives what `lucid run` gives: traces, the stack limit, and
+/// foreign calls each depend on how the program starts.
+#[test]
+fn built_programs_match_run() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("built");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("cannot make directory");
+    let cases =
+        [("trap", "trace", "err"), ("trap", "stack_overflow", "err"), ("run", "unsafe", "out")];
+    for (kind, name, extension) in cases {
+        let source = repo().join("tests").join(kind).join(format!("{name}.lcd"));
+        fs::copy(source, dir.join(format!("{name}.lcd"))).expect("cannot copy");
+        let output = lucid(&dir, &["build", &format!("{name}.lcd")]);
+        assert!(output.status.success(), "{name}: {}", text(&output.stderr));
+        let program = Command::new(dir.join(format!("{name}.exe"))).current_dir(&dir).output();
+        let output = program.expect("cannot start the program");
+        let path = repo().join("tests").join(kind).join(format!("{name}.{extension}"));
+        let expected = text(&fs::read(path).expect("no expected output"));
+        let (code, got) = match kind {
+            "trap" => (Some(101), text(&output.stderr)),
+            _ => (Some(0), text(&output.stdout)),
+        };
+        assert_eq!((output.status.code(), got), (code, expected), "{name}");
+    }
 }
 
 /// A standard module's sites are not the program's to audit or fix.

@@ -273,7 +273,7 @@ A task value has `Show`, and prints as its type. It has no `Equal`, `Order`, or 
 
 `x.f(a)` also calls a field of `x` that holds a task value, if no task named `f` takes `x`.
 
-`...` is a placeholder statement that traps at run time. `lucid build --release` rejects it.
+`...` is a placeholder statement that traps at run time. A planned `lucid build --release` will reject it.
 
 ## Parameter modes
 

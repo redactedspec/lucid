@@ -20,6 +20,7 @@ Every tool has a stable `--json` output.
 | Command | Purpose for agents |
 | --- | --- |
 | `lucid check --json` | Fast diagnostics, no code generation |
+| `lucid build --json` | A standalone executable, or the diagnostics that `lucid check --json` gives |
 | `lucid fix` | Apply machine-suggested fixes |
 | `lucid explain E0123` | Cause, example, and fix for an error code |
 | `lucid test --json` | Per-test results of a file, or of every file in a package's `src`, with values on failure: `name`, `passed`, `file`, `line`, `column`, and `output`, which holds what the test printed and, on failure, the trap message and trace |

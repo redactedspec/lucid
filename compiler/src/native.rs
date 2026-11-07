@@ -1,4 +1,5 @@
-//! Cranelift backend. Lowers MIR to machine code, and runs it in this process.
+//! Cranelift backend. Lowers MIR to machine code, and runs it in this process,
+//! or writes an object file for `lucid build`.
 
 use crate::ast::BinaryOp;
 use crate::diag::{Diagnostic, Lines, Source, Span};
@@ -8,10 +9,13 @@ use cranelift_codegen::ir::{
     AbiParam, Block, FuncRef, GlobalValue, InstBuilder, MemFlagsData, Signature, SourceLoc,
     StackSlotData, StackSlotKind, TrapCode, Type, Value, types,
 };
+use cranelift_codegen::isa;
+use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module, default_libcall_names};
-use lucid_rt::CallSite;
+use cranelift_object::{ObjectBuilder, ObjectModule};
+use lucid_rt::{CallSite, SITE_WORDS, STACK_MARGIN};
 use std::collections::HashMap;
 
 const CODEGEN: &str = "code generation failed";
@@ -19,9 +23,6 @@ const OUT_OF_BOUNDS: &str = "list index out of bounds";
 
 /// False only in the benchmark build. See "Commands" in docs/compiler.md.
 const CHECK_OVERFLOW: bool = !cfg!(feature = "bench-unchecked");
-
-/// Stack kept free below the limit, for runtime calls and for one task's frame.
-const STACK_MARGIN: usize = 1024 * 1024;
 
 /// The stack check runs after the prologue, so a frame must fit in the margin.
 /// Half the margin stays spare, for runtime calls.
@@ -34,6 +35,34 @@ const INLINE_COUNTS: bool = !cfg!(debug_assertions);
 /// Marks the end of paths that cannot continue, such as after `lucid_trap`.
 const UNREACHABLE: TrapCode = TrapCode::unwrap_user(1);
 
+/// The only target of `lucid build` until M8.
+const TARGET: &str = "x86_64-pc-windows-msvc";
+
+const FLAGS: [(&str, &str); 4] = [
+    ("opt_level", "speed"),
+    // Windows commits stack one page at a time, so large frames must probe.
+    ("enable_probestack", "true"),
+    ("probestack_strategy", "inline"),
+    // A stack trace walks these, see `lucid_rt::lucid_trap`.
+    ("preserve_frame_pointers", "true"),
+];
+
+/// Where each task finds the lowest stack address it may use.
+#[derive(Clone, Copy)]
+enum StackLimit {
+    /// In the code, for the one thread of `lucid run`.
+    Fixed(usize),
+    /// In `lucid_stack_limit`, which the start of a built program sets.
+    Global(DataId),
+}
+
+/// What `compile` declared, and each call's return offset in its task.
+struct Compiled {
+    main: FuncId,
+    ids: Vec<FuncId>,
+    sites: Vec<(FuncId, u32, Option<CallSite>)>,
+}
+
 /// Compiles the program and runs it on this thread, whose stack is
 /// `stack_bytes` long. `source` places trap messages.
 pub fn run(program: &Program, source: &Source, stack_bytes: usize) -> Result<(), Vec<Diagnostic>> {
@@ -41,7 +70,7 @@ pub fn run(program: &Program, source: &Source, stack_bytes: usize) -> Result<(),
     // ponytail: a limit in the code fits one JIT thread. `lucid build` and
     // `spawn` need a per-thread limit that the runtime sets up.
     let stack_limit = (&raw const here) as usize - (stack_bytes - STACK_MARGIN);
-    let (entry, _) = compile(program, source, stack_limit, stack_bytes / 2)?;
+    let (entry, _) = jit(program, source, stack_limit, stack_bytes / 2)?;
     run_entry(entry);
     Ok(())
 }
@@ -57,7 +86,7 @@ pub fn run_tests(
 ) -> Result<(), Vec<Diagnostic>> {
     let here = 0u8;
     let stack_limit = (&raw const here) as usize - (stack_bytes - STACK_MARGIN);
-    let (_, tests) = compile(program, source, stack_limit, stack_bytes / 2)?;
+    let (_, tests) = jit(program, source, stack_limit, stack_bytes / 2)?;
     let mark = || {
         let mark = b"\0";
         // SAFETY: the range is `mark`.
@@ -161,7 +190,7 @@ struct Runtime {
     bool_text: FuncId,
 }
 
-fn signature_of(module: &JITModule, task: &Task) -> Signature {
+fn signature_of(module: &dyn Module, task: &Task) -> Signature {
     let mut signature = module.make_signature();
     for (local, &ty) in task.locals[..task.params].iter().enumerate() {
         let pointer = module.target_config().pointer_type();
@@ -172,22 +201,14 @@ fn signature_of(module: &JITModule, task: &Task) -> Signature {
     signature
 }
 
-/// Panics on a failure: valid input reaching here makes that a compiler bug.
-fn compile(
+/// Compiles in memory, and returns the entry of the top level and of each test.
+fn jit(
     program: &Program,
     source: &Source,
     stack_limit: usize,
     max_main_frame: usize,
 ) -> Result<(*const u8, Vec<*const u8>), Vec<Diagnostic>> {
-    let flags = [
-        ("opt_level", "speed"),
-        // Windows commits stack one page at a time, so large frames must probe.
-        ("enable_probestack", "true"),
-        ("probestack_strategy", "inline"),
-        // A stack trace walks these, see `lucid_rt::lucid_trap`.
-        ("preserve_frame_pointers", "true"),
-    ];
-    let mut builder = JITBuilder::with_flags(&flags, default_libcall_names()).expect(CODEGEN);
+    let mut builder = JITBuilder::with_flags(&FLAGS, default_libcall_names()).expect(CODEGEN);
     builder.symbol_lookup_fn(Box::new(find_symbol));
     builder.symbol("lucid_print", lucid_rt::lucid_print as *const u8);
     builder.symbol("lucid_print_int", lucid_rt::lucid_print_int as *const u8);
@@ -263,7 +284,84 @@ fn compile(
     builder.symbol("lucid_bytes_valid", lucid_rt::lucid_bytes_valid as *const u8);
     builder.symbol("lucid_bytes_text", lucid_rt::lucid_bytes_text as *const u8);
     let mut module = JITModule::new(builder);
+    let stack = StackLimit::Fixed(stack_limit);
+    let Compiled { main, ids, sites } =
+        compile(&mut module, program, source, stack, max_main_frame)?;
+    module.finalize_definitions().expect(CODEGEN);
+    let entry = module.get_finalized_function(main);
+    let tests = program.tests.iter();
+    let tests = tests.map(|test| module.get_finalized_function(ids[test.task])).collect();
+    let address =
+        |(id, offset, line)| (module.get_finalized_function(id) as usize + offset as usize, line);
+    lucid_rt::set_call_sites(sites.into_iter().map(address).collect());
+    // Leaked on purpose: `entry` points into memory that the module owns.
+    std::mem::forget(module);
+    Ok((entry, tests))
+}
 
+/// Compiles the top level to an object file, for `lucid build`. It defines
+/// `lucid_main`, and the call site table that `exe.rs` in `lucid_rt` reads.
+pub fn object(program: &Program, source: &Source) -> Result<Vec<u8>, Vec<Diagnostic>> {
+    let mut flags = settings::builder();
+    for (name, value) in FLAGS {
+        flags.set(name, value).expect(CODEGEN);
+    }
+    let isa = isa::lookup_by_name(TARGET).expect(CODEGEN);
+    let isa = isa.finish(settings::Flags::new(flags)).expect(CODEGEN);
+    let builder = ObjectBuilder::new(isa, "lucid", default_libcall_names()).expect(CODEGEN);
+    let mut module = ObjectModule::new(builder);
+    let limit = module.declare_data("lucid_stack_limit", Linkage::Import, false, false);
+    let stack = StackLimit::Global(limit.expect(CODEGEN));
+    let max_main_frame = lucid_rt::EXE_STACK_BYTES / 2;
+    let Compiled { sites, .. } = compile(&mut module, program, source, stack, max_main_frame)?;
+
+    // Each name once, since every call in a file repeats the name of the file.
+    let mut names = String::new();
+    let mut placed: HashMap<&str, usize> = HashMap::new();
+    let mut place = |name: &'static str| {
+        let start = *placed.entry(name).or_insert_with(|| {
+            names += name;
+            names.len() - name.len()
+        });
+        [start, name.len()]
+    };
+    let mut table = vec![sites.len()];
+    let mut description = DataDescription::new();
+    for (id, offset, site) in &sites {
+        let func = module.declare_func_in_data(*id, &mut description);
+        description.write_function_addr((table.len() * 8) as u32, func);
+        table.extend([0, *offset as usize]);
+        match site {
+            Some(CallSite { file, task, line, column }) => {
+                table.extend(place(file));
+                table.extend(place(task));
+                table.extend([*line, *column]);
+            }
+            None => table.extend([0; SITE_WORDS - 2]),
+        }
+    }
+    let bytes: Vec<u8> = table.iter().flat_map(|word| (*word as u64).to_le_bytes()).collect();
+    description.define(bytes.into_boxed_slice());
+    description.set_align(8);
+    let id = module.declare_data("lucid_call_sites", Linkage::Export, false, false);
+    module.define_data(id.expect(CODEGEN), &description).expect(CODEGEN);
+    // The trailing byte keeps the data non-empty.
+    let mut description = DataDescription::new();
+    description.define([names.as_bytes(), &[0]].concat().into_boxed_slice());
+    let id = module.declare_data("lucid_call_names", Linkage::Export, false, false);
+    module.define_data(id.expect(CODEGEN), &description).expect(CODEGEN);
+    Ok(module.finish().emit().expect(CODEGEN))
+}
+
+/// Lowers every task. Panics on a failure: valid input reaching here makes that
+/// a compiler bug.
+fn compile(
+    module: &mut dyn Module,
+    program: &Program,
+    source: &Source,
+    stack: StackLimit,
+    max_main_frame: usize,
+) -> Result<Compiled, Vec<Diagnostic>> {
     let pointer = module.target_config().pointer_type();
     let mut import = |name: &str, params: &[AbiParam], returns: &[AbiParam]| {
         let mut signature = module.make_signature();
@@ -335,11 +433,12 @@ fn compile(
 
     let mut ids = Vec::with_capacity(program.tasks.len());
     for task in &program.tasks {
-        let signature = signature_of(&module, task);
+        let signature = signature_of(module, task);
         ids.push(module.declare_anonymous_function(&signature).expect(CODEGEN));
     }
-    let signature = signature_of(&module, &program.main);
-    let main = module.declare_anonymous_function(&signature).expect(CODEGEN);
+    let signature = signature_of(module, &program.main);
+    let main = module.declare_function("lucid_main", Linkage::Export, &signature);
+    let main = main.expect(CODEGEN);
 
     let lines = Lines::new(source);
     let mut diags = Vec::new();
@@ -349,9 +448,9 @@ fn compile(
     let mut sites = Vec::new();
     let tasks = program.tasks.iter().zip(&ids).map(|(task, id)| (task, *id));
     for (task, id) in tasks.chain([(&program.main, main)]) {
-        context.func.signature = signature_of(&module, task);
+        context.func.signature = signature_of(module, task);
         let body = FunctionBuilder::new(&mut context.func, &mut builder_context);
-        let (module, runtime, ids, lines) = (&mut module, &runtime, &ids, &lines);
+        let (module, runtime, ids, lines) = (&mut *module, &runtime, &ids, &lines);
         let statics = &mut statics;
         let data_id = module.declare_anonymous_data(false, false).expect(CODEGEN);
         let data = module.declare_data_in_func(data_id, body.func);
@@ -375,7 +474,7 @@ fn compile(
             statics,
             lines,
         }
-        .task(task, data_id, stack_limit);
+        .task(task, data_id, stack);
         module.define_function(id, &mut context).expect(CODEGEN);
         let code = context.compiled_code().expect(CODEGEN);
         let locs = code.buffer.get_srclocs_sorted();
@@ -401,16 +500,7 @@ fn compile(
     if !diags.is_empty() {
         return Err(diags);
     }
-    module.finalize_definitions().expect(CODEGEN);
-    let entry = module.get_finalized_function(main);
-    let tests = program.tests.iter();
-    let tests = tests.map(|test| module.get_finalized_function(ids[test.task])).collect();
-    let address =
-        |(id, offset, line)| (module.get_finalized_function(id) as usize + offset as usize, line);
-    lucid_rt::set_call_sites(sites.into_iter().map(address).collect());
-    // Leaked on purpose: `entry` points into memory that the module owns.
-    std::mem::forget(module);
-    Ok((entry, tests))
+    Ok(Compiled { main, ids, sites })
 }
 
 /// Finds a foreign task in the libraries that every Lucid program has loaded.
@@ -443,7 +533,7 @@ pub fn find_symbol(_name: &str) -> Option<*const u8> {
 }
 
 struct Lower<'a, 'b> {
-    module: &'a mut JITModule,
+    module: &'a mut dyn Module,
     body: FunctionBuilder<'b>,
     pointer: Type,
     runtime: &'a Runtime,
@@ -470,7 +560,7 @@ struct Lower<'a, 'b> {
 }
 
 impl Lower<'_, '_> {
-    fn task(mut self, task: &Task, data_id: DataId, stack_limit: usize) {
+    fn task(mut self, task: &Task, data_id: DataId, stack: StackLimit) {
         let entry = self.body.create_block();
         self.body.append_block_params_for_function_params(entry);
         self.body.switch_to_block(entry);
@@ -501,7 +591,15 @@ impl Lower<'_, '_> {
         }
 
         let sp = self.body.ins().get_stack_pointer(self.pointer);
-        let limit = self.body.ins().iconst(self.pointer, stack_limit as i64);
+        let limit = match stack {
+            StackLimit::Fixed(limit) => self.body.ins().iconst(self.pointer, limit as i64),
+            StackLimit::Global(id) => {
+                let global = self.module.declare_data_in_func(id, self.body.func);
+                let address = self.body.ins().symbol_value(self.pointer, global);
+                let flags = MemFlagsData::trusted();
+                self.body.ins().load(self.pointer, flags, address, 0)
+            }
+        };
         let low = self.body.ins().icmp(IntCC::UnsignedLessThan, sp, limit);
         self.trap_if(low, "stack overflow", task.span);
 

@@ -15,11 +15,11 @@ mod parser;
 mod resolve;
 
 use diag::{Diagnostic, Source};
-use resolve::{load, package_files};
+use resolve::{load, package_files, package_root};
 use std::io::Write;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\nPATH is a file or a package directory, by default the current directory.";
+const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\nPATH is a file or a package directory, by default the current directory.";
 
 /// Set for the child process of `lucid test`, to the place of its first test.
 const TEST_FROM: &str = "LUCID_TEST_FROM";
@@ -51,12 +51,14 @@ fn cli(args: &[String]) -> ExitCode {
         Some((path, flags)) if !path.starts_with('-') => (flags, *path),
         _ => (rest, "."),
     };
+    let build = command == "build";
     let (run, json, costs) = match (command, rest) {
         ("test", []) => return test(path, false),
         ("test", ["--json"]) => return test(path, true),
         ("check", ["--unsafe"]) => return unsafe_sites(path, false),
         ("check", ["--json", "--unsafe"]) => return unsafe_sites(path, true),
-        ("run", []) => (true, false, false),
+        ("run" | "build", []) => (true, false, false),
+        ("build", ["--json"]) => (true, true, false),
         ("check", []) => (false, false, false),
         ("check", ["--json"]) => (false, true, false),
         ("check", ["--costs"]) => (false, false, true),
@@ -80,7 +82,12 @@ fn cli(args: &[String]) -> ExitCode {
             emit(std::io::stdout(), &ownership::render_costs(&source, &found, json));
             return ExitCode::SUCCESS;
         }
-        if run && diags.is_empty() {
+        if build && diags.is_empty() {
+            match native::object(&program, &source) {
+                Ok(object) => return link(&object, &exe_name(path)),
+                Err(errors) => diags = errors,
+            }
+        } else if run && diags.is_empty() {
             diags = native::run(&program, &source, STACK_BYTES).err().unwrap_or_default();
         } else if !run && !costs {
             // `check` reports errors in the program. An unbuilt feature is not one.
@@ -90,6 +97,64 @@ fn cli(args: &[String]) -> ExitCode {
     }
     report_errors(&source, &diags, json);
     if diags.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+}
+
+/// The executable that `lucid build` writes to the current directory: named
+/// after the file, or after the directory of the package.
+fn exe_name(path: &str) -> String {
+    let path = std::path::Path::new(path);
+    let stem = if path.is_dir() {
+        let root = std::fs::canonicalize(format!("{}.", package_root(&path.display().to_string())));
+        root.ok().and_then(|root| root.file_name().map(|name| name.to_os_string()))
+    } else {
+        path.file_stem().map(|name| name.to_os_string())
+    };
+    format!("{}.exe", stem.unwrap_or("main".into()).display())
+}
+
+/// Links an object file from `native::object` with the embedded runtime, into
+/// `exe`. A failure here is in the system, not the program, so it has no code.
+#[cfg(windows)]
+fn link(object: &[u8], exe: &str) -> ExitCode {
+    const RUNTIME: &[u8] = include_bytes!(env!("LUCID_RT_LIB"));
+    let fail = |problem: String| {
+        emit(std::io::stderr(), &format!("lucid: {problem}\n"));
+        ExitCode::FAILURE
+    };
+    let Some(linker) = find_msvc_tools::find_tool("x86_64-pc-windows-msvc", "link.exe") else {
+        return fail(
+            "cannot find the MSVC linker: install Visual Studio Build Tools, with the C++ tools"
+                .into(),
+        );
+    };
+    let dir = std::env::temp_dir().join(format!("lucid-build-{}", std::process::id()));
+    let linked = std::fs::create_dir_all(&dir)
+        .and_then(|()| std::fs::write(dir.join("main.obj"), object))
+        .and_then(|()| std::fs::write(dir.join("lucid_rt.lib"), RUNTIME))
+        .and_then(|()| {
+            let mut command = linker.to_command();
+            command.args(["/NOLOGO", "/SUBSYSTEM:CONSOLE"]);
+            command.arg(format!("/STACK:{}", lucid_rt::EXE_STACK_BYTES));
+            command.arg(format!("/OUT:{exe}"));
+            command.arg(dir.join("main.obj")).arg(dir.join("lucid_rt.lib"));
+            command.args(env!("LUCID_RT_LIBS").split_whitespace()).output()
+        });
+    let _ = std::fs::remove_dir_all(&dir);
+    match linked {
+        Ok(output) if output.status.success() => ExitCode::SUCCESS,
+        Ok(output) => {
+            let said =
+                String::from_utf8_lossy(&output.stdout) + String::from_utf8_lossy(&output.stderr);
+            fail(format!("linking failed:\n{said}"))
+        }
+        Err(e) => fail(format!("cannot link: {e}")),
+    }
+}
+
+#[cfg(not(windows))]
+fn link(_object: &[u8], _exe: &str) -> ExitCode {
+    emit(std::io::stderr(), "lucid: `lucid build` works only on Windows until M8\n");
+    ExitCode::FAILURE
 }
 
 /// Reports compile errors, as data on stdout with `json`.
