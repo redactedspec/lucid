@@ -30,11 +30,10 @@ const groups = [
 ];
 ---
 <footer class="site-footer">
-  <div class="wrap grid">
+  <div class="container grid">
     <div class="brand">
-      <Wordmark />
-      <p>A readable, memory-safe, compiled language. In development: no public release yet.</p>
-      <p class="fine">Compiler under GPL-3.0-or-later. Runtime and standard library add a linking exception, so built programs may use any license.</p>
+      <Wordmark size={32} />
+      <p>A readable, memory-safe, compiled language. In development, with no public release yet.</p>
     </div>
     {groups.map((group) => (
       <nav aria-label={group.title}>
@@ -43,29 +42,25 @@ const groups = [
       </nav>
     ))}
   </div>
-  <div class="wrap base">
-    <span>lucidlang.dev</span>
-    <span>Files end in <code>.lcd</code></span>
+  <div class="container base">
+    <p>Compiler under GPL-3.0-or-later. The runtime and standard library add a linking exception, so built programs may use any license.</p>
   </div>
 </footer>
 
 <style>
-  .site-footer { border-top: 1px solid var(--line); padding-top: 3.5rem; margin-top: 2rem; }
-  .grid { display: grid; grid-template-columns: 2fr repeat(3, 1fr); gap: 2.5rem; }
-  .brand { display: grid; gap: 1rem; align-content: start; max-width: 22rem; }
-  .brand p { color: var(--text-muted); font-size: 0.9375rem; }
-  .brand .fine { color: var(--text-faint); font-size: 0.8125rem; }
-  h2 { font: 500 0.75rem/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 1rem; }
-  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
-  a { color: var(--text-muted); text-decoration: none; font-size: 0.9375rem; }
-  a:hover { color: var(--text); }
-  .base {
-    display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
-    margin-top: 3.5rem; padding-block: 1.5rem; border-top: 1px solid var(--line);
-    color: var(--text-faint); font: 400 0.8125rem/1.4 var(--mono);
-  }
-  @media (max-width: 52rem) {
-    .grid { grid-template-columns: 1fr 1fr; }
+  .site-footer { border-top: var(--rule-hair) solid var(--color-rule); padding-top: var(--space-2xl); background: var(--color-paper-3); }
+  .grid { display: grid; grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)); gap: var(--gap-columns); }
+  .brand { display: grid; gap: var(--space-md); align-content: start; }
+  .brand p { color: var(--color-muted); max-width: 34ch; }
+  h2 { font: 500 var(--text-sm)/1.2 var(--font-body); letter-spacing: 0; text-wrap: balance; color: var(--color-muted); margin-bottom: var(--space-md); }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-xs); }
+  a { color: var(--color-ink-2); text-decoration: none; transition: color var(--dur-short) var(--ease-out); }
+  a:hover { color: var(--color-accent); }
+  a:active { color: var(--color-ink); }
+  .base { margin-top: var(--space-2xl); padding-block: var(--space-lg); border-top: var(--rule-hair) solid var(--color-rule); }
+  .base p { color: var(--color-muted); font-size: var(--text-sm); max-width: 75ch; }
+  @media (max-width: 56rem) {
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .brand { grid-column: 1 / -1; }
   }
 </style>

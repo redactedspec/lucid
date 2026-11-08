@@ -29,7 +29,7 @@ The public website for Lucid: a static Astro site, with Starlight for the docs. 
 | `/install.sh`, `/install.ps1` | Reserved. Each prints that no release exists, and fails |
 | `/404` | Not found |
 
-**Design.** Dark first, near-black, one accent (ice cyan), IBM Plex Sans and Mono, self-hosted. A fine grid on the hero only. A Lucid TextMate grammar in `src/lucid.tmLanguage.json` colors code on every page.
+**Design.** Dark first: a graphite ground in three steps, Host Grotesk for reading and Atkinson Hyperlegible Mono for code and compiler output, both self-hosted. Amber marks what a person does (the primary action, the current milestone), and cool blue what the compiler wrote. Tokens are in `src/styles/tokens.css`, and `docs.css` restates them for Starlight. The home page leads with one real diagnostic: `src/examples/shapes.lcd` with one arm removed, and the outputs in `src/data/diagnostic.json`, which `check:examples` compares with the compiler. A Lucid TextMate grammar in `src/lucid.tmLanguage.json` colors code on every page.
 
 ## Commands
 
@@ -40,7 +40,7 @@ npm ci                    # install
 npm run dev               # local server at http://localhost:4321
 npm run build             # sync diagnostics, type check, build to dist/
 npm run preview           # serve dist/
-npm run check:examples    # lucid check on every lucid block in the docs
+npm run check:examples    # lucid check on every lucid block, and the home page diagnostic
 npm run check:links       # every internal link in dist/ resolves
 ```
 

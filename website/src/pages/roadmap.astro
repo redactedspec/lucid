@@ -9,35 +9,34 @@ const label = { done: 'Done', active: 'In progress', planned: 'Planned' } as con
   title="Roadmap"
   description="Lucid's development milestones: M0 to M7 are done, M8 (ecosystem, Linux, registry, language server, 1.0 promise) is in progress, and M9 self-hosting is planned."
 >
-  <div class="wrap">
+  <div class="container">
     <header class="page-head">
-      <p class="eyebrow">Roadmap</p>
       <h1>One runnable result per milestone.</h1>
-      <p>Each milestone ends with an exit test that must pass before the next one starts. There is no release yet: the 1.0 stability promise is the last step of M8.</p>
+      <p>Each milestone ends with an exit test that must pass before the next starts. The 1.0 stability promise is the last step of M8.</p>
     </header>
 
-    <ol class="timeline">
+    <ol class="trail">
       {milestones.map((m) => (
         <li class={m.status}>
-          <div class="marker" aria-hidden="true"></div>
+          <div class="side">
+            <span class="measured id">{m.id}</span>
+            <span class={`state state--${m.status}`}>{label[m.status]}</span>
+          </div>
           <div class="body">
-            <div class="head">
-              <span class="id">{m.id}</span>
-              <h2>{m.title}</h2>
-              <span class={`tag tag-${m.status}`}>{label[m.status]}</span>
-            </div>
+            <h2>{m.title}</h2>
             <p set:html={inline(m.summary)} />
             {m.steps && (
               <ul class="steps">
                 {m.steps.map((s) => (
                   <li class={s.done ? 'step done' : 'step'}>
+                    <span class="mark" aria-hidden="true">{s.done ? 'Done' : 'To do'}</span>
                     <span class="sr-only">{s.done ? 'Done:' : 'To do:'}</span>
                     <span set:html={inline(s.text)} />
                   </li>
                 ))}
               </ul>
             )}
-            <p class="exit"><span>Exit</span> <span set:html={inline(m.exit)} /></p>
+            <dl class="exit"><dt>Exit test</dt><dd set:html={inline(m.exit)} /></dl>
           </div>
         </li>
       ))}
@@ -47,26 +46,30 @@ const label = { done: 'Done', active: 'In progress', planned: 'Planned' } as con
 </Base>
 
 <style>
-  .timeline { list-style: none; margin: 0; padding: 0 0 2rem; }
-  .timeline > li { display: grid; grid-template-columns: 1.5rem 1fr; gap: 1.25rem; position: relative; padding-bottom: 2.25rem; }
-  .timeline > li::before {
-    content: ''; position: absolute; left: calc(0.75rem - 0.5px); top: 1.25rem; bottom: 0; width: 1px; background: var(--line-strong);
+  .trail { list-style: none; margin: 0; padding: 0; }
+  .trail > li {
+    display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 9fr); gap: var(--gap-columns);
+    padding-block: var(--space-xl); border-bottom: var(--rule-hair) solid var(--color-rule);
   }
-  .timeline > li:last-child::before { display: none; }
-  .marker { width: 0.75rem; height: 0.75rem; margin: 0.45rem auto 0; border-radius: 50%; border: 1.5px solid var(--text-faint); background: var(--bg); position: relative; }
-  .done .marker { background: var(--ok); border-color: var(--ok); }
-  .active .marker { background: var(--warn); border-color: var(--warn); box-shadow: 0 0 0 4px #2a2211; }
-  .body { display: grid; gap: 0.7rem; max-width: 46rem; }
-  .head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
-  .id { font: 500 0.875rem/1 var(--mono); color: var(--text-faint); }
-  h2 { font-size: 1.25rem; }
-  .body > p { color: var(--text-muted); }
-  .exit { font-size: 0.9375rem; }
-  .exit > span:first-child { font: 500 0.6875rem/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); margin-right: 0.4rem; }
-  .steps { list-style: none; margin: 0.25rem 0; padding: 0; display: grid; gap: 0.45rem; }
-  .step { position: relative; padding-left: 1.6rem; color: var(--text-muted); font-size: 0.9375rem; }
-  .step::before { content: ''; position: absolute; left: 0; top: 0.35em; width: 0.8rem; height: 0.8rem; border: 1.5px solid var(--line-strong); border-radius: 3px; }
-  .step.done { color: var(--text); }
-  .step.done::before { background: var(--ok); border-color: var(--ok); }
-  .later { color: var(--text-faint); padding: 1rem 0 3rem; border-top: 1px solid var(--line); }
+  .trail > li.active { background: var(--color-paper-2); box-shadow: inset 2px 0 0 var(--color-accent); padding-inline: var(--space-lg); border-radius: 0 var(--radius-card) var(--radius-card) 0; }
+  .side { display: grid; gap: var(--space-xs); align-content: start; justify-items: start; }
+  .id { font-size: var(--text-xl); color: var(--color-ink); }
+  .body { display: grid; gap: var(--space-sm); max-width: 50rem; }
+  .body h2 { font-size: var(--text-xl); }
+  .body > p { color: var(--color-muted); }
+  .steps { list-style: none; margin: var(--space-xs) 0; padding: 0; display: grid; gap: var(--space-xs); }
+  .step { display: grid; grid-template-columns: 6ch minmax(0, 1fr); gap: var(--space-sm); color: var(--color-muted); }
+  .step.done { color: var(--color-ink-2); }
+  .mark { font-size: var(--text-sm); font-weight: 500; color: var(--color-muted); padding-top: var(--space-3xs); }
+  .done .mark { color: var(--color-ok); }
+  .exit { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-sm); font-size: var(--text-sm); }
+  .exit dt { font-weight: 500; color: var(--color-ink); }
+  .exit dd { margin: 0; color: var(--color-muted); }
+  .later { color: var(--color-muted); padding-block: var(--space-xl) var(--section-gap-s); max-width: 65ch; }
+
+  @media (max-width: 48rem) {
+    .trail > li { grid-template-columns: minmax(0, 1fr); gap: var(--space-sm); }
+    .side { grid-auto-flow: column; justify-content: start; align-items: baseline; gap: var(--space-md); }
+    .exit { grid-template-columns: minmax(0, 1fr); gap: var(--space-2xs); }
+  }
 </style>

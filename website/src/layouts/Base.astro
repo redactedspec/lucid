@@ -25,7 +25,7 @@ const image = new URL('/og.png', Astro.site);
     {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={canonical} />}
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="sitemap" href="/sitemap-index.xml" />
-    <meta name="theme-color" content="#07080a" />
+    <meta name="theme-color" content="#0d1013" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Lucid" />
     <meta property="og:title" content={fullTitle} />
@@ -46,10 +46,15 @@ const image = new URL('/og.png', Astro.site);
   </body>
 </html>
 
+<style is:global>
+  html, body { overflow-x: clip; }
+</style>
+
 <style>
   .skip {
-    position: absolute; left: 1rem; top: -4rem; z-index: 20;
-    padding: 0.6rem 1rem; background: var(--accent); color: var(--accent-ink); border-radius: var(--radius); font-weight: 500;
+    position: absolute; left: var(--space-md); top: calc(-1 * var(--space-3xl)); z-index: var(--z-modal);
+    padding: var(--space-sm) var(--space-md); background: var(--color-accent); color: var(--color-accent-ink);
+    border-radius: var(--radius-pill); font-weight: 500;
   }
-  .skip:focus { top: 1rem; }
+  .skip:focus { top: var(--space-md); }
 </style>

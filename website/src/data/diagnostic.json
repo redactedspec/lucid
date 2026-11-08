@@ -1,0 +1,7 @@
+{
+  "file": "shapes.lcd",
+  "removed": "        Point -> 0.0",
+  "check": "shapes.lcd:9:9: error E0316: this `match` does not cover every `Shape`\n  note: add an arm for `Point`",
+  "json": "[{\"code\":\"E0316\",\"severity\":\"error\",\"message\":\"this `match` does not cover every `Shape`\",\"file\":\"shapes.lcd\",\"line\":9,\"column\":9,\"end_line\":9,\"end_column\":21,\"notes\":[\"add an arm for `Point`\"],\"fixes\":[]}]",
+  "run": "9.0"
+}

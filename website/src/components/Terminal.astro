@@ -3,20 +3,20 @@ interface Props {
   lines: { cmd?: string; out?: string }[];
   title?: string;
 }
-const { lines, title = 'Terminal' } = Astro.props;
+const { lines, title } = Astro.props;
 ---
-<figure class="term">
-  <figcaption>{title}</figcaption>
+<figure class="term panel">
+  {title && <figcaption>{title}</figcaption>}
   <pre><code>{lines.map((line) => line.cmd !== undefined
     ? <span class="line"><span class="prompt" aria-hidden="true">$ </span><span class="cmd">{line.cmd}</span>{'\n'}</span>
     : <span class="line out">{line.out}{'\n'}</span>)}</code></pre>
 </figure>
 
 <style>
-  .term { margin: 0; border: 1px solid var(--line-strong); border-radius: 8px; background: #050607; overflow: hidden; min-width: 0; }
-  figcaption { padding: 0.65rem 1rem; border-bottom: 1px solid var(--line); font: 400 0.8125rem/1 var(--mono); color: var(--text-faint); }
-  pre { margin: 0; padding: 1rem 1.25rem; overflow-x: auto; font-size: 0.875rem; line-height: 1.7; }
-  .prompt { color: var(--accent); user-select: none; }
-  .cmd { color: var(--text); }
-  .out { color: var(--text-muted); }
+  .term { margin: 0; background: var(--color-paper-3); }
+  figcaption { padding: var(--space-sm) var(--space-md); border-bottom: var(--rule-hair) solid var(--color-rule); font-size: var(--text-sm); color: var(--color-muted); background: var(--color-paper-2); }
+  pre { margin: 0; padding: var(--space-md) var(--space-lg); overflow-x: auto; font-size: var(--text-sm); line-height: 1.7; }
+  .prompt { color: var(--color-accent); user-select: none; }
+  .cmd { color: var(--color-ink); }
+  .out { color: var(--color-cool); }
 </style>

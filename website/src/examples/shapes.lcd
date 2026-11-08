@@ -1,0 +1,12 @@
+choice Shape
+    Circle(radius: float)
+    Square(side: float)
+    Point
+
+task area(self: Shape) -> float
+    return match self
+        Circle(radius) -> 3.14159 * radius * radius
+        Square(side) -> side * side
+        Point -> 0.0
+
+print Square(side: 3.0).area()

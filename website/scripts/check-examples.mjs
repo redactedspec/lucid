@@ -43,6 +43,25 @@ samples.forEach((s, i) => {
     console.error(`FAIL ${s.where}\n${(r.stdout + r.stderr).replaceAll(path, s.where)}`);
   }
 });
+
+// The home page shows one diagnostic as the compiler prints it. Check that it still does.
+const d = JSON.parse(readFileSync(join(root, 'src', 'data', 'diagnostic.json'), 'utf-8'));
+const fixed = readFileSync(join(root, 'src', 'examples', d.file), 'utf-8').replace(/\r\n/g, '\n');
+const broken = fixed.replace(`${d.removed}\n`, '');
+const shown = [
+  ['run', fixed, d.run],
+  ['check', broken, d.check],
+  ['check --json', broken, d.json],
+];
+for (const [args, code, want] of shown) {
+  writeFileSync(join(dir, d.file), code);
+  const r = spawnSync(lucid, [...args.split(' '), d.file], { cwd: dir, encoding: 'utf-8' });
+  const got = (r.stdout + r.stderr).replace(/\r\n/g, '\n').trimEnd();
+  if (got !== want) {
+    failed++;
+    console.error(`FAIL home page diagnostic, lucid ${args}:\nwant ${want}\ngot  ${got}`);
+  }
+}
 rmSync(dir, { recursive: true, force: true });
-console.log(`${samples.length} samples, ${failed} failed`);
+console.log(`${samples.length} samples and 3 home page outputs, ${failed} failed`);
 if (failed) process.exitCode = 1;

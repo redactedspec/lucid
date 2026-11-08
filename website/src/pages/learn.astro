@@ -29,20 +29,18 @@ const code = (s: string) => s.replace(/`([^`]+)`/g, '<code>$1</code>');
   title="Learn"
   description="Learn Lucid: a guided path through the language docs, and complete example programs that run with the current compiler."
 >
-  <div class="wrap">
+  <div class="container">
     <header class="page-head">
-      <p class="eyebrow">Learn</p>
       <h1>Learn Lucid in an afternoon.</h1>
-      <p>The language is small on purpose: its whole reference fits in one sitting. Follow the path in order, then read the example programs.</p>
+      <p>The whole reference fits in one sitting. Follow the path in order, then read the example programs.</p>
     </header>
 
     <section aria-labelledby="path-title" class="block">
-      <h2 id="path-title">The path</h2>
+      <h2 id="path-title" class="sr-only">The path, in order</h2>
       <ol class="path">
-        {path.map((step, i) => (
+        {path.map((step) => (
           <li>
             <a href={step.href}>
-              <span class="num">{String(i + 1).padStart(2, '0')}</span>
               <span class="title">{step.title}</span>
               <span class="text" set:html={code(step.text)} />
             </a>
@@ -52,8 +50,10 @@ const code = (s: string) => s.replace(/`([^`]+)`/g, '<code>$1</code>');
     </section>
 
     <section aria-labelledby="examples-title" class="block">
-      <h2 id="examples-title">Example programs</h2>
-      <p class="intro">These are the example programs from the Lucid repository. The compiler's test suite runs them, so they stay current.</p>
+      <div class="head head--split">
+        <h2 id="examples-title">Four whole programs.</h2>
+        <p>These are the example programs from the Lucid repository. The compiler’s test suite runs them, so they stay current.</p>
+      </div>
       <div class="examples">
         {examples.map((e) => (
           <article>
@@ -65,13 +65,12 @@ const code = (s: string) => s.replace(/`([^`]+)`/g, '<code>$1</code>');
     </section>
 
     <section aria-labelledby="agents-title" class="block agents">
-      <h2 id="agents-title">Teaching an agent</h2>
-      <p class="intro">
-        One file holds everything that runs today, sized for an agent's context window.
-        Give it to the agent with the task, and let it read diagnostics with <code>--json</code>.
-      </p>
+      <div class="agents-text">
+        <h2 id="agents-title">Teaching an agent</h2>
+        <p>One file holds everything that runs today, sized for an agent’s context window. Give it to the agent with the task, and let it read diagnostics with <code>--json</code>.</p>
+      </div>
       <div class="actions">
-        <a class="btn" href="/agent-guide.md">agent-guide.md</a>
+        <a class="btn btn--primary" href="/agent-guide.md">Open agent-guide.md</a>
         <a class="link" href="/docs/ai-agents/">Writing Lucid with agents</a>
       </div>
     </section>
@@ -79,25 +78,34 @@ const code = (s: string) => s.replace(/`([^`]+)`/g, '<code>$1</code>');
 </Base>
 
 <style>
-  .block { padding-block: 3rem; border-top: 1px solid var(--line); }
-  h2 { font-size: 1.5rem; margin-bottom: 1.5rem; }
-  .intro { color: var(--text-muted); max-width: 44rem; margin: -0.75rem 0 1.75rem; }
-  .path {
-    list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
-    border-top: 1px solid var(--line); border-left: 1px solid var(--line);
-  }
+  .block { padding-block: var(--space-3xl); border-bottom: var(--rule-hair) solid var(--color-rule); }
+  .block:last-child { border-bottom: 0; padding-bottom: var(--section-gap-s); }
+  .path { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+  .path li { counter-increment: step; border-bottom: var(--rule-hair) solid var(--color-rule); }
+  .path li:first-child { border-top: var(--rule-hair) solid var(--color-rule); }
   .path a {
-    display: grid; gap: 0.4rem; height: 100%; padding: 1.25rem 1.25rem 1.5rem; text-decoration: none;
-    border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); transition: background-color 0.15s;
+    display: grid; grid-template-columns: 4ch minmax(0, 5fr) minmax(0, 7fr); gap: var(--gap-columns); align-items: baseline;
+    padding-block: var(--space-lg); text-decoration: none;
+    transition: background-color var(--dur-short) var(--ease-out);
   }
-  .path a:hover { background: var(--bg-raised); }
-  .path a:hover .title { color: var(--accent); }
-  .num { font: 500 0.75rem/1 var(--mono); color: var(--text-faint); }
-  .title { font-weight: 500; }
-  .text { color: var(--text-muted); font-size: 0.9375rem; }
-  .examples { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem; }
-  article { display: grid; gap: 0.9rem; align-content: start; min-width: 0; }
-  article p { color: var(--text-muted); font-size: 0.9375rem; }
-  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 1.25rem; }
-  @media (max-width: 60rem) { .examples { grid-template-columns: 1fr; } }
+  .path a::before { content: counter(step); font: 400 var(--text-sm)/1 var(--font-outlier); color: var(--color-muted); font-variant-numeric: tabular-nums; text-align: right; }
+  .path a:hover { background: var(--color-paper-2); }
+  .path a:hover .title { color: var(--color-accent); }
+  .path a:active { background: var(--color-paper-3); }
+  .title { font-size: var(--text-title); font-weight: 500; letter-spacing: -0.015em; color: var(--color-ink); transition: color var(--dur-short) var(--ease-out); }
+  .text { color: var(--color-muted); }
+  .examples { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2xl) var(--gap-columns); }
+  article { display: grid; gap: var(--space-md); align-content: start; min-width: 0; }
+  article p { color: var(--color-muted); max-width: 52ch; }
+  .agents { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: var(--gap-columns); align-items: end; }
+  .agents-text { display: grid; gap: var(--space-md); }
+  .agents h2 { font-size: var(--text-section); }
+  .agents-text p { color: var(--color-muted); font-size: var(--text-lead); line-height: 1.45; max-width: 46ch; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-lg); justify-content: end; }
+  @media (max-width: 60rem) {
+    .examples, .agents { grid-template-columns: minmax(0, 1fr); }
+    .path a { grid-template-columns: 3ch minmax(0, 1fr); row-gap: var(--space-2xs); }
+    .path .text { grid-column: 2; }
+    .actions { justify-content: start; }
+  }
 </style>

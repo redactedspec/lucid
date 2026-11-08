@@ -1,0 +1,113 @@
+---
+// One real diagnostic, three ways. The outputs in diagnostic.json are the
+// compiler's own; `npm run check:examples` fails if they drift.
+import { Code } from 'astro:components';
+import lucid from '../lucid.tmLanguage.json';
+import theme from '../lucid-dark.theme.json';
+import fixed from '../examples/shapes.lcd?raw';
+import d from '../data/diagnostic.json';
+
+const source = fixed.replace(/\r\n/g, '\n').trimEnd();
+const lines = source.split('\n');
+const removedAt = lines.indexOf(d.removed) + 1;
+const broken = lines.filter((_, i) => i + 1 !== removedAt).join('\n');
+const errorLine = Number(d.check.split(':')[1]);
+
+import type { ShikiTransformer } from 'shiki';
+
+const mark = (line: number, cls: string): ShikiTransformer[] => [{
+  line(node, n) { if (n === line) this.addClassToHast(node, cls); },
+}];
+
+const states = [
+  { id: 'text', label: 'For you', code: broken, marked: mark(errorLine, 'bad'), cmd: `lucid check ${d.file}`, out: d.check, wrap: false },
+  { id: 'json', label: 'For an agent', code: broken, marked: mark(errorLine, 'bad'), cmd: `lucid check --json ${d.file}`, out: d.json, wrap: true },
+  { id: 'fixed', label: 'Fixed', code: source, marked: mark(removedAt, 'plus'), cmd: `lucid run ${d.file}`, out: d.run, wrap: false },
+];
+---
+<div class="diag panel" data-diag>
+  <div class="top">
+    <span class="file">{d.file}</span>
+    <div role="tablist" aria-label="Compiler output" class="tabs" hidden>
+      {states.map((s, i) => (
+        <button type="button" role="tab" id={`diag-tab-${s.id}`} aria-controls={`diag-${s.id}`} aria-selected={i === 0 ? 'true' : 'false'} tabindex={i === 0 ? 0 : -1}>{s.label}</button>
+      ))}
+    </div>
+  </div>
+  {states.map((s, i) => (
+    <div role="tabpanel" id={`diag-${s.id}`} aria-labelledby={`diag-tab-${s.id}`} class="state" hidden={i !== 0}>
+      <div class="src"><Code code={s.code} lang={{ ...lucid } as any} theme={theme as any} transformers={s.marked} /></div>
+      <pre class:list={['out', { wrap: s.wrap }]}><code><span class="prompt" aria-hidden="true">$ </span><span class="cmd">{s.cmd}</span>{'\n'}<span class="result">{s.out}</span></code></pre>
+    </div>
+  ))}
+</div>
+
+<script>
+  for (const root of document.querySelectorAll<HTMLElement>('[data-diag]')) {
+    const list = root.querySelector<HTMLElement>('[role="tablist"]')!;
+    const tabs = [...list.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const select = (tab: HTMLButtonElement) => {
+      for (const t of tabs) {
+        const on = t === tab;
+        t.setAttribute('aria-selected', String(on));
+        t.tabIndex = on ? 0 : -1;
+        root.querySelector<HTMLElement>(`#${t.getAttribute('aria-controls')}`)!.hidden = !on;
+      }
+    };
+    tabs.forEach((tab, i) => {
+      tab.addEventListener('click', () => select(tab));
+      tab.addEventListener('keydown', (e) => {
+        const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+        if (!step) return;
+        const next = tabs[(i + step + tabs.length) % tabs.length];
+        select(next);
+        next.focus();
+      });
+    });
+    list.hidden = false;
+  }
+</script>
+
+<style>
+  .diag { background: var(--color-paper-3); }
+  .top {
+    display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); flex-wrap: wrap;
+    padding: var(--space-2xs) var(--space-2xs) var(--space-2xs) var(--space-md);
+    background: var(--color-paper-2); border-bottom: var(--rule-hair) solid var(--color-rule);
+  }
+  .file { font: 400 var(--text-sm)/1.2 var(--font-outlier); color: var(--color-ink-2); }
+  .tabs { display: flex; gap: var(--space-2xs); }
+  [role='tab'] {
+    min-height: 44px; padding-inline: var(--space-md); border: var(--rule-hair) solid transparent; border-radius: var(--radius-pill);
+    background: transparent; color: var(--color-muted); font-weight: 500; font-size: var(--text-sm); cursor: pointer; white-space: nowrap;
+    transition: color var(--dur-short) var(--ease-out), background-color var(--dur-short) var(--ease-out);
+  }
+  [role='tab']:hover { color: var(--color-ink); background: var(--color-rule); }
+  [role='tab']:active { background: var(--color-paper-3); }
+  [role='tab'][aria-selected='true'] { color: var(--color-ink); background: var(--color-cool-soft); border-color: var(--color-rule-2); }
+  [role='tab']:disabled { opacity: 0.55; cursor: not-allowed; }
+
+  .src :global(pre) {
+    margin: 0; padding: var(--space-md) 0; overflow-x: auto; counter-reset: ln;
+    font-size: var(--text-sm); line-height: 1.75; background: var(--color-paper-3) !important;
+  }
+  .src :global(.line) { display: inline-block; min-width: 100%; padding-right: var(--space-lg); counter-increment: ln; }
+  .src :global(.line)::before {
+    content: counter(ln); display: inline-block; width: 3.5ch; margin-right: var(--space-md);
+    text-align: right; color: var(--color-rule-2);
+  }
+  .src :global(.line.bad) { background: var(--color-bad-soft); box-shadow: inset 3px 0 0 var(--color-bad); }
+  .src :global(.line.bad)::before { color: var(--color-bad); }
+  .src :global(.line.plus) { background: var(--color-ok-soft); box-shadow: inset 3px 0 0 var(--color-ok); }
+  .src :global(.line.plus)::before { color: var(--color-ok); }
+
+  .out {
+    margin: 0; padding: var(--space-md) var(--space-lg); overflow-x: auto; min-height: 7.5rem;
+    border-top: var(--rule-hair) solid var(--color-rule); background: var(--color-paper-2);
+    font-size: var(--text-sm); line-height: 1.7;
+  }
+  .out.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .prompt { color: var(--color-accent); user-select: none; }
+  .cmd { color: var(--color-ink); }
+  .result { color: var(--color-cool); }
+</style>

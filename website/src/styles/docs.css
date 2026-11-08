@@ -1,29 +1,31 @@
-/* Starlight theme, matched to the marketing pages. */
+/* Hallmark · checked: Starlight docs dressed in the site's Console tokens · theme: Console · redesign: full · v2.0.0 */
+/* Starlight reads its own variables, so the Console palette is restated here as hex. */
 :root {
-  --sl-font: 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif;
-  --sl-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sl-font: 'Host Grotesk Variable', 'Host Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --sl-font-mono: 'Atkinson Hyperlegible Mono', ui-monospace, monospace;
 }
 :root[data-theme='dark'] {
-  --sl-color-accent-low: #0b2a34;
-  --sl-color-accent: #3aa9cc;
-  --sl-color-accent-high: #a8e6f7;
-  --sl-color-white: #f2f5f8;
-  --sl-color-gray-1: #e2e6eb;
-  --sl-color-gray-2: #bcc3cc;
-  --sl-color-gray-3: #8e97a2;
-  --sl-color-gray-4: #5d6570;
-  --sl-color-gray-5: #2c333d;
-  --sl-color-gray-6: #14181e;
-  --sl-color-black: #07080a;
-  --sl-color-bg-nav: #07080a;
-  --sl-color-bg-sidebar: #07080a;
-  --sl-color-hairline-light: #1b2028;
-  --sl-color-hairline: #1b2028;
+  --sl-color-accent-low: #38280a;
+  --sl-color-accent: #f7b83d;
+  --sl-color-accent-high: #f9daa1;
+  --sl-color-white: #eceff2;
+  --sl-color-gray-1: #d4d8dc;
+  --sl-color-gray-2: #b3b8bd;
+  --sl-color-gray-3: #8e9398;
+  --sl-color-gray-4: #5e646a;
+  --sl-color-gray-5: #2d3135;
+  --sl-color-gray-6: #15191c;
+  --sl-color-black: #0d1013;
+  --sl-color-bg-nav: #0d1013;
+  --sl-color-bg-sidebar: #0d1013;
+  --sl-color-hairline-light: #2d3135;
+  --sl-color-hairline: #2d3135;
 }
 :root[data-theme='light'] {
-  --sl-color-accent-low: #d6f1f9;
-  --sl-color-accent: #0a6f8c;
-  --sl-color-accent-high: #063f50;
+  --sl-color-accent-low: #f6e6cb;
+  --sl-color-accent: #a15c00;
+  --sl-color-accent-high: #653400;
 }
-.site-title { font-family: var(--sl-font-mono); font-weight: 500; letter-spacing: -0.01em; }
+.site-title { font-family: var(--sl-font); font-weight: 600; letter-spacing: -0.03em; text-transform: lowercase; }
 .site-title img { height: 1.6rem; width: 1.6rem; }
+.sl-markdown-content h1, .sl-markdown-content h2, .sl-markdown-content h3, h1#_top { font-weight: 500; letter-spacing: -0.02em; text-wrap: balance; }

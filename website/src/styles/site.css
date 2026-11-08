@@ -1,110 +1,96 @@
+/* Hallmark · shape: Workbench (/), Feature Stack (/features), Audit Trail (/roadmap), Index (/learn), Ledger (/downloads) · genre: modern-minimal · theme: Console (by request: the brief asks dark-first; dealt Wayfind, Cobalt, Vantage were light or point-cloud) · deal: manual · redesign: full
+ * hero: Stage (/), Banner (other routes) · nav: edge-aligned bar, release status in place of a button · footer: index columns, a real sitemap · imagery: the product (real compiler output) · signature: one real lucid check diagnostic, shown as text, as JSON for an agent, and fixed · console: graphite
+ * axes: dark/grotesk-sans/chromatic-amber · posture: restrained · contrast: pass · fold: pass · job: learn the language (no release to download) · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E4 S5 R4 V4 · weakest: P, a language page argues little by itself; the hero argues that errors are an interface, with the compiler's real output as proof */
+/* Hallmark · waive 49b · real phrases, two lines at most at 320px · shortening would rename Lucid's feature titles and the agents docs page */
+/* Hallmark · waive 44c · Banner posture on /features, /roadmap, /downloads, /learn · each inner page head is short so its Lucid content starts above the fold */
+/* Hallmark · waive 79 · Banner posture on the inner routes, the first section in view · the Lucid table, trail, path or feature fills the screen below the page head */
+/* Hallmark · dismissed 77 · inner routes hold their content in lists and a page head, not section elements; each holds 4 to 10 full-width rows */
+/* Hallmark · amber marks what a person does (the primary action, the current milestone); cool marks what the compiler wrote */
+@import url("./tokens.css");
+@import url("./base.css");
+
 :root {
-  color-scheme: dark;
-  --bg: #07080a;
-  --bg-raised: #0c0e12;
-  --bg-hover: #12161b;
-  --line: #1b2028;
-  --line-strong: #2c333d;
-  --text: #e8ecf0;
-  --text-muted: #a1aab5;
-  --text-faint: #7f8995;
-  --accent: #7fd4ef;
-  --accent-strong: #a8e6f7;
-  --accent-ink: #03141a;
-  --ok: #8fd9a8;
-  --warn: #e8c27a;
-  --sans: 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif;
-  --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  --wrap: 72rem;
-  --pad: clamp(1.25rem, 4vw, 2.5rem);
-  --radius: 6px;
+  --nav-h: 64px;
 }
 
-*, *::before, *::after { box-sizing: border-box; }
+html { scroll-padding-top: calc(var(--nav-h) + var(--space-lg)); }
 
-html { -webkit-text-size-adjust: 100%; scroll-padding-top: 5rem; }
+code, kbd, pre, .measured { font-family: var(--font-outlier); }
+.measured { font-size: var(--text-sm); font-variant-numeric: tabular-nums slashed-zero; color: var(--color-cool); }
 
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 400 1rem/1.6 var(--sans);
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
-
-h1, h2, h3 { line-height: 1.15; letter-spacing: -0.02em; font-weight: 600; margin: 0; text-wrap: balance; }
-p { margin: 0; text-wrap: pretty; }
-a { color: inherit; }
-code, kbd, pre { font-family: var(--mono); }
 :not(pre) > code {
   font-size: 0.875em;
-  padding: 0.1em 0.35em;
-  border: 1px solid var(--line);
+  padding: var(--space-3xs) var(--space-2xs);
+  border: var(--rule-hair) solid var(--color-rule);
   border-radius: 4px;
-  background: var(--bg-raised);
-  white-space: nowrap;
+  background: var(--color-paper-3);
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
 }
 
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+/* Section rhythm: three steps, mixed by each page. */
+.section { padding-block: var(--section-gap-s); }
+.section--wide { padding-block: var(--section-gap); }
+.band { background: var(--color-paper-3); color: var(--color-ink); border-block: var(--rule-hair) solid var(--color-rule); }
 
-.wrap { width: 100%; max-width: var(--wrap); margin-inline: auto; padding-inline: var(--pad); }
+.head { display: grid; gap: var(--space-md); margin-bottom: var(--space-2xl); }
+.head--split { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: var(--gap-columns); align-items: end; }
+.head p { color: var(--color-muted); font-size: var(--text-lead); line-height: 1.45; max-width: 46ch; }
 
-.eyebrow {
-  font: 500 0.75rem/1 var(--mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
+/* Page heads for the inner routes: a Banner, the first section in view. */
+.page-head { display: grid; gap: var(--space-lg); padding-block: var(--space-3xl) var(--space-2xl); border-bottom: var(--rule-hair) solid var(--color-rule); }
+.page-head > * { min-width: 0; }
+.page-head h1 { font-size: var(--text-display-s); max-width: 22ch; }
+.page-head p { color: var(--color-ink-2); font-size: var(--text-lead); line-height: 1.45; max-width: 52ch; }
 
-.section { padding-block: clamp(4rem, 9vw, 7rem); border-top: 1px solid var(--line); }
-.section-head { display: grid; gap: 0.9rem; max-width: 42rem; margin-bottom: 2.75rem; }
-.section-head h2 { font-size: clamp(1.75rem, 3.5vw, 2.5rem); }
-.section-head p:not(.eyebrow) { color: var(--text-muted); font-size: 1.0625rem; }
-
-.page-head { padding-block: clamp(3.5rem, 8vw, 6rem) 2.5rem; display: grid; gap: 1rem; max-width: 46rem; }
-.page-head h1 { font-size: clamp(2.25rem, 5vw, 3.5rem); }
-.page-head p:not(.eyebrow) { color: var(--text-muted); font-size: 1.125rem; }
-
+/* Controls: an amber key for the one primary, an outline for the rest. */
 .btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-height: 2.75rem;
-  padding: 0 1.1rem;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
-  font: 500 0.9375rem/1 var(--sans);
-  text-decoration: none;
-  color: var(--text);
-  background: transparent;
-  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-xs);
+  min-height: 48px; padding-inline: var(--space-lg);
+  border: var(--rule-hair) solid var(--color-rule-2); border-radius: var(--radius-pill);
+  background: var(--color-paper-2); color: var(--color-ink);
+  font: 500 var(--text-md)/1 var(--font-body); text-decoration: none; white-space: nowrap; cursor: pointer;
+  transition: background-color var(--dur-short) var(--ease-out), border-color var(--dur-short) var(--ease-out);
 }
-.btn:hover { background: var(--bg-hover); border-color: #3a424d; }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-.btn-primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+.btn:hover { background: var(--color-rule); border-color: var(--color-muted); }
+.btn:active { background: var(--color-paper-3); }
+.btn--primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-accent-ink); }
+.btn--primary:hover { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-paper); }
+.btn--primary:active { background: var(--color-ink-2); }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
-.prose { display: grid; gap: 1rem; color: var(--text-muted); max-width: 44rem; }
-.prose strong { color: var(--text); font-weight: 600; }
-.prose a, .link { color: var(--accent); text-underline-offset: 0.2em; }
-.prose a:hover, .link:hover { color: var(--accent-strong); }
+.link { color: var(--color-ink); text-decoration-line: underline; text-decoration-color: var(--color-rule-2); text-underline-offset: 0.2em; transition: color var(--dur-short) var(--ease-out), text-decoration-color var(--dur-short) var(--ease-out); }
+.link:hover { color: var(--color-accent); text-decoration-color: var(--color-accent); }
+.link:active { color: var(--color-ink-2); }
 
-.sr-only {
-  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
-}
+.prose { display: grid; gap: var(--space-md); color: var(--color-muted); }
+.prose p, .prose li { max-width: 65ch; }
+.prose strong { color: var(--color-ink); font-weight: 500; }
+.prose a { color: var(--color-ink); text-decoration-color: var(--color-rule-2); text-underline-offset: 0.2em; }
+.prose a:hover { color: var(--color-accent); text-decoration-color: var(--color-accent); }
 
-.tag {
-  display: inline-flex; align-items: center; gap: 0.4rem;
-  font: 500 0.6875rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase;
-  padding: 0.35rem 0.5rem; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--text-muted);
-  white-space: nowrap;
-}
-.tag::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.tag-done { color: var(--ok); border-color: #24402f; }
-.tag-active { color: var(--warn); border-color: #4a3c1f; }
-.tag-planned { color: var(--text-faint); }
+/* Panels: one surface, divided by 1px seams. */
+.panel { color: var(--color-ink); border: var(--rule-hair) solid var(--color-rule); border-radius: var(--radius-card); background: var(--color-paper-2); overflow: hidden; min-width: 0; }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+/* Ruled tables: horizontal rules only, full width. */
+.table-wrap { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; }
+.table th, .table td { text-align: left; vertical-align: top; padding: var(--space-md) var(--space-lg) var(--space-md) 0; border-bottom: var(--rule-hair) solid var(--color-rule); }
+.table th:last-child, .table td:last-child { padding-right: 0; }
+.table thead th { font-size: var(--text-sm); font-weight: 500; color: var(--color-muted); white-space: nowrap; border-bottom-color: var(--color-rule-2); }
+.table tbody th { font-weight: 500; color: var(--color-ink); }
+.table td { color: var(--color-muted); }
+
+/* State, as text: the label face, tinted by meaning. */
+.state { font-size: var(--text-sm); font-weight: 500; white-space: nowrap; }
+.state--done { color: var(--color-ok); }
+.state--active { color: var(--color-accent); }
+.state--planned { color: var(--color-muted); }
+
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+@media (max-width: 60rem) {
+  .head--split { grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .page-head { padding-block: var(--space-2xl) var(--space-xl); }
 }

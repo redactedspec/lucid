@@ -30,7 +30,7 @@ export default defineConfig({
       expressiveCode: {
         themes: [/** @type {any} */ (lucidDark), 'github-light'],
         shiki: { langs: [lucidLang] },
-        styleOverrides: { borderRadius: '6px', codeFontFamily: "'IBM Plex Mono', ui-monospace, monospace" },
+        styleOverrides: { borderRadius: '6px', codeFontFamily: "'Atkinson Hyperlegible Mono', ui-monospace, monospace" },
       },
       sidebar: [
         { label: 'Start', items: ['docs', 'docs/installation', 'docs/cli'] },
