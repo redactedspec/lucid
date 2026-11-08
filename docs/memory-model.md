@@ -73,7 +73,9 @@ The checks are stricter than the law, for two reasons. A counted value that a st
 
 ## Shared references
 
-`shared T` is a reference-counted heap cell. Copying it copies the reference, so writes are visible through all copies.
+Planned, not built: `shared` and `weak` report E0901, and stay outside the version 1.0 promise.
+
+`shared T` will be a reference-counted heap cell. Copying it copies the reference, so writes are visible through all copies.
 
 - **Creation:** `shared value` allocates a cell. `weak cell` makes a weak reference to it.
 - **Mutation:** each write takes a short dynamic borrow. Conflicting access traps, like `RefCell` in Rust.

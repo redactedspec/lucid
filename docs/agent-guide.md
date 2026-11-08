@@ -6,7 +6,7 @@ Every `lucid` block below runs. Run a file with `lucid run file.lcd`, or a packa
 
 ## Layout
 
-- A block is an indent of exactly 4 spaces. Tabs are an error.
+- A block is an indent of exactly 4 spaces. A tab in indentation is an error.
 - A statement ends at the end of its line. To continue a line, wrap it in `()`, `[]`, or `{}`. A trailing comma is allowed.
 - `#` starts a comment.
 - Keywords cannot be names: `and`, `any`, `as`, `break`, `change`, `choice`, `continue`, `else`, `empty`, `expect`, `extern`, `false`, `for`, `if`, `in`, `is`, `let`, `match`, `none`, `not`, `or`, `print`, `public`, `return`, `self`, `shared`, `spawn`, `take`, `task`, `test`, `then`, `trait`, `true`, `try`, `type`, `unsafe`, `use`, `var`, `weak`, `while`.

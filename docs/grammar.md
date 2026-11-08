@@ -11,7 +11,7 @@ The lexer produces `NEWLINE`, `INDENT`, and `DEDENT` tokens.
 1. Blank lines and comment-only lines produce nothing.
 2. Inside `()`, `[]`, or `{}`, newlines and indentation produce nothing.
 3. Each other line ends with `NEWLINE`. At the start of the next line, compare indentation with the top of the indent stack. One level deeper is 4 more spaces and gives `INDENT`. Each level shallower gives `DEDENT`. Any other width is an error.
-4. A tab character in leading whitespace is an error.
+4. A tab in the indentation of a line that rule 3 compares is an error. Anywhere else outside text, a tab is whitespace, as a space is, since no depth depends on it.
 5. At end of file, the lexer emits `NEWLINE` if needed, then closes all open levels.
 
 ## Tokens
@@ -26,7 +26,7 @@ TEXT     = '"' { char | escape | "{" expression "}" | "{{" | "}}" } '"'
 escape   = "\n" | "\t" | "\r" | "\\" | '\"' ;
 ```
 
-`letter` is an ASCII letter and `digit` is an ASCII digit. Names are ASCII only. Comments may hold any UTF-8. Text may too, except a NUL character, which the compiler uses internally. Outside text, any other character is an error.
+`letter` is an ASCII letter and `digit` is an ASCII digit. Names are ASCII only. Comments may hold any UTF-8. Text may too, except a NUL character, which the compiler uses internally. Outside text and comments, a character that starts no token, and is not a space, tab, or line break, is an error.
 
 A `FLOAT` needs digits on both sides of the point, so `0..10` lexes as a range. A number directly followed by a letter is an error, and so is a number that ends in `_`, so `1e5` and `1_` are rejected. Write `1.0e5`.
 
@@ -139,8 +139,9 @@ Precedence, lowest first:
 | 11 | `<<` `>>` | left |
 | 12 | `+` `-` | left |
 | 13 | `*` `/` `//` `%` | left |
-| 14 | `-` `~` `try` `spawn` `shared` `weak` | prefix |
-| 15 | call, index, field | left |
+| 14 | `?`, in a type form such as `f[int?](x)` | postfix, at most one |
+| 15 | `-` `~` `try` `spawn` `shared` `weak` | prefix |
+| 16 | call, index, field | left |
 
 ```ebnf
 expression  = lambda | if_expr | fallback ;
@@ -178,7 +179,7 @@ entry       = expression ":" expression ;
 - **Leading `if`:** a statement that starts with `if` is always an `if_stmt`, so `if a then b else c` alone on a line is an error. One form does this job, and `if_expr` is for values.
 - **`then` branch:** it uses `logic_or`, not `expression`, so the `else` in `if a then b else c` is never read as a fallback.
 - **`is` target:** it is a single `type_term`, so `or` after it stays boolean: `x is text or y > 3`. `none` and `empty` are taken first, so `x is none?` is an error.
-- **`_` in patterns:** `_` alone is the wildcard, and it skips a field in a variant pattern. It is not a name in `NAME ":" type`, so `_: int` is an error.
+- **`_` in patterns:** `_` is always the wildcard, and it skips a field in a variant pattern. It is not a name in `NAME ":" type` or `NAME "(" ...`, so `_: int` and `_(a)` are errors.
 - **`try` scope:** `try` covers the whole postfix chain. `try read(p).trim()` calls `.trim()` first, on the union, and fails type checking. Write `(try read(p)).trim()`.
 - **Negative numbers:** in `unary`, a `-` before a number with no postfix after it joins the literal, which does not change the value. It lets `-9223372036854775808` fit. Parentheses keep them apart, so `-(1)` negates a literal.
 - **`any`:** the grammar takes any type after `any`. The checker needs one trait name there.

@@ -128,7 +128,7 @@ Designed by decisions 188 to 205, see "Ecosystem" in `compiler.md`. Build in thi
 - [x] Orphan rule, by decisions 196 and 210
 - [x] Registry, `lucid package`, version selection, `lucid.lock`, and the fetch client in Lucid, by decisions 197 to 201 and 211. Tests use a local directory registry
 - [x] `lucid lsp`, by decisions 202 and 212
-- [ ] Spec review, then the version 1.0 promise, by decisions 203 and 204
+- [ ] Spec review, then the version 1.0 promise, by decisions 203 and 204. The `spec-reviewer` pass is done, by decision 213. The `/code-review ultra` pass is next, and is the owner's to run
 
 **Exit:** a package that uses a registry package with `std.sql` and `std.crypto` builds and passes `lucid test` on Windows and Linux, and an editor shows its diagnostics through `lucid lsp`.
 
@@ -146,4 +146,4 @@ Start only after the version 1.0 stability promise. Port one stage at a time. Th
 
 ## Later, not planned
 
-macOS, by decision 205. Native backend in Lucid, LLVM release backend, plain types stored inline, literal types, compile-time evaluation.
+macOS, by decision 205. `shared` and `weak`, by decision 213. Native backend in Lucid, LLVM release backend, plain types stored inline, literal types, compile-time evaluation.

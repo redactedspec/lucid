@@ -14,7 +14,7 @@ print "Hello, world!"
 
 ## Layout
 
-- Blocks are defined by indentation of exactly 4 spaces. A tab in indentation is an error.
+- Blocks are defined by indentation of exactly 4 spaces. A tab in the indentation of a line of code is an error.
 - A statement ends at the end of its line.
 - To continue over several lines, wrap the expression in `()`, `[]`, or `{}`. Newlines inside brackets are ignored. There is no other continuation rule.
 - Comments start with `#`. Doc comments start with `##`.
@@ -607,7 +607,7 @@ task hash(self: Money) -> int                       # any result with `Hash`
     return self.cents
 ```
 
-These names replace derived tasks or give an operator, so each must have this form, on a `type`, `choice`, or collection. Any other form is error E0323.
+These names replace derived tasks or give an operator, so each must have this form, on a `type`, `choice`, collection, or union such as `text?`. Any other form is error E0323.
 
 `hash` gives what stands for the value in a key. It may be any type with `Hash`, and it often names the fields that `equal` reads. Equal values must give equal results, or a key may not be found again. A breach is a bug in the program, and it stays memory safe. The result cannot lead back to the same type, even through a list or a field, since hashing it would never end, and such a type has no `Hash`. A type with a hand-written `equal` has no `Hash` unless it also has a hand-written `hash`, since a derived hash would not match it.
 
@@ -625,9 +625,9 @@ use ./models.load as read_models
 
 `use ./a.b` is relative to the file that holds it, and reads `a/b.lcd`. If that file does not exist, it takes the name `b` from `a.lcd`. A `./` path cannot go up a directory. A file that cannot be found is error E0334, and the spelling must match the file's name exactly, on every system.
 
-`use std.a` is a module of the standard library, and `use std.a.b` takes the name `b` from it. `std` has no `./`, and needs no dependency entry. In a package, `std.fs`, `std.env`, `std.net`, `std.http`, and `std.process` need a permission in `lucid.toml`, or else error E0340, see [security.md](security.md). A module not built yet reports E0901. The modules are in [stdlib-and-web.md](stdlib-and-web.md).
+`use std.a` is a module of the standard library, and `use std.a.b` takes the name `b` from it. `std` has no `./`, and needs no dependency entry. In a package, `std.fs`, `std.sql`, `std.env`, `std.net`, `std.http`, and `std.process` need a permission in `lucid.toml`, or else error E0340, see [security.md](security.md). A module not built yet reports E0901. The modules are in [stdlib-and-web.md](stdlib-and-web.md).
 
-A whole module goes by its last name, or by the name after `as`, and its names need that prefix: `models.load()`, `x: models.User`. A taken name has no prefix. The name a `use` takes must be new in the file, and not a built-in type or trait, or else error E0304. A local in a block may hide it, as with any top-level name. A `use` works in its own file only, and a module passes nothing on from its imports.
+A whole module goes by its last name, or by the name after `as`, and its names need that prefix: `models.load()`, `x: models.User`. A taken name has no prefix. The name a `use` takes must be new in the file, or else error E0304. A taken name also must not be a built-in type or trait. A whole module may share a name with one, as `use std.sql` does with the type `sql`, since a module name is always followed by a dot. A local in a block may hide it, as with any top-level name. A `use` works in its own file only, and a module passes nothing on from its imports.
 
 Names are private to their module unless marked `public`, on a task, `type`, `choice`, or `trait`. Using a private name from another module is error E0333. A public `type` shows all its fields, and a public `choice` shows all its variants. A variant is a name of its module, so build one with `models.Red`. A pattern needs no prefix or import, since the type of the subject finds the variant: `Red -> ...`. So no binding in a pattern can reuse the name of a type or variant of any module, or else error E0318.
 
@@ -708,7 +708,9 @@ There is no `async` or `await`. Tasks do not have colors: any task can block and
 
 ## Shared references
 
-Values are independent by default. For graphs, caches, and other shared structures, use `shared`. See [memory-model.md](memory-model.md).
+Planned, not built: `shared` and `weak` parse, and report E0901. They are not part of the version 1.0 promise, and adding them later breaks no program, since both are keywords now. Until then, a graph uses indexes into a list.
+
+Values are independent by default. For graphs, caches, and other shared structures, `shared` will give a counted cell. See [memory-model.md](memory-model.md).
 
 ```lucid
 type TreeNode
@@ -754,7 +756,7 @@ Only an `unsafe` block can call an `extern` task or `.pointer()`, or else error 
 
 Under `lucid build --target web`, a user `extern` task or `.pointer()` is error E0905, since a page reaches no C library.
 
-`unsafe` blocks and `extern` declarations in any module will need the `unsafe` package permission, once permission checks exist. See [security.md](security.md).
+In a package, an `unsafe` block or an `extern` declaration in any module needs the `unsafe` permission, or else error E0340. See [security.md](security.md).
 
 ## Keywords
 
