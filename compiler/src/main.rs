@@ -207,7 +207,9 @@ fn link(object: &[u8], exe: &str) -> ExitCode {
                 command.arg(format!("/STACK:{}", lucid_rt::EXE_STACK_BYTES));
                 command.arg(format!("/OUT:{exe}"));
             } else {
-                command.arg("-o").arg(exe);
+                // Drops the sections that the program never reaches, such as
+                // SQLite in a program that never opens a database.
+                command.arg("-Wl,--gc-sections").arg("-o").arg(exe);
             }
             command.arg(&object_file).arg(&runtime_file);
             command.args(env!("LUCID_RT_LIBS").split_whitespace()).output()

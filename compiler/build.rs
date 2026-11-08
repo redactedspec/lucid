@@ -39,6 +39,9 @@ fn build(out: &Path, cargo_args: &[&str], rustc_args: &[&str]) -> String {
         .args(cargo_args)
         .arg("--target-dir")
         .arg(out.join("runtime"))
+        // Data in its own sections, so the linker drops SQLite's tables, and
+        // with them its code, from a program that never opens a database.
+        .env("CFLAGS_x86_64_pc_windows_msvc", "/Gw")
         .arg("--")
         .args(rustc_args)
         .output()
