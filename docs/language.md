@@ -379,7 +379,7 @@ if ada.is_adult()
 
 `x.f(a)` runs the task `f` whose `self` type is the type of `x`. A `self` type can be an `any`, except for a task of its own trait. So one name can have one task per type, and such a name stays out of the shared namespace of "Choices". `f(x, a)` is an error, since one job has one form. `self` needs a type, which cannot be a bare type parameter, and `self: list[T]` covers every list. Two tasks of one name whose receivers can overlap are an error, counting each type parameter as free, and so is a built-in name on a built-in type, such as `len` on `text`. A dot call does not widen its receiver: an `int` does not reach `self: int?`. `x is empty` calls `x.is_empty()`.
 
-Planned for M8, by decision 196: in a package, a task with `self` needs its receiver's type, or a trait that names the task, declared in that package. A built-in type belongs to `std`. A file with no `lucid.toml` is exempt.
+In a package, a task with `self` needs its receiver's type, or a trait that names the task, declared in that package, or else it is error E0342. This is the orphan rule, by decisions 196 and 210. A built-in type belongs to `std`, and so do `list`, `map`, `set`, unions, and task types, whatever they hold, so `self: list[User]` is outside every package. An `any` belongs where its trait is declared. A file with no `lucid.toml` is exempt.
 
 The receiver must be a `var`, or a path into one, when `self` is `change`, and it follows the rules for a `change` argument. The `change` keyword is not repeated on a dot call, but it is required on any other argument. `x is empty` cannot call an `is_empty` that changes `self`.
 

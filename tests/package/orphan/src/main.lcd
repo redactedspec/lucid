@@ -1,0 +1,36 @@
+use greet
+
+type Box
+    size: int
+
+trait Pretty
+    task pretty(self) -> text
+
+task grow(change self: Box)
+    self.size += 1
+
+task pretty(self: text) -> text
+    return "<{self}>"
+
+task pretty(self: Box) -> text
+    return "box"
+
+task shout(self: text) -> text
+    return self.upper()
+
+task first(self: list[Box]) -> Box
+    return self[0]
+
+task maybe(self: Box?) -> int
+    return 0
+
+task loud(self: greet.Name) -> text
+    return self.text.upper()
+
+task describe(self: any Pretty) -> text
+    return self.pretty()
+
+var b = Box(size: 1)
+b.grow()
+print b.size
+print "hi".pretty()

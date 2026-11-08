@@ -603,6 +603,14 @@ let job = spawn 1 + 2
 
 Fix: spawn a call of a task, as `spawn add(1, 2)`. For a `change` argument, pass the value, and return the new one, which `.wait()` gives.
 
+## E0342: A task with `self` in a package is on a type from outside it
+
+By the orphan rule, decision 196, a task with `self` in a package needs its receiver's type declared in that package, or else a trait of that package that names the task. Built-in types, including `list`, `map`, `set`, unions such as `User?`, and task types, belong to `std`, whatever they hold. So do the types of `std` modules. A file with no `lucid.toml` is exempt.
+
+For example, `task shout(self: text) -> text` in a package. The test is `tests/package/orphan`, since it needs a manifest.
+
+Fix: take the value as a plain argument, as `shout(t: text)`, or declare a `type` of the package that holds it. To call one task on many types, declare a trait in the package that names it.
+
 ## E0901: Parses, but cannot run at this milestone
 
 The feature is in the language, but not built yet, or not built yet for `lucid build --target web`. `lucid check` does not report this code.

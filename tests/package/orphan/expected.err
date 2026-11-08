@@ -1,0 +1,8 @@
+orphan/src/main.lcd:18:6: error E0342: `shout` adds a task to `text`, a type from outside this package
+  note: take the value as a plain argument, or hold it in a type of this package
+orphan/src/main.lcd:21:6: error E0342: `first` adds a task to `list[main.Box]`, a type from outside this package
+  note: take the value as a plain argument, or hold it in a type of this package
+orphan/src/main.lcd:24:6: error E0342: `maybe` adds a task to `main.Box?`, a type from outside this package
+  note: take the value as a plain argument, or hold it in a type of this package
+orphan/src/main.lcd:27:6: error E0342: `loud` adds a task to `greet.Name`, a type from outside this package
+  note: take the value as a plain argument, or hold it in a type of this package

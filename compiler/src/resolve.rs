@@ -474,10 +474,12 @@ impl Loader {
             return Some(id);
         }
         let (base, text) = self.read(path, used_at)?;
-        if let Some(holder) = self.holder(path, used_at)
-            && !self.packages[holder].grant("unsafe").held()
-        {
-            self.source.no_unsafe.push((base, format!("{}lucid.toml", self.packages[holder].dir)));
+        if let Some(holder) = self.holder(path, used_at) {
+            self.source.packages.push((base, holder));
+            if !self.packages[holder].grant("unsafe").held() {
+                let manifest = format!("{}lucid.toml", self.packages[holder].dir);
+                self.source.no_unsafe.push((base, manifest));
+            }
         }
         let (mut tokens, diags) = lexer::lex(&text);
         shift(&mut tokens, base);

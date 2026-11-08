@@ -56,6 +56,8 @@ print ada.is_adult()     # true
 
 `x.f()` and `f(x)` are not interchangeable: a task with `self` is called only with a dot.
 
+In a package, `self` must be a `type` or `choice` of that package, or the task must be named by a trait of that package. This is the orphan rule, error E0342. It stops two packages from each adding a task of one name to `text`. A single file with no `lucid.toml` is exempt.
+
 ## Parameter modes
 
 Parameters are read-only views by default, and passing a value never copies it. Two keywords change that:

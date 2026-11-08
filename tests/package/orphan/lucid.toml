@@ -1,0 +1,7 @@
+# A task with `self` on a type from outside the package, by decision 196.
+[package]
+name = "orphan"
+version = "0.1.0"
+
+[dependencies]
+greet = { path = "../greet" }

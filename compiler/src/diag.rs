@@ -77,6 +77,9 @@ pub struct Source {
     /// The start of each file whose package lacks the `unsafe` permission,
     /// with the path of the package's `lucid.toml`.
     pub no_unsafe: Vec<(usize, String)>,
+    /// The start of each file that a package holds, with the package's index.
+    /// Files of `std`, and of a program with no `lucid.toml`, have none.
+    pub packages: Vec<(usize, usize)>,
     /// The permissions of the root package, one for each of
     /// `manifest::PERMISSIONS`. `None` for a program with no `lucid.toml`.
     pub grants: Option<Vec<crate::manifest::Grant>>,

@@ -297,6 +297,8 @@ print [1, 2].twice()
 
 `self` always has a type. Several tasks can share a name if their `self` types differ. A built-in name on a built-in type, such as `len` on `text`, cannot be defined again.
 
+In a package, one with a `lucid.toml`, `self` must be a `type` or `choice` of that package, or the task must be named by a trait of that package, or else E0342. So `twice(self: list[int])` above works only in a file with no `lucid.toml`. In a package, write `twice(items: list[int])` and call it as `twice(xs)`.
+
 ## Choices and match
 
 ```lucid

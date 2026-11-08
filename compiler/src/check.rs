@@ -64,6 +64,7 @@ pub fn check(file: &ast::File, source: &Source, keep_tests: bool) -> (Program, V
         src: &source.text,
         files: &source.files,
         no_unsafe: &source.no_unsafe,
+        packages: &source.packages,
         ..Checker::default()
     };
     checker.declare_types(file);
@@ -291,6 +292,8 @@ struct Checker<'a> {
     files: &'a [SourceFile],
     /// See `Source::no_unsafe`.
     no_unsafe: &'a [(usize, String)],
+    /// See `Source::packages`.
+    packages: &'a [(usize, usize)],
     diags: Vec<Diagnostic>,
     /// The ids of `extern` tasks.
     foreign: HashSet<usize>,
@@ -305,6 +308,8 @@ struct Checker<'a> {
     methods: HashMap<&'a str, Vec<usize>>,
     /// The tasks that each trait requires, as indexes into `signatures`.
     traits: HashMap<&'a str, Vec<usize>>,
+    /// Where each trait is declared.
+    trait_spans: HashMap<&'a str, Span>,
     /// True once every task is declared, so that bounds can be checked.
     ready: bool,
     /// Bounds on type arguments written in a declaration: the type, the trait,
@@ -1599,6 +1604,7 @@ impl<'a> Checker<'a> {
         }
         if self.define_data(&def.name) {
             self.traits.insert(&def.name.text, Vec::new());
+            self.trait_spans.insert(&def.name.text, def.name.span);
         }
     }
 
@@ -1628,8 +1634,40 @@ impl<'a> Checker<'a> {
                 || self.trait_task(receiver, name).is_some()
             {
                 self.fail("E0304", format!("`{name}` is already defined"), span);
+            } else {
+                self.check_orphan(id);
             }
             self.check_written_shape(id);
+        }
+    }
+
+    /// The package that holds the file of a span, if any.
+    fn package_of(&self, span: Span) -> Option<usize> {
+        let file = self.files[file_index(self.files, span.start)].start;
+        self.packages.iter().find(|(start, _)| *start == file).map(|&(_, package)| package)
+    }
+
+    /// The orphan rule of decision 196: in a package, a task with `self` needs
+    /// its receiver's type, or a trait that names the task, from that package.
+    fn check_orphan(&mut self, id: usize) {
+        let signature = &self.signatures[id];
+        let (name, span, receiver) =
+            (signature.name.text.as_str(), signature.name.span, signature.params[0].ty);
+        let Some(package) = self.package_of(span) else { return };
+        let owner = match receiver {
+            Ty::Data(_, data, _) => self.package_of(self.datas[data].name.span),
+            Ty::Any(held) => self.trait_spans.get(held).and_then(|&at| self.package_of(at)),
+            _ => None,
+        };
+        let named = self.traits.values().flatten().any(|&task| {
+            let task = &self.signatures[task].name;
+            task.text == name && self.package_of(task.span) == Some(package)
+        });
+        if owner != Some(package) && !named {
+            let message =
+                format!("`{name}` adds a task to `{}`, a type from outside this package", receiver.name());
+            let note = "take the value as a plain argument, or hold it in a type of this package";
+            self.report(Diagnostic::new("E0342", message, span).note(note));
         }
     }
 
