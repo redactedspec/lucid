@@ -125,7 +125,9 @@ fn clif(ty: Ty) -> Type {
         | Ty::Spawned(_)
         | Ty::Channel(_)
         | Ty::Lock(_)
-        | Ty::Socket => types::I64,
+        | Ty::Socket
+        | Ty::Database
+        | Ty::Sql => types::I64,
         Ty::Float => types::F64,
         Ty::F32 => types::F32,
         Ty::Bool | Ty::None => types::I8,
@@ -295,8 +297,28 @@ fn jit(
     builder.symbol("lucid_crypto_same", lucid_rt::lucid_crypto_same as *const u8);
     builder.symbol("lucid_crypto_random", lucid_rt::lucid_crypto_random as *const u8);
     builder.symbol("lucid_crypto_hash_password", lucid_rt::lucid_crypto_hash_password as *const u8);
-    builder.symbol("lucid_crypto_check_password", lucid_rt::lucid_crypto_check_password as *const u8);
+    builder
+        .symbol("lucid_crypto_check_password", lucid_rt::lucid_crypto_check_password as *const u8);
     builder.symbol("lucid_crypto_hex", lucid_rt::lucid_crypto_hex as *const u8);
+    builder.symbol("lucid_sql_open", lucid_rt::lucid_sql_open as *const u8);
+    builder.symbol("lucid_sql_prepare", lucid_rt::lucid_sql_prepare as *const u8);
+    builder.symbol("lucid_sql_marks", lucid_rt::lucid_sql_marks as *const u8);
+    builder.symbol("lucid_sql_bind_null", lucid_rt::lucid_sql_bind_null as *const u8);
+    builder.symbol("lucid_sql_bind_int", lucid_rt::lucid_sql_bind_int as *const u8);
+    builder.symbol("lucid_sql_bind_float", lucid_rt::lucid_sql_bind_float as *const u8);
+    builder.symbol("lucid_sql_bind_text", lucid_rt::lucid_sql_bind_text as *const u8);
+    builder.symbol("lucid_sql_bind_bytes", lucid_rt::lucid_sql_bind_bytes as *const u8);
+    builder.symbol("lucid_sql_step", lucid_rt::lucid_sql_step as *const u8);
+    builder.symbol("lucid_sql_run", lucid_rt::lucid_sql_run as *const u8);
+    builder.symbol("lucid_sql_columns", lucid_rt::lucid_sql_columns as *const u8);
+    builder.symbol("lucid_sql_column_name", lucid_rt::lucid_sql_column_name as *const u8);
+    builder.symbol("lucid_sql_column_kind", lucid_rt::lucid_sql_column_kind as *const u8);
+    builder.symbol("lucid_sql_column_int", lucid_rt::lucid_sql_column_int as *const u8);
+    builder.symbol("lucid_sql_column_float", lucid_rt::lucid_sql_column_float as *const u8);
+    builder.symbol("lucid_sql_column_text", lucid_rt::lucid_sql_column_text as *const u8);
+    builder.symbol("lucid_sql_column_bytes", lucid_rt::lucid_sql_column_bytes as *const u8);
+    builder.symbol("lucid_sql_failure", lucid_rt::lucid_sql_failure as *const u8);
+    builder.symbol("lucid_sql_detail", lucid_rt::lucid_sql_detail as *const u8);
     builder.symbol("lucid_net_listen", lucid_rt::lucid_net_listen as *const u8);
     builder.symbol("lucid_net_port", lucid_rt::lucid_net_port as *const u8);
     builder.symbol("lucid_net_accept", lucid_rt::lucid_net_accept as *const u8);
@@ -1748,7 +1770,7 @@ impl Lower<'_, '_> {
             };
         }
         let b = self.expr(right);
-        if ty == Ty::Text {
+        if matches!(ty, Ty::Text | Ty::Sql) {
             let cc = int_cc(op).expect("the checker allows only comparisons on text");
             let order = self.call(self.runtime.text_compare, &[a, b]);
             return self.body.ins().icmp_imm_s(cc, order.expect("it returns an int"), 0);

@@ -1,0 +1,22 @@
+0
+1
+1
+Constraint(detail: "UNIQUE constraint failed: users.name")
+Constraint(detail: "NOT NULL constraint failed: users.name")
+id=Int(value: 1) name=Text(value: "ada") score=Float(value: 1.5) avatar=Bytes(value: [1, 2]) 
+id=Int(value: 2) name=Text(value: "bob'); DROP TABLE users; --") score=Null avatar=Null 
+
+name=Text(value: "ada") 
+
+1
+n=Int(value: 7) t=Text(value: "xy") z=Null 
+
+SELECT id, name, score, avatar FROM users
+true
+2
+Failed(detail: "no such column: nope")
+Failed(detail: "a query holds exactly one statement")
+Failed(detail: "a query holds exactly one statement")
+Failed(detail: "not authorized")
+Failed(detail: "authorization denied")
+0

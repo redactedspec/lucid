@@ -1,0 +1,6 @@
+# A query with a different number of `?` marks and values traps, by
+# decision 194, since SQLite would read a missing value as null.
+use std.sql
+
+let db = try sql.open(":memory:")
+print db.run("SELECT ?, ?", [sql.Int(value: 1)])

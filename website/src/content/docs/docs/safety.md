@@ -52,7 +52,8 @@ Inside `unsafe`, the guarantees above are the author's job. `lucid check --unsaf
 - The `std.http` client always verifies TLS certificates, with no option to turn the check off.
 - The `std.http` server rejects ambiguous requests that could be read as two, and limits header size, body size, idle time, and connections.
 - `net.listen` listens only on `127.0.0.1` unless told otherwise.
-- Planned for M8: `std.sql` takes values only through `?` marks, and `std.crypto` hashes passwords with Argon2id.
+- `std.sql` takes values only through `?` marks. A query has the type `sql`, which only text literals make, so text from a user cannot become part of a query.
+- `std.crypto` hashes passwords with Argon2id, and compares secrets in constant time.
 
 ## Package permissions
 

@@ -55,6 +55,12 @@ pub enum Ty {
     /// A socket of `std.net`, which only `std` can name, and which closes at
     /// its last count. See "Threads" in docs/compiler.md.
     Socket,
+    /// A connection or statement of `std.sql`, which only `std` can name. See
+    /// "Ecosystem" in docs/compiler.md.
+    Database,
+    /// A query of `std.sql`, which only text literals and `sql + sql` make, by
+    /// decision 195. The same value as `text` in every backend.
+    Sql,
     /// A type parameter, by its name and its position in the list of the task
     /// or type that declares it. `mono.rs` replaces every one.
     Param(&'static str, usize),
@@ -95,6 +101,8 @@ impl Ty {
             Ty::Channel(item) => format!("channel[{}]", item.name()),
             Ty::Lock(item) => format!("lock[{}]", item.name()),
             Ty::Socket => "socket".into(),
+            Ty::Database => "database".into(),
+            Ty::Sql => "sql".into(),
             Ty::Data(name, _, []) => name.into(),
             Ty::Data(name, _, args) => {
                 let args: Vec<String> = args.iter().map(|ty| ty.name()).collect();
@@ -134,7 +142,7 @@ impl Ty {
     /// A parameter may turn out to be counted, so the checker keeps a place
     /// for it. `mono.rs` drops what the real type does not need.
     pub fn is_counted(self) -> bool {
-        self == Ty::Text
+        matches!(self, Ty::Text | Ty::Sql)
             || self.is_compound()
             || matches!(self, Ty::Param(..) | Ty::Task(..))
             || self.is_handle()
@@ -143,7 +151,7 @@ impl Ty {
     /// A thread, a channel, a lock, or a socket: a counted handle that only
     /// the runtime reads, and that shows as its type.
     pub fn is_handle(self) -> bool {
-        matches!(self, Ty::Spawned(_) | Ty::Channel(_) | Ty::Lock(_) | Ty::Socket)
+        matches!(self, Ty::Spawned(_) | Ty::Channel(_) | Ty::Lock(_) | Ty::Socket | Ty::Database)
     }
 
     /// True if `part` appears anywhere in this type.

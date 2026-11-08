@@ -1,0 +1,5 @@
+# Only a text literal with no interpolation is a query, by decision 195.
+use std.sql
+
+task find(db: sql.Db, name: text) -> list[sql.Row] or sql.SqlError
+    return db.query("SELECT * FROM users WHERE name = '{name}'", [])

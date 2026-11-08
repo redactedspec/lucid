@@ -23,11 +23,15 @@ use std::time::Duration;
 mod crypto;
 #[cfg(feature = "exe")]
 mod exe;
+#[cfg(not(target_arch = "wasm32"))]
+mod sql;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use crypto::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use sql::*;
 #[cfg(not(target_arch = "wasm32"))]
 use std::process::exit;
 #[cfg(target_arch = "wasm32")]
@@ -77,15 +81,26 @@ pub struct Head {
 #[repr(u8)]
 #[derive(Clone, Copy)]
 enum Kind {
-    Text { ascii: Ascii },
-    List { counted: bool, small: bool },
-    Map { key_counted: bool, value_counted: bool },
+    Text {
+        ascii: Ascii,
+    },
+    List {
+        counted: bool,
+        small: bool,
+    },
+    Map {
+        key_counted: bool,
+        value_counted: bool,
+    },
     Record,
     Spawned,
     Scope,
     Channel,
     Lock,
     Socket,
+    /// A connection or statement of `std.sql`, in `sql.rs`.
+    #[cfg(not(target_arch = "wasm32"))]
+    Sql,
 }
 
 /// Whether a text holds only ASCII, which makes a character position a byte
@@ -792,6 +807,8 @@ pub unsafe extern "C" fn lucid_mark(value: *mut Head) {
                 Kind::Scope => unreachable!("a scope is a hidden local, which nothing holds"),
                 // What a channel or a lock holds is marked when it goes in.
                 Kind::Channel | Kind::Lock | Kind::Socket => {}
+                #[cfg(not(target_arch = "wasm32"))]
+                Kind::Sql => {}
             }
         }
     }
@@ -882,6 +899,11 @@ pub unsafe extern "C" fn lucid_release(value: *mut Head) {
                     // Dropping the endpoint closes it.
                     drop(Box::from_raw((*value.cast::<Socket>()).endpoint));
                     free(value, size_of::<Socket>());
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                Kind::Sql => {
+                    ((*value.cast::<sql::Sql>()).release)(value);
+                    free(value, size_of::<sql::Sql>());
                 }
             }
         }

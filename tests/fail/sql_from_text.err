@@ -1,0 +1,2 @@
+sql_from_text.lcd:5:21: error E0303: this argument needs `sql`, found `text`
+  note: only a text literal with no `{...}` is a `sql` query: pass each value through a `?` mark

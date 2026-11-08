@@ -1,0 +1,131 @@
+# SQLite, by decisions 194 and 195. A query has the type `sql`, which only
+# text literals and `sql + sql` make, so each value goes through a `?` mark.
+# A connection closes when no value holds it.
+
+## Why a query failed.
+public choice SqlError
+    ## A `UNIQUE`, `NOT NULL`, `CHECK`, or foreign key constraint did not hold.
+    Constraint(detail: text)
+    ## Another connection holds a lock on the database.
+    Busy(detail: text)
+    Failed(detail: text)
+
+## The failure in words.
+public task error_message(self: SqlError) -> text
+    return match self
+        Constraint(detail) -> detail
+        Busy(detail) -> detail
+        Failed(detail) -> detail
+
+## A value that goes to a `?` mark, or comes back in a row.
+public choice Value
+    Null
+    Int(value: int)
+    Float(value: float)
+    Text(value: text)
+    Bytes(value: list[byte])
+
+## One row of a result: `values` in the order of `columns`.
+public type Row
+    columns: list[text]
+    values: list[Value]
+
+## An open database. Copies share the connection.
+public type Db
+    connection: database
+
+unsafe extern task lucid_sql_open(path: text) -> database
+unsafe extern task lucid_sql_prepare(db: database, query: sql) -> database
+unsafe extern task lucid_sql_marks(statement: database) -> int
+unsafe extern task lucid_sql_bind_null(statement: database, at: int)
+unsafe extern task lucid_sql_bind_int(statement: database, at: int, value: int)
+unsafe extern task lucid_sql_bind_float(statement: database, at: int, value: float)
+unsafe extern task lucid_sql_bind_text(statement: database, at: int, value: text)
+unsafe extern task lucid_sql_bind_bytes(statement: database, at: int, value: list[byte])
+unsafe extern task lucid_sql_step(statement: database) -> bool
+unsafe extern task lucid_sql_run(statement: database) -> int
+unsafe extern task lucid_sql_columns(statement: database) -> int
+unsafe extern task lucid_sql_column_name(statement: database, at: int) -> text
+unsafe extern task lucid_sql_column_kind(statement: database, at: int) -> int
+unsafe extern task lucid_sql_column_int(statement: database, at: int) -> int
+unsafe extern task lucid_sql_column_float(statement: database, at: int) -> float
+unsafe extern task lucid_sql_column_text(statement: database, at: int) -> text
+unsafe extern task lucid_sql_column_bytes(statement: database, at: int) -> list[byte]
+unsafe extern task lucid_sql_failure() -> int
+unsafe extern task lucid_sql_detail() -> text
+
+# How the last runtime call failed, if it did.
+task failure() -> SqlError?
+    # Each task only reads what the last call left.
+    unsafe
+        return match lucid_sql_failure()
+            0 -> none
+            1 -> Constraint(detail: lucid_sql_detail())
+            2 -> Busy(detail: lucid_sql_detail())
+            _ -> Failed(detail: lucid_sql_detail())
+
+## Opens the database at `path`, and creates it if it does not exist.
+## `":memory:"` gives a new empty one that lives in memory. Any other path
+## needs the `files` permission.
+public task open(path: text) -> Db or SqlError
+    # The runtime only reads `path`, and gives a new connection.
+    unsafe
+        let connection = lucid_sql_open(path)
+        try failure()
+        return Db(connection: connection)
+
+# A statement for `query`, with `values` bound to its `?` marks in order.
+task start(self: Db, query: sql, values: list[Value]) -> database or SqlError
+    # The runtime only reads the connection, the query, and each value, and
+    # gives a new statement.
+    unsafe
+        let statement = lucid_sql_prepare(self.connection, query)
+        try failure()
+        # A missing value would read as null, so a different count is a bug.
+        let marks = lucid_sql_marks(statement)
+        expect marks == values.len()
+        for at in 0..values.len()
+            match values[at]
+                Null -> lucid_sql_bind_null(statement, at + 1)
+                Int(value) -> lucid_sql_bind_int(statement, at + 1, value)
+                Float(value) -> lucid_sql_bind_float(statement, at + 1, value)
+                Text(value) -> lucid_sql_bind_text(statement, at + 1, value)
+                Bytes(value) -> lucid_sql_bind_bytes(statement, at + 1, value)
+            try failure()
+        return statement
+
+## Runs one statement, such as an `INSERT`, with `values` for its `?` marks,
+## and gives how many rows it changed, with those that triggers and foreign
+## keys changed. A query with a different number of
+## marks traps.
+public task run(self: Db, query: sql, values: list[Value]) -> int or SqlError
+    let statement = try self.start(query, values)
+    # The runtime only reads the statement.
+    unsafe
+        let changed = lucid_sql_run(statement)
+        try failure()
+        return changed
+
+## Runs one statement, such as a `SELECT`, with `values` for its `?` marks,
+## and gives its rows. A query with a different number of marks traps.
+public task query(self: Db, query: sql, values: list[Value]) -> list[Row] or SqlError
+    let statement = try self.start(query, values)
+    var rows: list[Row] = []
+    # The runtime only reads the statement, and gives new values.
+    unsafe
+        var columns: list[text] = []
+        for at in 0..lucid_sql_columns(statement)
+            columns.push(lucid_sql_column_name(statement, at))
+        while lucid_sql_step(statement)
+            var row: list[Value] = []
+            for at in 0..columns.len()
+                let value = match lucid_sql_column_kind(statement, at)
+                    1 -> Int(value: lucid_sql_column_int(statement, at))
+                    2 -> Float(value: lucid_sql_column_float(statement, at))
+                    3 -> Text(value: lucid_sql_column_text(statement, at))
+                    4 -> Bytes(value: lucid_sql_column_bytes(statement, at))
+                    _ -> Null
+                row.push(value)
+            rows.push(Row(columns: columns, values: row))
+        try failure()
+    return rows

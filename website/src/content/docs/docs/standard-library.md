@@ -17,7 +17,7 @@ The standard library is written in Lucid and ships inside the compiler, so a pro
 | `std.http` | HTTP/1.1 server, and a client with TLS | Built |
 | `std.html` | HTML building that escapes on render | Built |
 | `std.crypto` | SHA-256, SHA-512, HMAC, constant-time compare, random bytes, Argon2id | Built |
-| `std.sql` | SQLite, with values only through `?` marks | Planned for M8 |
+| `std.sql` | SQLite, with values only through `?` marks | Built |
 
 ## Arguments and environment
 
@@ -121,6 +121,22 @@ print crypto.same(token, token)
 ```
 
 Passwords use Argon2id at OWASP's setting, in a PHC string. Compare secrets with `crypto.same` or `crypto.hmac_check`, which take the same time wherever the bytes differ. `crypto.random_bytes` is the only source of random values. On the web, `std.crypto` is error E0907.
+
+## SQL
+
+`std.sql` is SQLite, built into the program. A query has the type `sql`, which only a text literal with no `{...}` makes, so every value goes through a `?` mark:
+
+```lucid
+use std.sql
+
+let db = try sql.open(":memory:")
+try db.run("CREATE TABLE users (name TEXT UNIQUE, age INTEGER)", [])
+try db.run("INSERT INTO users VALUES (?, ?)", [sql.Text(value: "ada"), sql.Int(value: 36)])
+for row in try db.query("SELECT name FROM users WHERE age > ?", [sql.Int(value: 30)])
+    print row.values[0]
+```
+
+`db.run` gives how many rows changed, and `db.query` gives rows, each with `columns` and `values`. Queries join with `+`, but never with `text`: `"... WHERE name = '{name}'"` is a compile error. A failure is a `SqlError`: `Constraint`, `Busy`, or `Failed`. Opening a file needs the `files` permission, and no query can attach another file. On the web, `std.sql` is error E0907.
 
 ## Not built yet
 

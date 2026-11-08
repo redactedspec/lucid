@@ -1,0 +1,3 @@
+@std/sql.lcd:86:9: trap: expect failed: 2 == 1
+    at @std/sql.lcd:102:25 in run
+    at sql_marks.lcd:6:7 in top level

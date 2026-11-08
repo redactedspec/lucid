@@ -19,3 +19,5 @@ argon2 = { version = "0.6.0", default-features = false, features = ["alloc", "pa
 ring = { version = "0.17.14", default-features = false }
 # Constant-time compare for `crypto.same`. `rustls` already builds it.
 subtle = "2.6.1"
+# SQLite for `std.sql`, by decision 194. `bundled` builds one pinned version.
+libsqlite3-sys = { version = "0.39.1", features = ["bundled"] }

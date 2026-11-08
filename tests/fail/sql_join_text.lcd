@@ -1,0 +1,4 @@
+# `+` joins a query only with another query, by decision 195.
+let name = "ada"
+let query: sql = "SELECT * FROM users WHERE name = "
+let joined = query + name

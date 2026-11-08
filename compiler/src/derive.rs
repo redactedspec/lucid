@@ -157,7 +157,9 @@ impl Mono<'_> {
     pub fn shown(&mut self, value: Expr, span: Span) -> Expr {
         let ty = value.ty;
         match ty {
-            Ty::Text => Expr { kind: ExprKind::TextQuote(boxed(value)), ty, span },
+            Ty::Text | Ty::Sql => {
+                Expr { kind: ExprKind::TextQuote(boxed(value)), ty: Ty::Text, span }
+            }
             // A task value or a thread shows its type: its code has no text.
             _ if matches!(ty, Ty::Task(..)) || ty.is_handle() => {
                 let name = Expr { kind: ExprKind::Text(ty.name()), ty: Ty::Text, span };
@@ -174,12 +176,14 @@ impl Mono<'_> {
     /// The text of a value by itself, which `print` and interpolation show.
     /// Text has no quotes, even when a union holds it.
     pub fn shown_alone(&mut self, value: Expr, span: Span) -> Expr {
-        if value.ty == Ty::Text {
-            return value;
+        // A query shows as its text, which cannot become a query again.
+        if matches!(value.ty, Ty::Text | Ty::Sql) {
+            return Expr { ty: Ty::Text, ..value };
         }
         let ty = value.ty;
         let written = ty.is_compound() && self.method("show", ty, span).is_some();
-        let may_hold_text = ty.members().iter().any(|m| matches!(m, Ty::Text | Ty::Any(_)));
+        let may_hold_text =
+            ty.members().iter().any(|m| matches!(m, Ty::Text | Ty::Sql | Ty::Any(_)));
         if written || !may_hold_text {
             return self.shown(value, span);
         }

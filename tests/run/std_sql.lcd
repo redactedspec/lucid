@@ -1,0 +1,52 @@
+# std.sql, by decisions 194 and 195: a query has the type `sql`, and each
+# value goes through a `?` mark.
+
+use std.sql
+use std.sql.Db
+use std.sql.Row
+use std.sql.SqlError
+
+task show(rows: list[Row]) -> text
+    var out = ""
+    for row in rows
+        for at in 0..row.columns.len()
+            out = "{out}{row.columns[at]}={row.values[at]} "
+        out = "{out}\n"
+    return out
+
+task count(db: Db) -> int or SqlError
+    let rows = try db.query("SELECT count(*) FROM users", [])
+    return match rows[0].values[0]
+        Int(value) -> value
+        _ -> -1
+
+let db = try sql.open(":memory:")
+print try db.run("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, score REAL, avatar BLOB)", [])
+let add: sql = "INSERT INTO users (name, score, avatar) VALUES (?, ?, ?)"
+print try db.run(add, [sql.Text(value: "ada"), sql.Float(value: 1.5), sql.Bytes(value: [1, 2])])
+
+# A value is never part of the query, whatever it holds.
+print try db.run(add, [sql.Text(value: "bob'); DROP TABLE users; --"), sql.Null, sql.Null])
+print db.run(add, [sql.Text(value: "ada"), sql.Null, sql.Null])
+print db.run(add, [sql.Null, sql.Null, sql.Null])
+
+# Queries join with `+`, and a literal next to a query is one too.
+let all: sql = "SELECT id, name, score, avatar FROM users"
+print show(try db.query(all + " WHERE id > ?" + " ORDER BY id", [sql.Int(value: 0)]))
+print show(try db.query("SELECT name FROM users WHERE id IN (" + "?, ?" + ")", [sql.Int(value: 1), sql.Int(value: 9)]))
+print try db.run("UPDATE users SET score = ? WHERE score IS NULL", [sql.Float(value: 0.0)])
+print show(try db.query("SELECT 7 AS n, 'x' || ? AS t, NULL AS z", [sql.Text(value: "y")]))
+print all
+print all == "SELECT id, name, score, avatar FROM users"
+
+# A connection goes to another thread.
+print (spawn count(db)).wait()
+
+print db.query("SELECT nope FROM users", [])
+print db.run("SELECT 1; SELECT 2", [])
+print db.run("", [])
+
+# Only the `files` permission says which files open, so no query attaches one.
+print db.run("ATTACH DATABASE 'other.db' AS other", [])
+print db.run("VACUUM INTO 'copy.db'", [])
+print try db.run("VACUUM", [])

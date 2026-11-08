@@ -4,7 +4,7 @@
 
 The standard library covers what most programs need, so that small projects need no dependencies. It is written in Lucid. Only low-level parts use `unsafe` and the runtime.
 
-Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/`, and the compiler holds a copy of them, so a program needs no files beside it. `std` alone can call the runtime, through `extern` tasks that start with `lucid_`. All of the M5 modules are built, and `std.dom`, `std.net`, `std.http`, `std.html`, and `std.crypto`.
+Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/`, and the compiler holds a copy of them, so a program needs no files beside it. `std` alone can call the runtime, through `extern` tasks that start with `lucid_`. All of the M5 modules are built, and `std.dom`, `std.net`, `std.http`, `std.html`, `std.crypto`, and `std.sql`.
 
 | Module | Contents | Milestone |
 | --- | --- | --- |
@@ -17,7 +17,7 @@ Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/
 | `std.net` | TCP sockets | M7, built |
 | `std.http` | HTTP/1.1 server, and client with TLS | M7, built |
 | `std.html` | Escaped HTML building | M7, built |
-| `std.sql` | SQLite, with values only through `?` marks and queries of type `sql`, by decisions 194 and 195 | M8, planned |
+| `std.sql` | SQLite, with values only through `?` marks and queries of type `sql`, by decisions 194, 195, and 209 | M8, built |
 | `std.crypto` | SHA-256, SHA-512, HMAC, constant-time compare, random bytes, Argon2id passwords, hex, by decisions 193 and 208 | M8, built |
 
 Never hand-roll cryptography primitives. Wrap a vetted implementation.
@@ -69,6 +69,13 @@ Text from the system that is not valid Unicode has its bad parts replaced, excep
 
 `std.crypto` wraps `ring`, `subtle`, and `argon2` in the runtime, by decisions 193 and 208. Passwords use m=19456, t=2, p=1, OWASP's first setting. The check reads the setting from the hash, so a later rise still checks old hashes. Text goes in through `.bytes()`. It needs no permission, and under `--target web` it is E0907.
 
+| `sql.open(path)` | `sql.Db or sql.SqlError`. `":memory:"` gives a new empty database in memory |
+| --- | --- |
+| `db.run(query, values)` | `int or SqlError`: how many rows one statement changed, with those that triggers and foreign keys changed |
+| `db.query(query, values)` | `list[sql.Row] or SqlError`: each `Row` has `columns`, a `list[text]`, and `values`, a `list[sql.Value]` in the same order |
+
+`std.sql` is SQLite 3.54.1, built into the runtime from `libsqlite3-sys`, by decisions 194, 195, and 209. A `query` has the type `sql`, which only a text literal with no `{...}`, and `sql + sql`, make. So a value goes in only through a `?` mark: `values` holds one `sql.Value` for each mark, in order, and a different count traps. A `Value` is `Null`, `Int(value)`, `Float(value)`, `Text(value)`, or `Bytes(value)`, and a row gives back the same kinds. A query holds exactly one statement. A `SqlError` is `Constraint(detail)`, `Busy(detail)`, or `Failed(detail)`, and `error_message()` gives the detail. A `Db` closes when no value holds it, and may go to another thread. `ATTACH` and `VACUUM INTO` a file fail, since only the `files` permission says which files open. `sql.open` needs the `files` permission for its path, and under `--target web` it is E0907.
+
 ## Websites
 
 Lucid covers both sides of a website.
@@ -82,7 +89,7 @@ Lucid covers both sides of a website.
 
 - `std.http` client: `http.get(url)` and `http.post(url, kind, body)`, where `kind` is the media type and `body` is bytes, give a `Response or NetError`, with header names in lowercase, and `response.header(name)` and `response.body_text()`. An `https` URL uses TLS, and the certificate must be for the host and come from a root that Mozilla trusts, with no way to turn the check off. Each request uses its own connection. A redirect is not followed. Limits are in [security.md](security.md).
 
-Under `--target web`, `std.net`, `std.http`, and `std.crypto` are error E0907.
+Under `--target web`, `std.net`, `std.http`, `std.crypto`, and `std.sql` are error E0907.
 
 **Browser side** compiles to WebAssembly with `lucid build --target web`. The output is one JavaScript file, `NAME.js`, which holds a small loader and both WebAssembly modules, so a page needs only `<script src="NAME.js">`. Every built feature works, except a user `extern` and `.pointer()`, which are E0905. On the web, `std.fs` gives `Failed`, `env.get` gives none, `args.all()` gives `[]`, and `time.sleep` traps. Browser access goes through `std.dom`, because WebAssembly cannot touch the DOM directly. `std.dom` works only with `--target web`, and elsewhere it is E0906.
 

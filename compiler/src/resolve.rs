@@ -61,7 +61,7 @@ pub fn std_module(name: &str) -> Option<&'static str> {
     STD_MODULES.iter().find(|(module, _)| *module == name).map(|(_, text)| *text)
 }
 
-const STD_MODULES: [(&str, &str); 10] = [
+const STD_MODULES: [(&str, &str); 11] = [
     ("args", include_str!("../../std/args.lcd")),
     ("crypto", include_str!("../../std/crypto.lcd")),
     ("dom", include_str!("../../std/dom.lcd")),
@@ -71,6 +71,7 @@ const STD_MODULES: [(&str, &str); 10] = [
     ("http", include_str!("../../std/http.lcd")),
     ("json", include_str!("../../std/json.lcd")),
     ("net", include_str!("../../std/net.lcd")),
+    ("sql", include_str!("../../std/sql.lcd")),
     ("time", include_str!("../../std/time.lcd")),
 ];
 
@@ -151,7 +152,7 @@ impl Package {
 /// The permission that a `std` module needs, if any.
 fn std_permission(module: &str) -> Option<&'static str> {
     match module {
-        "fs" => Some("files"),
+        "fs" | "sql" => Some("files"),
         "env" => Some("env"),
         "net" | "http" => Some("net"),
         "process" => Some("process"),
@@ -646,6 +647,7 @@ impl Loader {
             "crypto" => Some("std.crypto"),
             "net" => Some("std.net"),
             "http" => Some("std.http"),
+            "sql" => Some("std.sql"),
             _ => None,
         } {
             self.source.host_only.get_or_insert((span, name));

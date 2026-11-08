@@ -1418,7 +1418,7 @@ impl<'a, 'b> Lower<'a, 'b> {
             };
             return;
         }
-        if ty == Ty::Text {
+        if matches!(ty, Ty::Text | Ty::Sql) {
             self.ptr(left);
             self.ptr(right);
             self.call_runtime("lucid_text_compare");

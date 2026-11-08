@@ -43,6 +43,7 @@ A task may read a top-level `let` whose value is a literal, with or without a le
 | `float` | 64-bit IEEE float |
 | `bool` | `true` or `false` |
 | `text` | Immutable UTF-8 string |
+| `sql` | A query for `std.sql`, made only from text literals |
 | `byte` | 8-bit unsigned integer |
 | `i8` `i16` `i32` `u16` `u32` `u64` `f32` | Sized numbers |
 | `i64`, `u8` | Other names for `int` and `byte` |
@@ -102,6 +103,13 @@ Escapes are `\n`, `\t`, `\r`, `\\`, and `\"`. Interpolated expressions may conta
 Any value can be interpolated, and reads as `print` shows it. Interpolation is the only way to join text, so `+` does not work on `text`.
 
 `==`, `!=`, `<`, `<=`, `>`, and `>=` work on `text`. Order is by Unicode code point.
+
+A text literal with no `{...}` has the type `sql` where the context expects `sql`, as a number literal takes the type the context expects. `sql + sql` is `sql`, and a text literal next to a `sql` in `+` is one too. Nothing else makes a `sql`: there is no conversion from `text`, and `sql` has only `Show` and `Equal`, so `json.parse` cannot give one. So a query holds only text that the program's author wrote, and `std.sql` takes each value through a `?` mark, by decision 195. A `sql` shows as its text, and `==` compares the text. Giving `text` where `sql` is expected is error E0303.
+
+```lucid
+let all: sql = "SELECT name FROM users"
+let adults = all + " WHERE age >= ?"
+```
 
 Length, slicing, and iteration work on Unicode characters. A character is one code point. `x.len()` is the number of characters, and `x.is_empty()` tests for none.
 

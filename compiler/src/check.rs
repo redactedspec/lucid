@@ -21,8 +21,8 @@ pub const PRELUDE_TRAITS: [&str; 1] = ["Error"];
 const LATER_TYPES: [&str; 1] = ["pointer"];
 
 /// Type names that a program cannot define for itself, beyond `number_type`.
-const BUILT_IN_TYPES: [&str; 8] =
-    ["bool", "text", "list", "map", "set", "spawned", "channel", "lock"];
+const BUILT_IN_TYPES: [&str; 9] =
+    ["bool", "text", "sql", "list", "map", "set", "spawned", "channel", "lock"];
 
 /// The same limit as nesting in the parser, for a chain of aliases.
 const MAX_ALIASES: usize = 128;
@@ -50,6 +50,10 @@ const CHANGING_CALLS: [&str; 5] = ["push", "swap", "add", "remove", "pop"];
 const THREAD_CALLS: [&str; 4] = ["send", "receive", "close", "update"];
 
 const JOIN_TEXT: &str = "join text with interpolation: \"{a}{b}\"";
+const SQL_TEXT: &str =
+    "only a text literal with no `{...}` is a `sql` query: pass each value through a `?` mark";
+const JOIN_SQL: &str =
+    "a `sql` query joins only text literals and other queries: pass each value through a `?` mark";
 const TEST_UNION: &str = "test it first, as in `if x is not none`. Only a name narrows, so name a field or call with `let`";
 
 /// Checks a file. A program using an unbuilt feature gets only E0901, because
@@ -842,6 +846,7 @@ impl<'a> Checker<'a> {
             (want, have) if want.is_number() && have.is_number() => {
                 diag.note(format!("conversions are explicit: use `.to_{}()`", want.name()))
             }
+            (Ty::Sql, Ty::Text) => diag.note(SQL_TEXT),
             _ => diag,
         });
     }
@@ -935,10 +940,11 @@ impl<'a> Checker<'a> {
         let plain = match name {
             "bool" => Some(Ty::Bool),
             "text" => Some(Ty::Text),
-            "socket"
+            "sql" => Some(Ty::Sql),
+            "socket" | "database"
                 if self.files[file_index(self.files, span.start)].path.starts_with("@std/") =>
             {
-                Some(Ty::Socket)
+                Some(if name == "socket" { Ty::Socket } else { Ty::Database })
             }
             _ => number_type(name),
         };
@@ -1256,6 +1262,8 @@ impl<'a> Checker<'a> {
             return false;
         }
         let holds = match name {
+            // No trait makes a query from text, by decision 195.
+            _ if ty == Ty::Sql => matches!(name, "Show" | "Equal"),
             "Show" | "Equal" => true,
             "Json" => match ty {
                 Ty::Map(key, _) => *key == Ty::Text,
@@ -4193,7 +4201,16 @@ impl<'a> Checker<'a> {
     fn lower(&mut self, expr: &'a ast::Expr, want: Option<Ty>) -> Expr {
         let span = expr.span;
         let number = self.number_want(want);
+        let sql = self.literal_want(want, |ty| *ty == Ty::Sql).filter(|ty| *ty == Ty::Sql);
         match &expr.kind {
+            // Only text that the author wrote becomes a query, by decision 195.
+            Ast::Text(_) if sql.is_some() && is_literal(expr) => {
+                let text = self.expr(expr);
+                Expr { ty: Ty::Sql, ..text }
+            }
+            Ast::Binary(BinaryOp::Add, left, right) if sql.is_some() => {
+                self.binary(BinaryOp::Add, left, right, sql, span)
+            }
             Ast::Int(lexeme) => self.int(lexeme, number, span),
             Ast::Float(lexeme) => self.float(lexeme, number, span),
             Ast::Unary(op @ (UnaryOp::Neg | UnaryOp::BitNot), value) => {
@@ -4791,9 +4808,14 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
-        let (left, right) = if literal_math(left) && !literal_math(right) {
+        // A text literal next to a query is a query too.
+        let sql = |ty: Ty| Some(ty).filter(|ty| *ty == Ty::Sql);
+        let text = |expr: &ast::Expr| matches!(expr.kind, Ast::Text(_)) && is_literal(expr);
+        let (left, right) = if (literal_math(left) && !literal_math(right))
+            || (op == BinaryOp::Add && text(left) && !text(right) && hint.is_none())
+        {
             let right = self.lower(right, hint);
-            let want = self.number_want(Some(right.ty)).or(hint);
+            let want = self.number_want(Some(right.ty)).or(sql(right.ty)).or(hint);
             (self.lower(left, want), right)
         } else {
             let first = self.lower(left, hint);
@@ -4801,7 +4823,7 @@ impl<'a> Checker<'a> {
             let want = if matches!(right.kind, Ast::List(_) | Ast::Map(_)) {
                 Some(first.ty).filter(|ty| ty.is_collection())
             } else {
-                self.number_want(Some(first.ty)).or(hint)
+                self.number_want(Some(first.ty)).or(sql(first.ty)).or(hint)
             };
             let right = self.lower(right, want);
             (first, right)
@@ -4895,6 +4917,8 @@ impl<'a> Checker<'a> {
                 diag.note("test a union with `is`. A captured name does not narrow, so test a `let` copy of it")
             } else if union {
                 diag.note("narrow a union with `is` first, as in `x is none`, or give a fallback with `else`")
+            } else if left.ty == Ty::Sql || right.ty == Ty::Sql {
+                diag.note(JOIN_SQL)
             } else if left.ty == Ty::Text || right.ty == Ty::Text {
                 diag.note(JOIN_TEXT)
             } else if numbers && !plain {
@@ -4906,6 +4930,9 @@ impl<'a> Checker<'a> {
             });
         }
         let ty = left.ty;
+        if ty == Ty::Sql && op == BinaryOp::Add {
+            return Expr { kind: ExprKind::Join(vec![left, right]), ty, span };
+        }
         let equality = matches!(op, BinaryOp::Eq | BinaryOp::Ne);
         let order = matches!(op, BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge);
         let int_only = is_math(op)
@@ -4915,6 +4942,7 @@ impl<'a> Checker<'a> {
             ty if ty.is_float() => !int_only,
             Ty::Bool => equality,
             Ty::Text => equality || order,
+            Ty::Sql => equality,
             ty if (ty.is_compound()
                 || ty.is_handle()
                 || matches!(ty, Ty::Param(..) | Ty::Task(..)))

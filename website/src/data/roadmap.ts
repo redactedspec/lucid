@@ -84,7 +84,7 @@ export const milestones: Milestone[] = [
       { text: 'Compile only reachable tasks', done: true },
       { text: 'Linux x86-64: `run`, `test`, and `build`', done: true },
       { text: '`std.crypto`', done: true },
-      { text: '`std.sql` and the `sql` type', done: false },
+      { text: '`std.sql` and the `sql` type', done: true },
       { text: 'Orphan rule for tasks with `self`', done: false },
       { text: 'Registry, `lucid package`, version selection, and `lucid.lock`', done: false },
       { text: '`lucid lsp`', done: false },

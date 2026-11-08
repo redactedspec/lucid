@@ -25,6 +25,7 @@ A task cannot read or write a top-level `var`: pass it as a parameter. A task ma
 | `float` | 64-bit IEEE float |
 | `bool` | `true` or `false` |
 | `text` | Immutable UTF-8 string |
+| `sql` | A query for `std.sql`, made only from text literals, see [Standard library](/docs/standard-library/#sql) |
 | `byte` | 8-bit unsigned integer |
 | `i8` `i16` `i32` `u16` `u32` `u64` `f32` | Sized numbers |
 | `list[T]`, `map[K, V]`, `set[T]` | Collections, see [Collections](/docs/collections/) |

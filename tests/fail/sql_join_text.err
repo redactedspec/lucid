@@ -1,0 +1,2 @@
+sql_join_text.lcd:4:14: error E0303: `+` needs one type on both sides, found `sql` and `text`
+  note: a `sql` query joins only text literals and other queries: pass each value through a `?` mark

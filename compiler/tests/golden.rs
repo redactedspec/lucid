@@ -673,12 +673,16 @@ fn permissions_hold_at_run_time() {
     fs::create_dir_all(dir.join("data")).expect("cannot make directory");
     let manifest = "[package]\nname = \"permissions\"\nversion = \"1.0.0\"\n\n\
         [permissions]\nfiles = [\"data\"]\nenv = [\"LUCID_PERM_SET\"]\n";
-    let main = "use std.env\nuse std.fs\n\n\
+    let main = "use std.env\nuse std.fs\nuse std.sql\n\n\
         task show(result: text or fs.FileError)\n    match result\n        \
         content: text -> print content\n        e: fs.FileError -> print e.error_message()\n\n\
+        task opened(path: text)\n    match sql.open(path)\n        \
+        db: sql.Db -> print \"opened {path}\"\n        \
+        e: sql.SqlError -> print \"{path}: {e.error_message()}\"\n\n\
         show(fs.read_text(\"data/a.txt\"))\nshow(fs.read_text(\"lucid.toml\"))\n\
         show(fs.read_text(\"data/../lucid.toml\"))\nprint fs.exists(\"data/a.txt\")\n\
-        print fs.exists(\"lucid.toml\")\nprint env.get(\"LUCID_PERM_SET\")\n\
+        print fs.exists(\"lucid.toml\")\nopened(\"data/app.db\")\nopened(\"app.db\")\n\
+        opened(\"file:data/app.db\")\nopened(\":memory:\")\nprint env.get(\"LUCID_PERM_SET\")\n\
         print env.get(\"LUCID_PERM_OTHER\")\n";
     fs::write(dir.join("lucid.toml"), manifest).expect("cannot write");
     fs::write(dir.join("src/main.lcd"), main).expect("cannot write");
@@ -686,8 +690,10 @@ fn permissions_hold_at_run_time() {
     let output = lucid(&dir, &["build"]);
     assert!(output.status.success(), "{}", text(&output.stderr));
     let outside = "outside the `files` permission in `lucid.toml`";
-    let expected =
-        format!("inside\nlucid.toml: {outside}\ndata/../lucid.toml: {outside}\ntrue\nfalse\nyes\n");
+    let expected = format!(
+        "inside\nlucid.toml: {outside}\ndata/../lucid.toml: {outside}\ntrue\nfalse\n\
+        opened data/app.db\napp.db: {outside}\nfile:data/app.db: {outside}\nopened :memory:\nyes\n"
+    );
     for built in [false, true] {
         let mut command = if built {
             Command::new(dir.join(format!("permissions{EXE_SUFFIX}")))
@@ -1041,22 +1047,24 @@ fn copy_dir(from: &Path, to: &Path) {
 
 /// Builds each run and trap test with `--target web`, and runs it under
 /// `node`, against the same golden files. Only the tests in `HOST_ONLY` are
-/// left out: by decisions 159, 162, 176, and 193, the web has no files,
-/// arguments, environment, sleep, user `extern`, `spawn`, sockets, or
-/// `std.crypto`. See "WebAssembly" in docs/compiler.md.
+/// left out: by decisions 159, 162, 176, 193, and 194, the web has no
+/// files, arguments, environment, sleep, user `extern`, `spawn`, sockets,
+/// `std.crypto`, or `std.sql`. See "WebAssembly" in docs/compiler.md.
 #[test]
 fn web_programs_match_run() {
-    const HOST_ONLY: [&str; 12] = [
+    const HOST_ONLY: [&str; 14] = [
         "channel_threads",
         "spawn",
         "spawn_overflow",
         "spawn_trap",
+        "sql_marks",
         "std_args_env",
         "std_crypto",
         "std_fs",
         "std_http",
         "std_http_client",
         "std_net",
+        "std_sql",
         "std_time",
         "unsafe",
     ];
@@ -1166,8 +1174,8 @@ fn web_rejects_foreign_code() {
     assert!(text(&output.stderr).contains("error E0905"), "{}", text(&output.stderr));
 }
 
-/// `spawn`, `std.net`, `std.http`, and `std.crypto` are E0907 under
-/// `--target web`, by decisions 176 and 193.
+/// `spawn`, `std.net`, `std.http`, `std.crypto`, and `std.sql` are E0907
+/// under `--target web`, by decisions 176, 193, and 194.
 #[test]
 fn web_rejects_spawn() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("web_spawn");
@@ -1177,6 +1185,7 @@ fn web_rejects_spawn() {
         ("std_net", "`std.net`"),
         ("std_http", "`std.http`"),
         ("std_crypto", "`std.crypto`"),
+        ("std_sql", "`std.sql`"),
     ] {
         let file = format!("{name}.lcd");
         fs::copy(repo().join("tests/run").join(&file), dir.join(&file)).expect("cannot copy");

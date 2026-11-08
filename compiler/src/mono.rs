@@ -332,7 +332,7 @@ impl Visit for Mono<'_> {
             match stmt {
                 Stmt::Print(value)
                     if value.ty.is_compound()
-                        || (matches!(value.ty, Ty::Task(..)) || value.ty.is_handle()) =>
+                        || (matches!(value.ty, Ty::Task(..) | Ty::Sql) || value.ty.is_handle()) =>
                 {
                     let span = value.span;
                     let empty = Expr { kind: ExprKind::None, ty: Ty::None, span };
@@ -415,7 +415,7 @@ impl Visit for Mono<'_> {
                 *value = self.shown_alone(*inner, span);
                 return;
             }
-            ExprKind::TextQuote(inner) if inner.ty != Ty::Text => {
+            ExprKind::TextQuote(inner) if !matches!(inner.ty, Ty::Text | Ty::Sql) => {
                 *value = self.shown(*inner, span);
                 return;
             }
