@@ -121,7 +121,7 @@ Designed by decisions 169 to 180, see "Threads" in `compiler.md`. OS threads, by
 Designed by decisions 188 to 205, see "Ecosystem" in `compiler.md`. Build in this order:
 
 - [x] Prelude text tasks `starts_with`, `ends_with`, `contains`, `find`, and `trim`, by decision 189
-- [ ] Compile only reachable tasks, by decision 190
+- [x] Compile only reachable tasks, by decision 190
 - [ ] Linux x86-64: `run`, `test`, and `build`, with a fresh private staging directory, by decision 191. All tests pass in WSL
 - [ ] `std.crypto`, by decision 193
 - [ ] `std.sql` and the `sql` type, by decisions 194 and 195

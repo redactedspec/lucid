@@ -191,7 +191,7 @@ fn front_end(path: &str) {
         return;
     }
     let (mut program, errors) = check::check(&file, &source, true);
-    if errors.is_empty() && mono::run(&mut program).is_empty() {
+    if errors.is_empty() && mono::run(&mut program, true).is_empty() {
         ownership::run(&mut program, true);
     }
 }

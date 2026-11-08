@@ -96,7 +96,7 @@ fn cli(args: &[String]) -> ExitCode {
         let (mut program, errors) = check::check(file, &source, !run);
         diags = errors;
         if diags.is_empty() {
-            diags = mono::run(&mut program);
+            diags = mono::run(&mut program, !run);
         }
         if diags.is_empty() && (run || costs) {
             ownership::run(&mut program, std::env::var_os("LUCID_NAIVE").is_none());
@@ -311,7 +311,7 @@ fn fix(path: &str, json: bool) -> ExitCode {
         let (mut program, errors) = check::check(file, &source, true);
         diags = errors;
         if diags.is_empty() {
-            diags = mono::run(&mut program);
+            diags = mono::run(&mut program, true);
         }
     }
     diags.sort_by_key(|d| d.span.start);
@@ -554,7 +554,7 @@ fn run_formatter(args: &[&str]) -> ExitCode {
         let (mut program, errors) = check::check(file, &source, false);
         diags = errors;
         if diags.is_empty() {
-            diags = mono::run(&mut program);
+            diags = mono::run(&mut program, false);
         }
         if diags.is_empty() {
             ownership::run(&mut program, true);
@@ -644,7 +644,7 @@ fn compile_tests(path: &str, json: bool) -> Result<FileTests, ExitCode> {
         let (mut program, errors) = check::check(file, &source, true);
         diags = errors;
         if diags.is_empty() {
-            diags = mono::run(&mut program);
+            diags = mono::run(&mut program, false);
         }
         if diags.is_empty() {
             diags = web_only(&source);

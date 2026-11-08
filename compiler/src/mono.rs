@@ -16,7 +16,7 @@ use std::collections::HashMap;
 /// several larger copies of itself.
 const MAX_INSTANCES: usize = 20_000;
 
-pub fn run(program: &mut Program) -> Vec<Diagnostic> {
+pub fn run(program: &mut Program, all: bool) -> Vec<Diagnostic> {
     let source = std::mem::take(&mut program.tasks);
     let mut mono = Mono {
         source: &source,
@@ -40,10 +40,14 @@ pub fn run(program: &mut Program) -> Vec<Diagnostic> {
         locals: Vec::new(),
         captures: Vec::new(),
     };
-    // Every task without parameters compiles, used or not.
-    for (id, task) in source.iter().enumerate() {
-        if task.type_params == 0 {
-            mono.instance(id, &[], task.span);
+    // A program compiles only what the top level and its tests reach, by
+    // decision 190. A check builds every task without parameters, so each one
+    // shows its errors and costs.
+    if all {
+        for (id, task) in source.iter().enumerate() {
+            if task.type_params == 0 {
+                mono.instance(id, &[], task.span);
+            }
         }
     }
     for test in &mut program.tests {

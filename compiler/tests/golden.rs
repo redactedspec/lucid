@@ -436,6 +436,19 @@ fn huge_frame_is_rejected() {
     assert!(text(&output.stderr).starts_with("huge_text.lcd:1:1: error E0902:"));
 }
 
+/// Only reachable tasks compile, by decision 190, so a task that nothing
+/// calls cannot fail as E0902.
+#[test]
+fn unreachable_tasks_do_not_compile() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let parts = "{a}".repeat(70_000);
+    let source = format!("task f(a: text)\n    print \"{parts}\"\nprint \"ok\"\n");
+    fs::write(dir.join("unused_huge.lcd"), source).expect("cannot write test file");
+    let output = lucid(dir, &["run", "unused_huge.lcd"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert_eq!(text(&output.stdout), "ok\n");
+}
+
 /// Each branch adds a hidden local and a merge block. E0902 must look at the
 /// real frame, and a task of this size must still compile.
 #[test]
