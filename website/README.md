@@ -1,6 +1,6 @@
 # lucidlang.dev
 
-The public website for Lucid: a static Astro site, with Starlight for the docs. It builds alone, with no Rust toolchain, and deploys to Cloudflare Pages.
+The public website for Lucid: a static Astro site, with Starlight for the docs. It builds alone, with no Rust toolchain. It is live at https://lucidlang.dev, served by Cloudflare Pages.
 
 ## Specification
 
@@ -46,9 +46,28 @@ npm run check:links       # every internal link in dist/ resolves
 
 `check:examples` needs a built compiler. It uses `../target/release/lucid.exe` or `../target/release/lucid`, or the path in `LUCID`.
 
-## Cloudflare Pages
+## Deployment
 
-Checked against the Cloudflare Pages docs on 2026-11-08. In the dashboard: Workers & Pages, Create application, Pages, Import an existing Git repository. Pick this repository, then Begin setup:
+Live since 2026-11-08, on the Cloudflare Pages free plan.
+
+| Part | Value |
+| --- | --- |
+| Production URL | https://lucidlang.dev, the only address the site names |
+| Pages address | `lucid-ah0.pages.dev`. It serves the same build, and its pages give `https://lucidlang.dev` as canonical |
+| Registrar | Porkbun, with nameservers pointed at Cloudflare |
+| DNS | Cloudflare, zone `lucidlang.dev` on the same account as the Pages project |
+| TLS | Cloudflare certificate. `http://` redirects to `https://` with a 301 |
+| Source | `main` of `redactedspec/lucid`, root directory `website/` |
+
+**Deploys are automatic.** Every push to `main` builds and publishes the site, so a pushed commit that changes `website/` or the files it reads is public within minutes. By Cloudflare's default, a push to another branch makes a preview deploy at its own `pages.dev` address. Run the checks under "Commands" before pushing.
+
+**Production URLs.** `site` in `astro.config.mjs` is `https://lucidlang.dev`. Canonical links, `og:url`, `og:image`, the sitemap at `/sitemap-index.xml`, and `robots.txt` all build from it, or name it directly. Never write the `pages.dev` address in the site or its docs.
+
+**Checked live on 2026-11-08** with `curl`: `/`, `/docs/`, `/downloads/`, and `/docs/installation/` give 200 with canonical and `og:url` on `lucidlang.dev`. The sitemap lists only `lucidlang.dev` URLs. `/install.sh` is `text/plain` and exits with "no public release" status, `/agent-guide.md` is `text/markdown`, an unknown path gives 404, and `_headers` security headers are present.
+
+### Setup
+
+How the project was created, checked against the Cloudflare Pages docs on 2026-11-08. In the dashboard: Workers & Pages, Create application, Pages, Import an existing Git repository. Pick this repository, then Begin setup:
 
 | Setting | Value |
 | --- | --- |
@@ -61,11 +80,13 @@ Checked against the Cloudflare Pages docs on 2026-11-08. In the dashboard: Worke
 
 Then Save and Deploy. The site is fully static, so the free plan covers it, and the build needs no token or secret.
 
-The build reads `../docs/errors.md` and `../docs/agent-guide.md`, and `../examples/`. The root directory only sets where the build runs, and the repository is cloned whole, but the Cloudflare docs do not say so outright: check the first deploy's log.
+The build reads `../docs/errors.md` and `../docs/agent-guide.md`, and `../examples/`. The root directory only sets where the build runs, and the repository is cloned whole: the live diagnostics page and `/agent-guide.md` prove those reads work on Cloudflare.
 
 `public/_headers` sets content types for the install scripts and the agent guide. `dist/404.html` is served for unknown paths.
 
-**Custom domain.** Cloudflare requires the apex domain `lucidlang.dev` to be a zone on the same Cloudflare account, so first add the domain to Cloudflare and point its nameservers there. Then open the Pages project, Custom domains, Set up a domain, enter `lucidlang.dev`, and continue: Cloudflare adds the DNS record. `www.lucidlang.dev` can be added the same way, as a `CNAME` to the project's `pages.dev` address.
+**Custom domain.** Cloudflare requires the apex domain `lucidlang.dev` to be a zone on the same Cloudflare account, so the domain was added to Cloudflare and its Porkbun nameservers pointed there. Then, in the Pages project: Custom domains, Set up a domain, `lucidlang.dev`. Cloudflare added the DNS record, and reports the domain Active with SSL.
+
+`www.lucidlang.dev` is not set up: on 2026-11-08 it gave Cloudflare error 525. To serve it, add it in Custom domains the same way, then redirect it to the apex with a Cloudflare redirect rule, which the free plan includes.
 
 ## Planned install design
 

@@ -35,7 +35,7 @@ Read in this order:
 | [research.md](docs/research.md) | Evidence behind each decision, and its gaps |
 | [claude-code.md](docs/claude-code.md) | How Claude Code is used to build Lucid |
 
-[website/](website/) is the public site, lucidlang.dev: a static Astro site with the user docs. It is not deployed yet. See [website/README.md](website/README.md).
+[website/](website/) is the public site, lucidlang.dev: a static Astro site with the user docs. It is live at https://lucidlang.dev, deployed by Cloudflare Pages from `main`. See [website/README.md](website/README.md).
 
 [examples/](examples/) holds target programs. They become the first compiler tests.
 
