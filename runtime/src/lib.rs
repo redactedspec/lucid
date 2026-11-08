@@ -1447,6 +1447,51 @@ pub unsafe extern "C" fn lucid_text_lower(text: *const Text) -> *mut Text {
     text_from(unsafe { system_text(text) }.to_lowercase().as_bytes())
 }
 
+/// True if `text` begins with `part`.
+///
+/// # Safety
+///
+/// Both must point to live texts.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_starts_with(text: *const Text, part: *const Text) -> bool {
+    // SAFETY: the caller guarantees live texts.
+    unsafe { bytes(text).starts_with(bytes(part)) }
+}
+
+/// True if `text` ends with `part`.
+///
+/// # Safety
+///
+/// Both must point to live texts.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_ends_with(text: *const Text, part: *const Text) -> bool {
+    // SAFETY: the caller guarantees live texts.
+    unsafe { bytes(text).ends_with(bytes(part)) }
+}
+
+/// The character index of the first `part` in `text`, or -1.
+///
+/// # Safety
+///
+/// Both must point to live texts.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_find(text: *const Text, part: *const Text) -> i64 {
+    // SAFETY: the caller guarantees live texts.
+    let (text, part) = unsafe { (system_text(text), system_text(part)) };
+    text.find(part).map_or(-1, |at| text[..at].chars().count() as i64)
+}
+
+/// A new text without the Unicode white space at either end.
+///
+/// # Safety
+///
+/// `text` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_text_trim(text: *const Text) -> *mut Text {
+    // SAFETY: the caller guarantees a live text.
+    text_from(unsafe { system_text(text) }.trim().as_bytes())
+}
+
 fn list_alloc(cap: usize, counted: bool, small: bool) -> *mut List {
     let head = Head { count: AtomicI64::new(1), kind: Kind::List { counted, small } };
     object(list_size(cap, small), List { head, len: 0, cap: cap as u64 })

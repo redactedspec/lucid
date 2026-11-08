@@ -63,6 +63,8 @@ for letter in word     # each one is a one-character text
 print word.bytes()     # list[byte], the UTF-8 bytes
 print "a,b".split(",") # ["a", "b"]; an empty separator traps
 print word.upper()     # HÉLLO, and lower() too
+print word.find("l")   # int?, the character index of the first match
+print " x ".trim()     # x; also starts_with, ends_with, contains
 let n = "42".to_int()  # int?, none unless the whole text is an integer
 ```
 
@@ -116,7 +118,7 @@ var empty_map: map[text, int] = {}
 empty_map["a"] = 1
 ```
 
-These are all the built-in tasks on collections: `len`, `is_empty`, `get`, `push`, `pop`, `swap`, `add`, `remove`, and `sort` on a list. Text has `len`, `is_empty`, `bytes`, `split`, `upper`, `lower`, `to_int`. A `float` has `sqrt`. Write anything else yourself.
+These are all the built-in tasks on collections: `len`, `is_empty`, `get`, `push`, `pop`, `swap`, `add`, `remove`, and `sort` on a list. Text has `len`, `is_empty`, `bytes`, `split`, `upper`, `lower`, `to_int`, `starts_with`, `ends_with`, `contains`, `find`, `trim`. A `float` has `sqrt`. Write anything else yourself.
 
 - An index is an `int` from 0, and a negative one traps. `.get` gives `none` for any index out of range, negative included. Sized numbers need `.to_int()` to be an index.
 - A key can be an integer, `bool`, `text`, or a value made of those. A `float` cannot be a key.

@@ -1,0 +1,4 @@
+print "abc".starts_with(1)
+print "abc".find()
+print "abc".trim(" ")
+print "abc".contains(part: "a")

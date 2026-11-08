@@ -1,0 +1,27 @@
+# Text search and trim: starts_with, ends_with, contains, find, trim.
+
+print "https://x".starts_with("https://")
+print "http".starts_with("https://")
+print "abc".starts_with("")
+print "report.lcd".ends_with(".lcd")
+print "lcd".ends_with(".lcd")
+print "héllo".contains("ll")
+print "héllo".contains("L")
+print "".contains("")
+
+# `find` counts characters, not bytes, and gives `none` for no match.
+print "héllo".find("l")
+print "a→b→c".find("→c")
+print "abc".find("x")
+print "abc".find("")
+let at = "key=value".find("=")
+if at is not none
+    print "key=value"[0..at]
+
+print "[{"  \t inner text \n ".trim()}]"
+# An ideographic space before, and a no-break space after.
+print "[{"　wide ".trim()}]"
+print "[{"   ".trim()}]"
+let name = "  Ada "
+print name.trim().len()
+print name

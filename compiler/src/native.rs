@@ -234,6 +234,10 @@ fn jit(
     builder.symbol("lucid_text_split", lucid_rt::lucid_text_split as *const u8);
     builder.symbol("lucid_text_upper", lucid_rt::lucid_text_upper as *const u8);
     builder.symbol("lucid_text_lower", lucid_rt::lucid_text_lower as *const u8);
+    builder.symbol("lucid_text_starts_with", lucid_rt::lucid_text_starts_with as *const u8);
+    builder.symbol("lucid_text_ends_with", lucid_rt::lucid_text_ends_with as *const u8);
+    builder.symbol("lucid_text_find", lucid_rt::lucid_text_find as *const u8);
+    builder.symbol("lucid_text_trim", lucid_rt::lucid_text_trim as *const u8);
     builder.symbol("lucid_list_new", lucid_rt::lucid_list_new as *const u8);
     builder.symbol("lucid_list_push", lucid_rt::lucid_list_push as *const u8);
     builder.symbol("lucid_list_unique", lucid_rt::lucid_list_unique as *const u8);

@@ -1,0 +1,4 @@
+text_search.lcd:1:25: error E0303: this argument needs `text`, found `int`
+text_search.lcd:2:7: error E0307: `find` takes 1 positional argument
+text_search.lcd:3:7: error E0307: `trim` takes no arguments
+text_search.lcd:4:7: error E0307: `contains` takes 1 positional argument

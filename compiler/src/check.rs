@@ -378,7 +378,21 @@ fn builtin_method(ty: Ty, name: &str) -> bool {
         ty if ty.is_float() && name == "sqrt" => true,
         ty if ty.is_number() => conversion(ty, name).is_some() || wrapping_op(ty, name).is_some(),
         Ty::Text => {
-            matches!(name, "len" | "is_empty" | "bytes" | "split" | "upper" | "lower" | "to_int")
+            matches!(
+                name,
+                "len"
+                    | "is_empty"
+                    | "bytes"
+                    | "split"
+                    | "upper"
+                    | "lower"
+                    | "to_int"
+                    | "starts_with"
+                    | "ends_with"
+                    | "contains"
+                    | "find"
+                    | "trim"
+            )
         }
         Ty::List(Ty::Byte) if name == "pointer" => true,
         Ty::List(_) => matches!(name, "len" | "is_empty" | "get" | "push" | "pop" | "swap"),
@@ -4599,6 +4613,45 @@ impl<'a> Checker<'a> {
     }
 
     /// `x.to_int()` on a text: the `int` it spells, or `none`.
+    /// `x.starts_with(part)`, `x.ends_with(part)`, `x.contains(part)`, and
+    /// `x.find(part)`, which gives the `int?` character index of the first
+    /// match. The runtime gives -1 for no match.
+    fn text_part(&mut self, value: Expr, name: &str, args: &'a [ast::Arg], span: Span) -> Expr {
+        let [ast::Arg { name: None, change: false, value: part }] = args else {
+            self.poison_args(args, span);
+            return self.fail("E0307", format!("`{name}` takes 1 positional argument"), span);
+        };
+        let part = self.expected(part, Some(Ty::Text));
+        self.expect(&part, Ty::Text, "this argument");
+        if part.ty != Ty::Text {
+            return poisoned(span);
+        }
+        let symbol = match name {
+            "starts_with" => "lucid_text_starts_with",
+            "ends_with" => "lucid_text_ends_with",
+            _ => "lucid_text_find",
+        };
+        let call = ExprKind::Foreign(symbol, vec![value, part]);
+        if symbol != "lucid_text_find" {
+            return Expr { kind: call, ty: Ty::Bool, span };
+        }
+        let int = |kind| Expr { kind, ty: Ty::Int, span };
+        let zero = || int(ExprKind::Int(0)).into();
+        if name == "contains" {
+            let kind = ExprKind::Binary(BinaryOp::Ge, int(call).into(), zero());
+            return Expr { kind, ty: Ty::Bool, span };
+        }
+        let ty = self.union([Ty::Int, Ty::None]);
+        let local = self.new_local(Ty::Int, false);
+        let at = self.read(local, span);
+        let kind = ExprKind::Binary(BinaryOp::Ge, at.clone().into(), zero());
+        let found = self.widen(at, ty);
+        let missing = self.widen(Expr { kind: ExprKind::None, ty: Ty::None, span }, ty);
+        let test = Expr { kind, ty: Ty::Bool, span };
+        let read = Expr { kind: ExprKind::If(test.into(), found.into(), missing.into()), ty, span };
+        Expr { kind: ExprKind::Seq(vec![Stmt::Set(local, int(call))], read.into()), ty, span }
+    }
+
     fn text_to_int(&mut self, value: Expr, span: Span) -> Expr {
         let ty = self.union([Ty::Int, Ty::None]);
         let mut setup = Vec::new();
@@ -5378,6 +5431,9 @@ impl<'a> Checker<'a> {
         if text == "split" {
             return self.text_split(value, args, span);
         }
+        if ty == Ty::Text && matches!(text, "starts_with" | "ends_with" | "contains" | "find") {
+            return self.text_part(value, text, args, span);
+        }
         if let Some(op) = wrapping_op(ty, text) {
             let [ast::Arg { name: None, change: false, value: other }] = args else {
                 return self.fail("E0307", format!("`{text}` takes 1 positional argument"), span);
@@ -5406,6 +5462,9 @@ impl<'a> Checker<'a> {
             }
             (Ty::Text, "lower") => {
                 Expr { kind: ExprKind::Foreign("lucid_text_lower", vec![value]), ty, span }
+            }
+            (Ty::Text, "trim") => {
+                Expr { kind: ExprKind::Foreign("lucid_text_trim", vec![value]), ty, span }
             }
             (Ty::Text, "to_int") => self.text_to_int(value, span),
             (Ty::Spawned(item), "wait") => self.first_of("lucid_wait", value, *item, span),

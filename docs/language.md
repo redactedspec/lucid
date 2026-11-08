@@ -126,6 +126,11 @@ A slice scans and copies, so its cost grows with the length of `x`. A `for` is l
 print "a,b,,c".split(",")    # ["a", "b", "", "c"]
 print "Straße".upper()       # STRASSE
 print "ÀB".lower()           # àb
+print "a.lcd".ends_with(".lcd")  # true, and starts_with too
+print "héllo".contains("ll") # true
+print "héllo".find("l")      # int?, here 2
+print " hi
+".trim()         # hi
 let n = "-42".to_int()       # int?, here -42
 let bad = "4x".to_int()      # none
 ```
@@ -134,7 +139,9 @@ let bad = "4x".to_int()      # none
 
 `x.upper()` and `x.lower()` change case by Unicode's default rules, which do not depend on a language. So the length can change, as `"ß".upper()` is `"SS"`.
 
-Planned for M8, by decision 189: `x.starts_with(part)`, `x.ends_with(part)`, `x.contains(part)`, `x.find(part)`, which gives the `int?` index of the first match, and `x.trim()`.
+`x.starts_with(part)`, `x.ends_with(part)`, and `x.contains(part)` give a `bool`. `x.find(part)` gives the `int?` character index of the first match, or `none`, so it can slice `x`. An empty `part` matches at the start, so `x.find("")` is 0.
+
+`x.trim()` gives `x` without the Unicode white space at either end, the characters with the `White_Space` property.
 
 `x.to_int()` gives the `int` that the whole text spells, or `none`. It takes an optional `+` or `-`, then ASCII digits, and nothing else: no space, `_`, or base prefix. A number that does not fit in `int` gives `none`.
 
