@@ -41,7 +41,7 @@ fn build(out: &Path, cargo_args: &[&str], rustc_args: &[&str]) -> String {
         .arg(out.join("runtime"))
         // Data in its own sections, so the linker drops SQLite's tables, and
         // with them its code, from a program that never opens a database.
-        .env("CFLAGS_x86_64_pc_windows_msvc", "/Gw")
+        .env("CFLAGS_x86_64_pc_windows_msvc", windows_cflags())
         .arg("--")
         .args(rustc_args)
         .output()
@@ -49,4 +49,17 @@ fn build(out: &Path, cargo_args: &[&str], rustc_args: &[&str]) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     assert!(output.status.success(), "building lucid_rt failed:\n{stderr}");
     stderr
+}
+
+/// `/Gw` added to the flags that `cc` would read for the runtime's C, so a
+/// developer's own flags stay. `cc` takes the first of these that is set.
+fn windows_cflags() -> String {
+    let names = [
+        "CFLAGS_x86_64-pc-windows-msvc",
+        "CFLAGS_x86_64_pc_windows_msvc",
+        "TARGET_CFLAGS",
+        "CFLAGS",
+    ];
+    let own = names.iter().find_map(|name| env::var(name).ok()).unwrap_or_default();
+    format!("{own} /Gw").trim_start().to_string()
 }
