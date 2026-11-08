@@ -521,6 +521,98 @@ fn todo_works(dir: &Path, built: bool) {
     assert_eq!(run(&["nope"]), "Unknown command: nope\n");
 }
 
+/// The exit of M7: the built website answers 64 clients at once, each
+/// with requests on one kept-alive connection, while one more client holds
+/// a request half sent.
+#[test]
+fn website_serves_under_load() {
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::time::{Duration, Instant};
+
+    struct Kill(std::process::Child);
+    impl Drop for Kill {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+        }
+    }
+    // One response: the status line, and the body by its Content-Length.
+    fn answer(reader: &mut BufReader<TcpStream>) -> (String, String) {
+        let mut status = String::new();
+        reader.read_line(&mut status).expect("no status line");
+        let mut length = 0;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("no header line");
+            if line == "\r\n" {
+                break;
+            }
+            if let Some(n) = line.strip_prefix("Content-Length: ") {
+                length = n.trim().parse().expect("bad length");
+            }
+        }
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).expect("short body");
+        (status.trim_end().to_string(), String::from_utf8(body).expect("body is not UTF-8"))
+    }
+
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("website");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("cannot make directory");
+    fs::copy(repo().join("examples/website.lcd"), dir.join("website.lcd")).expect("cannot copy");
+    let output = lucid(&dir, &["build", "website.lcd"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    // A free port, given back so that the server can take it.
+    let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let mut server = Command::new(dir.join("website.exe"));
+    server.arg(port.to_string()).stdout(Stdio::null()).stderr(Stdio::piped());
+    let mut server = Kill(server.spawn().expect("cannot start the website"));
+    let address = format!("127.0.0.1:{port}");
+    let started = Instant::now();
+    let connect = || loop {
+        match TcpStream::connect(&address) {
+            Ok(stream) => {
+                stream.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+                return stream;
+            }
+            Err(e) if started.elapsed() > Duration::from_secs(20) => panic!("cannot connect: {e}"),
+            Err(_) => std::thread::sleep(Duration::from_millis(20)),
+        }
+    };
+    let mut slow = connect();
+    slow.write_all(b"GET /status HTTP/1.1\r\nHost: x\r\n").unwrap();
+    let clients: Vec<_> = (0..64)
+        .map(|i| {
+            let stream = connect();
+            std::thread::spawn(move || {
+                let mut writer = stream.try_clone().unwrap();
+                let mut reader = BufReader::new(stream);
+                for n in 0..20 {
+                    let path = if (i + n) % 2 == 0 { "/" } else { "/status" };
+                    let request = format!("GET {path} HTTP/1.1\r\nHost: x\r\n\r\n");
+                    writer.write_all(request.as_bytes()).unwrap();
+                    let (status, body) = answer(&mut reader);
+                    assert_eq!(status, "HTTP/1.1 200 OK", "{path}");
+                    let wanted = if path == "/" { "Hello from Lucid" } else { "\"ok\":true" };
+                    assert!(body.contains(wanted), "{path}: {body}");
+                }
+            })
+        })
+        .collect();
+    let failed = clients.into_iter().map(|c| c.join()).filter(|r| r.is_err()).count();
+    if failed == 0 {
+        slow.write_all(b"\r\n").unwrap();
+        let (status, body) = answer(&mut BufReader::new(slow));
+        assert_eq!(status, "HTTP/1.1 200 OK");
+        assert!(body.contains("\"version\":\"0.1.0\""), "{body}");
+    }
+    let exited = server.0.try_wait().unwrap();
+    server.0.kill().unwrap();
+    let mut stderr = String::new();
+    server.0.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
+    assert_eq!((failed, exited, stderr.as_str()), (0, None, ""), "clients failed, exit, stderr");
+}
+
 /// A built program gives what `lucid run` gives: traces, the stack limit,
 /// foreign calls, and threads each depend on how the program starts.
 #[test]
