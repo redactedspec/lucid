@@ -118,12 +118,11 @@ Designed by decisions 169 to 180, see "Threads" in `compiler.md`. OS threads, by
 
 ## M8: Ecosystem
 
-Designed by decisions 188 to 204, see "Ecosystem" in `compiler.md`. Build in this order:
+Designed by decisions 188 to 205, see "Ecosystem" in `compiler.md`. Build in this order:
 
 - [ ] Prelude text tasks `starts_with`, `ends_with`, `contains`, `find`, and `trim`, by decision 189
 - [ ] Compile only reachable tasks, by decision 190
 - [ ] Linux x86-64: `run`, `test`, and `build`, with a fresh private staging directory, by decision 191. All tests pass in WSL
-- [ ] macOS arm64, by decision 191, and a GitHub Actions job that runs `cargo test` there, by decision 192
 - [ ] `std.crypto`, by decision 193
 - [ ] `std.sql` and the `sql` type, by decisions 194 and 195
 - [ ] Orphan rule, by decision 196
@@ -131,7 +130,7 @@ Designed by decisions 188 to 204, see "Ecosystem" in `compiler.md`. Build in thi
 - [ ] `lucid lsp`, by decision 202
 - [ ] Spec review, then the version 1.0 promise, by decisions 203 and 204
 
-**Exit:** a package that uses a registry package with `std.sql` and `std.crypto` builds and passes `lucid test` on Windows, Linux, and macOS, and an editor shows its diagnostics through `lucid lsp`.
+**Exit:** a package that uses a registry package with `std.sql` and `std.crypto` builds and passes `lucid test` on Windows and Linux, and an editor shows its diagnostics through `lucid lsp`.
 
 ## M9: Self-hosted front end
 
@@ -147,4 +146,4 @@ Start only after the version 1.0 stability promise. Port one stage at a time. Th
 
 ## Later, not planned
 
-Native backend in Lucid, LLVM release backend, plain types stored inline, literal types, compile-time evaluation.
+macOS, by decision 205. Native backend in Lucid, LLVM release backend, plain types stored inline, literal types, compile-time evaluation.

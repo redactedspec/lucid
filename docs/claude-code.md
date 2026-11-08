@@ -85,7 +85,7 @@ Hooks load when a session starts, so a change to them applies from the next sess
 
 ## Not useful for Lucid now
 
-Skipped on purpose: agent teams (about 7x the tokens in plan mode), cloud sessions and GitHub features (the repository is a private GitHub repository, used only for push), MCP servers, and scheduled tasks. One exception is planned for M8: a GitHub Actions job on macOS, since no Mac is at hand, under a $0 spending limit, by decision 192. Reconsider if a real need appears.
+Skipped on purpose: agent teams (about 7x the tokens in plan mode), cloud sessions and GitHub features (the repository is a private GitHub repository, used only for push), MCP servers, and scheduled tasks. No CI runs: M8 supports Windows and Linux, both checked on the owner's machine, by decision 205. Reconsider if a real need appears.
 
 ## Sources
 
