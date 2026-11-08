@@ -443,6 +443,9 @@ impl Parser {
         let name = self.name()?;
         let mut params = Vec::new();
         if self.eat("(") {
+            if self.at(")") {
+                return self.expected("a field");
+            }
             params = self.params()?;
             self.expect(")")?;
         }
@@ -1385,6 +1388,7 @@ mod tests {
         assert_eq!(codes("a == b is none\n"), ["E0204"]);
         assert_eq!(codes("a..b..c\n"), ["E0204"]);
         assert_eq!(codes("if a\n    use b\n"), ["E0206"]);
+        assert_eq!(codes("choice C\n    V()\n"), ["E0201"]);
     }
 
     #[test]

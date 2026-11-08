@@ -14,7 +14,7 @@ collection_types.lcd:13:9: error E0303: a set has no index
   note: to test for a value, use `x in items`
 collection_types.lcd:14:9: error E0303: this needs one index
 collection_types.lcd:15:14: error E0303: `in` needs a list, map, or set, found `int`
-collection_types.lcd:16:9: error E0303: `in` needs `int`, found `text`
+collection_types.lcd:16:17: error E0303: this list needs `text`, found `int`
 collection_types.lcd:17:9: error E0303: `push` gives no value, so it must be a statement
 collection_types.lcd:18:9: error E0303: `bytes` does not work on `list[byte]`
 collection_types.lcd:20:8: error E0303: this argument needs `int`, found `text`

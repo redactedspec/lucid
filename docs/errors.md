@@ -551,9 +551,9 @@ Fix: mark the declaration `public`, or use what the module already shares.
 
 ## E0334: The file of a `use` does not exist, or is spelled with other letter case
 
-A `use ./a.b` reads `a/b.lcd` from the directory of the file. Letter case must match the disk, so the program works on every system.
+A `use ./a.b` reads `a/b.lcd` from the directory of the file. Letter case must match the disk, so the program works on every system. A `use std.a` needs `a` to be a module of the standard library.
 
-Fix: correct the path, or match the letter case of the file on disk.
+Fix: correct the path, or match the letter case of the file on disk. For `std`, see the modules in `docs/stdlib-and-web.md`.
 
 ## E0335: Modules import each other in a cycle
 

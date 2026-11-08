@@ -476,6 +476,11 @@ fn is_std_module(name: &str) -> bool {
     STD_MODULES.iter().any(|(module, _)| *module == name)
 }
 
+/// A `std` module in the spec but not built yet, whose `use` reports E0901.
+fn is_planned_std_module(name: &str) -> bool {
+    name == "process"
+}
+
 /// True if a file is the `src/lib.lcd` of its package, by any spelling.
 fn is_library(file: &str) -> bool {
     let real = |path: &str| std::fs::canonicalize(path).ok();
@@ -929,6 +934,10 @@ impl Loader {
             return None;
         }
         if !is_std_module(&module.text) {
+            if !is_planned_std_module(&module.text) {
+                let message = format!("the standard library has no module `{}`", module.text);
+                self.diags.push(Diagnostic::new("E0334", message, span));
+            }
             return None;
         }
         let (item, last) = match rest {
@@ -1135,12 +1144,12 @@ fn join(
         let mut renamer =
             Renamer { names, aliases, exports: &exports, keys: &keys, scopes: Vec::new(), diags };
         renamer.stmts(&mut module.stmts);
-        // A `use` of a `std` module not built yet stays, and reports E0901.
+        // A `use` of a planned `std` module stays, and reports E0901.
         module.stmts.retain(|stmt| match &stmt.kind {
             StmtKind::Use { relative, path, .. } => {
                 !relative
                     && path[0].text == "std"
-                    && path.get(1).is_some_and(|module| !is_std_module(&module.text))
+                    && path.get(1).is_some_and(|module| is_planned_std_module(&module.text))
             }
             _ => true,
         });

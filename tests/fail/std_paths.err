@@ -1,3 +1,4 @@
 std_paths.lcd:1:1: error E0334: `std` is not a module
   note: name one of its modules, as in `use std.fs`
 std_paths.lcd:2:1: error E0334: `std.args` has no modules inside it
+std_paths.lcd:3:1: error E0334: the standard library has no module `jsn`

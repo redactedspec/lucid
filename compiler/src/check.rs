@@ -4627,7 +4627,7 @@ impl<'a> Checker<'a> {
                 None
             }
             _ => {
-                self.unsupported("indexing", span);
+                self.fail("E0303", format!("`{}` has no index", ty.name()), span);
                 None
             }
         }
@@ -4942,7 +4942,9 @@ impl<'a> Checker<'a> {
         } else {
             let first = self.lower(left, hint);
             // A collection literal takes its element type from the other side.
-            let want = if matches!(right.kind, Ast::List(_) | Ast::Map(_)) {
+            let set = matches!(&right.kind, Ast::Call { callee, .. }
+                if matches!(&callee.kind, Ast::Name(name) if self.is_set_call(name)));
+            let want = if set || matches!(right.kind, Ast::List(_) | Ast::Map(_)) {
                 Some(first.ty).filter(|ty| ty.is_collection())
             } else {
                 self.number_want(Some(first.ty)).or(sql(first.ty)).or(hint)
@@ -4962,7 +4964,7 @@ impl<'a> Checker<'a> {
     ) -> Expr {
         // A literal takes its type from the other side, so that side goes first.
         let first = (!literal_math(left)).then(|| self.expr(left));
-        let want = first.as_ref().map(|value| value.ty).filter(|ty| ty.is_number());
+        let want = first.as_ref().map(|value| value.ty).filter(|ty| *ty != Ty::Error);
         let collection = want.and_then(|item| match &right.kind {
             Ast::List(_) => Some(Ty::List(inner(item))),
             Ast::Call { callee, .. }

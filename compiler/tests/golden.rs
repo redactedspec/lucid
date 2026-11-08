@@ -370,7 +370,7 @@ fn costs_are_reported() {
     }
     // A program that cannot compile has no costs to report, which is not zero.
     let scratch = Path::new(env!("CARGO_TARGET_TMPDIR"));
-    fs::write(scratch.join("unbuilt.lcd"), "use std.foo\nprint 1\n")
+    fs::write(scratch.join("unbuilt.lcd"), "use std.process\nprint 1\n")
         .expect("cannot write test file");
     let output = lucid(scratch, &["check", "--costs", "unbuilt.lcd"]);
     assert_eq!(output.status.code(), Some(1));
@@ -396,7 +396,7 @@ fn unsafe_sites_are_reported() {
     assert_eq!((output.status.code(), text(&output.stdout).as_str()), (Some(0), ""));
     // An unbuilt feature does not hide a site, as it does not fail `check`.
     let scratch = Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let source = "use std.foo\n# It runs nothing.\nunsafe\n    print 1\n";
+    let source = "use std.process\n# It runs nothing.\nunsafe\n    print 1\n";
     fs::write(scratch.join("unbuilt_unsafe.lcd"), source).expect("cannot write test file");
     let output = lucid(scratch, &["check", "--unsafe", "unbuilt_unsafe.lcd"]);
     assert_eq!(text(&output.stdout), "unbuilt_unsafe.lcd:3:1: unsafe: block\n");

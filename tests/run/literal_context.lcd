@@ -1,0 +1,12 @@
+# An empty or mixed literal on the right of `==` or `in` takes its type
+# from the left side, whatever that type is.
+
+let s = set([1, 2])
+print s == set([])
+let name = "a"
+print name in []
+let x: int? = none
+print x in [1, none]
+print name in set(["a"])
+let m = {"a": 1}
+print m == {}
