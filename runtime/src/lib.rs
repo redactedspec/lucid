@@ -2986,6 +2986,19 @@ pub unsafe extern "C" fn lucid_net_set_timeout(connection: *const Socket, nanos:
     net_result(stream.set_read_timeout(length).and_then(|()| stream.set_write_timeout(length)));
 }
 
+/// Closes the sending half of `connection`, so the other end reads an end,
+/// while this end can still read, by decision 207.
+///
+/// # Safety
+///
+/// `connection` must point to a live socket of a connection.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_net_close_write(connection: *const Socket) {
+    // SAFETY: the caller guarantees a live socket.
+    let stream = unsafe { stream(connection) };
+    net_result(stream.shutdown(std::net::Shutdown::Write));
+}
+
 /// The kind of the last failure on this thread. See `NET_FAILURE`.
 #[unsafe(no_mangle)]
 pub extern "C" fn lucid_net_failure() -> i64 {

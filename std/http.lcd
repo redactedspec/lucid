@@ -49,6 +49,7 @@ choice Read
 
 unsafe extern task lucid_bytes_valid(data: list[byte]) -> bool
 unsafe extern task lucid_bytes_text(data: list[byte]) -> text
+unsafe extern task lucid_net_close_write(connection: socket)
 
 # The most that a request head and a request body can hold.
 let HEAD_LIMIT = 16384
@@ -320,6 +321,7 @@ public task answer(self: App, connection: Connection)
             Bad(status) ->
                 let refused = Response(status: status, body: reason(status).bytes())
                 send(connection, refused, false, true) else none
+                linger(connection) else none
                 return
             Got(request, close) ->
                 let response = route(self, request)
@@ -327,6 +329,25 @@ public task answer(self: App, connection: Connection)
                     return
                 if close
                     return
+
+# Closes in stages, by RFC 9112 section 9.6 and decision 207. A refused
+# client may still be sending, and a system that closes with bytes unread
+# resets the connection, which can lose the answer. So this end closes its
+# half first, then reads and drops what comes until the client closes too.
+task linger(connection: Connection) -> none or NetError
+    # The runtime only reads the socket. If the close fails, the reads below
+    # fail too, or end at the timeout.
+    unsafe
+        lucid_net_close_write(connection.socket)
+    try connection.set_timeout(time.seconds(2))
+    # A client that keeps sending gets cut off after 1 MiB.
+    var left = 1048576
+    while left > 0
+        let data = try connection.read(65536)
+        if data.is_empty()
+            return none
+        left = left - data.len()
+    return none
 
 # The response of the handler for the request's method and path.
 task route(app: App, request: Request) -> Response

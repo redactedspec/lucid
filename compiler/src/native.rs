@@ -292,6 +292,7 @@ fn jit(
     builder.symbol("lucid_net_read", lucid_rt::lucid_net_read as *const u8);
     builder.symbol("lucid_net_write", lucid_rt::lucid_net_write as *const u8);
     builder.symbol("lucid_net_set_timeout", lucid_rt::lucid_net_set_timeout as *const u8);
+    builder.symbol("lucid_net_close_write", lucid_rt::lucid_net_close_write as *const u8);
     builder.symbol("lucid_net_tls", lucid_rt::lucid_net_tls as *const u8);
     builder.symbol("lucid_net_failure", lucid_rt::lucid_net_failure as *const u8);
     builder.symbol("lucid_net_detail", lucid_rt::lucid_net_detail as *const u8);
