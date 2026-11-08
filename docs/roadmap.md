@@ -105,7 +105,7 @@ Designed by decisions 156 to 164, see "WebAssembly" in `compiler.md`. Build in t
 Designed by decisions 169 to 180, see "Threads" in `compiler.md`. OS threads, by decision 169. Build in this order:
 
 - [x] Bit operators, by decisions 153 and 181
-- [ ] Counts safe across threads, by decision 170. The benchmarks of "M4 benchmarks" must not slow by more than 2%
+- [x] Counts safe across threads, by decision 170. The benchmarks of "M4 benchmarks" must not slow by more than 2%
 - [ ] Stack limit as a hidden parameter, by decision 175, with the same benchmark check
 - [ ] `spawn`, `spawned`, and waiting at the end of a task, by decisions 171 and 172, and E0907, by decision 176
 - [ ] `channel`, `lock`, and the deadlock trap, by decisions 173 and 174. A write through `update` to a value with one count is in place

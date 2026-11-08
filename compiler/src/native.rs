@@ -667,19 +667,48 @@ impl Lower<'_, '_> {
         self.body.def_var(self.vars[local], value);
     }
 
+    /// Adds a count to `value`. Only a positive count, which this thread
+    /// alone holds, changes here. The runtime takes a marked or static one.
     fn retain(&mut self, value: Value) {
         if !INLINE_COUNTS {
             self.call(self.runtime.retain, &[value]);
             return;
         }
+        let plain = self.body.create_block();
+        let other = self.body.create_block();
+        let done = self.body.create_block();
+        self.body.set_cold_block(other);
         let flags = MemFlagsData::trusted();
         let count = self.body.ins().load(types::I64, flags, value, lucid_rt::COUNT_OFFSET);
-        let count = self.body.ins().iadd_imm_s(count, 1);
-        self.body.ins().store(flags, count, value, lucid_rt::COUNT_OFFSET);
+        let positive = self.body.ins().icmp_imm_s(IntCC::SignedGreaterThan, count, 0);
+        self.body.ins().brif(positive, plain, &[], other, &[]);
+        self.body.seal_block(plain);
+        self.body.seal_block(other);
+        self.body.switch_to_block(plain);
+        let more = self.body.ins().iadd_imm_s(count, 1);
+        self.body.ins().store(flags, more, value, lucid_rt::COUNT_OFFSET);
+        self.body.ins().jump(done, &[]);
+        self.body.switch_to_block(other);
+        self.call_unless_static(self.runtime.retain, value, count, done);
+        self.body.seal_block(done);
+        self.body.switch_to_block(done);
     }
 
-    /// Gives up a count of `value`, which may be null. Only the last count
-    /// calls the runtime.
+    /// Calls the count `task` on `value` unless its `count` is 0, then jumps
+    /// to `done`. Static data is common, as a variant with no fields, so it
+    /// takes no call.
+    fn call_unless_static(&mut self, task: FuncId, value: Value, count: Value, done: Block) {
+        let call = self.body.create_block();
+        self.body.ins().brif(count, call, &[], done, &[]);
+        self.body.seal_block(call);
+        self.body.switch_to_block(call);
+        self.call(task, &[value]);
+        self.body.ins().jump(done, &[]);
+    }
+
+    /// Gives up a count of `value`, which may be null. Only a count above 1
+    /// changes here. The runtime takes the last count, and a marked or
+    /// static one.
     fn release(&mut self, value: Value) {
         if !INLINE_COUNTS {
             self.call(self.runtime.release, &[value]);
@@ -695,17 +724,16 @@ impl Lower<'_, '_> {
         self.body.switch_to_block(held);
         let flags = MemFlagsData::trusted();
         let count = self.body.ins().load(types::I64, flags, value, lucid_rt::COUNT_OFFSET);
-        let more = self.body.ins().icmp_imm_s(IntCC::NotEqual, count, 1);
+        let more = self.body.ins().icmp_imm_s(IntCC::SignedGreaterThan, count, 1);
         self.body.ins().brif(more, shared, &[], last, &[]);
         self.body.seal_block(shared);
         self.body.seal_block(last);
         self.body.switch_to_block(shared);
-        let count = self.body.ins().iadd_imm_s(count, -1);
-        self.body.ins().store(flags, count, value, lucid_rt::COUNT_OFFSET);
+        let fewer = self.body.ins().iadd_imm_s(count, -1);
+        self.body.ins().store(flags, fewer, value, lucid_rt::COUNT_OFFSET);
         self.body.ins().jump(done, &[]);
         self.body.switch_to_block(last);
-        self.call(self.runtime.release, &[value]);
-        self.body.ins().jump(done, &[]);
+        self.call_unless_static(self.runtime.release, value, count, done);
         self.body.seal_block(done);
         self.body.switch_to_block(done);
     }
@@ -1011,8 +1039,8 @@ impl Lower<'_, '_> {
         if expr.ty == Ty::Float { self.expr(expr) } else { self.slot(expr) }
     }
 
-    /// True if `value` has one count. A debug runtime's dead value has another,
-    /// so it reaches the runtime's own check.
+    /// True if `value` has one count. A marked value with one count, and a
+    /// debug runtime's dead value, take the runtime path, which checks them.
     fn is_unique(&mut self, value: Value) -> Value {
         let flags = MemFlagsData::trusted();
         let count = self.body.ins().load(types::I64, flags, value, lucid_rt::COUNT_OFFSET);

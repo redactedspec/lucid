@@ -163,6 +163,25 @@ What moved the numbers, in order of size:
 
 Vectorizing is worth about 1.5x here, and Cranelift has none. Boxing costs at most 1.34x, even under LLVM. A version of the Lucid program with one flat `list[float]` per field took 309 ms in one run, so moving the records out of the heap would not help by itself. The gap to unvectorized Rust, 2.2x, is then bounds checks, count checks, and code quality. No LLVM build was tried, so what it would give Lucid is unmeasured.
 
+### Signed counts (M7)
+
+Level: **Read** (own measurement), 2026-11-07, for decision 170. `benchmarks/run.py` with the compiler from before the change in the `unchecked` slot, so each round runs old and new one after the other. Ratio of new to old, best and median:
+
+| Program | Rounds | Best | Median |
+| --- | --- | --- | --- |
+| `nbody` | 15 | 1.00 | 1.00 |
+| `trees` | 40 | 1.01 | 1.02 |
+| `json` | 15 | 1.01 | 1.02 |
+| `hashmap` | 15 | 1.02 | 0.98 |
+| `strings` | 15 | 0.95 | 0.95 |
+
+What moved the numbers on the way there:
+
+- **Static data must not reach the runtime.** With a count of 0, the first version sent each retain and release of a variant with no fields to a runtime call. Compiled code now tests for 0 before it calls.
+- **The runtime release path is sensitive to branch order.** `trees` frees mostly records whose slots hold a count of 1 or static data. A `match` on the count made it 10% to 17% slower. A version that stored the count twice for the last count made a text join loop 45% slower. The built order tests for a positive count first, stores only a count above 1, and puts the atomic path in a `#[cold]` function. Each step was timed on `trees` and on a 3 million step loop of `"key{i % 10000}"`.
+
+Limits: one machine, with best times of the old compiler that moved by up to 8% between runs of `trees`. So 2% is near what this method can see, and the 40 round run of `trees` is the one to trust. No thread shares a value yet, so the atomic path is tested by `marked_counts_hold_across_threads` in `lucid_rt`, not timed.
+
 ### First Lucid benchmarks (M2)
 
 Level: **Read** (own measurement). `sh benchmarks/run.sh`, 2026-11-05, on the development machine: 15 paired rounds, so drift hits every build alike. Lucid includes JIT compile time. Rust is `rustc -O`, and "Rust checked" adds `-C overflow-checks=on`.
@@ -208,7 +227,8 @@ Decisions 169 to 180. Level: **Snippet** for web sources, read through search su
 - **Deadlock.** Go's `checkdead` reports "all goroutines are asleep" when no thread runs and no goroutine can wake. Go turns it off for programs linked with C, since C code may still make progress.
 - **HTTP framing.** RFC 9112, section 6.1, lets a server reject a request with both `Transfer-Encoding` and `Content-Length`, or else use `Transfer-Encoding` and close the connection after. Crystal's 2026 post-mortem and an http4s advisory report request smuggling from parsers that read `Content-Length` first. The RFC text itself was not read.
 - **TLS.** `rustls` 0.23 made `aws-lc-rs` the default provider, whose build needs `cmake`, and NASM on Windows. `ring` stays available with default features off.
-- **Weak ground.** The cost of the extra compare on retain, and of the hidden stack limit parameter, is not measured. Both are build steps with a benchmark check.
+- **Cost of signed counts.** Measured, see "Signed counts (M7)" below: within 2% on the M4 benchmarks, but only after the runtime release path was reordered.
+- **Weak ground.** The cost of the hidden stack limit parameter is not measured. It is a build step with a benchmark check.
 
 Sources: [Why async Rust?](https://without.boats/blog/why-async-rust/), [loom-dev, native methods and virtual threads](https://mail.openjdk.org/pipermail/loom-dev/2023-July/005934.html), [JEP 491](https://openjdk.org/jeps/491), [lean-rs-sys refcount.rs](https://docs.rs/crate/lean-rs-sys/latest/source/src/refcount.rs), [Rust Arc](https://doc.rust-lang.org/nightly/alloc/sync/struct.Arc.html), [golang-nuts on recovery](https://groups.google.com/g/golang-nuts/c/zzUfBynUVV8), [Go issue 76763](https://github.com/golang/go/issues/76763), [Go under the hood: deadlock](https://golang.design/under-the-hood/en/part5toolchain/ch16tools/deadlock/), [Go issue 46260](https://golang.org/issue/46260), [Crystal post-mortem](https://crystal-lang.org/2026/05/26/http-request-smuggling-vulnerability-in-http-server/), [http4s advisory](https://corgea.com/advisories/vulnerabilities/CVE-2026-69204), [rustls issue 1913](https://www.github.com/rustls/rustls/issues/1913), [rustls docs](https://docs.rs/rustls/).
 

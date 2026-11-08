@@ -13,7 +13,7 @@ use std::io::{ErrorKind, Write};
 use std::mem::offset_of;
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering, fence};
 
 #[cfg(feature = "exe")]
 mod exe;
@@ -53,9 +53,15 @@ const STDOUT_FAILED: &[u8] = b"trap: cannot write to stdout";
 const OUT_OF_MEMORY: &[u8] = b"trap: out of memory";
 
 /// Starts every heap value, so one `retain` and `release` serve them all.
+///
+/// The sign of `count` tells who holds the value, by decision 170. A positive
+/// count belongs to one thread, and changes with plain loads and stores. A
+/// negative count is marked: threads share it, and it changes atomically. A
+/// count of 0 is static data, which nothing changes. Every access here is
+/// atomic, and a `Relaxed` load or store is a plain one.
 #[repr(C)]
 pub struct Head {
-    count: u64,
+    count: AtomicI64,
     kind: Kind,
 }
 
@@ -172,8 +178,9 @@ pub const TAG_OFFSET: i32 = offset_of!(Record, tag) as i32;
 pub const RECORD_SLOTS_OFFSET: i32 = size_of::<Record>() as i32;
 pub const COUNTED_OFFSET: i32 = offset_of!(Record, counted) as i32;
 
-/// Debug builds only: the count of a released value.
-const DEAD: u64 = u64::MAX;
+/// Debug builds only: the count of a released value. No marked value has this
+/// many counts.
+const DEAD: i64 = i64::MIN;
 
 /// Debug builds only: the number of values not yet released.
 static LIVE: AtomicUsize = AtomicUsize::new(0);
@@ -227,7 +234,7 @@ unsafe fn free(value: *mut Head, size: usize) {
     if cfg!(debug_assertions) {
         LIVE.fetch_sub(1, Ordering::Relaxed);
         // SAFETY: the caller guarantees a live value.
-        unsafe { (*value).count = DEAD };
+        unsafe { (*value).count.store(DEAD, Ordering::Relaxed) };
     } else {
         // SAFETY: the caller guarantees the size, and `object` used this layout.
         unsafe { dealloc(value.cast(), layout(size)) };
@@ -241,7 +248,7 @@ unsafe fn free(value: *mut Head, size: usize) {
 /// `value` must be readable, which a debug build keeps true after release.
 unsafe fn check_live(value: *const Head) {
     // SAFETY: the caller guarantees this.
-    if cfg!(debug_assertions) && unsafe { (*value).count } == DEAD {
+    if cfg!(debug_assertions) && unsafe { (*value).count.load(Ordering::Relaxed) } == DEAD {
         trap(b"trap: runtime bug: use after free");
     }
 }
@@ -252,12 +259,13 @@ fn text_alloc(len: usize) -> *mut Text {
 }
 
 fn text_with_room(len: usize, cap: usize) -> *mut Text {
-    let head = Head { count: 1, kind: Kind::Text { ascii: Ascii::Unknown } };
+    let head = Head { count: AtomicI64::new(1), kind: Kind::Text { ascii: Ascii::Unknown } };
     object(text_size(cap), Text { head, len: len as u64, cap: cap as u64 })
 }
 
-/// The count of a value in static data. Nothing can release it this many times.
-const IMMORTAL: u64 = 1 << 62;
+/// The count of a value in static data. `lucid_retain` and `lucid_release`
+/// leave it alone, and it is never unique, so nothing writes to it.
+const STATIC: i64 = 0;
 
 /// Copies a header, for a backend to put in static data.
 ///
@@ -273,10 +281,10 @@ fn image<T>(value: T) -> Vec<u8> {
 }
 
 /// A text as static data. Compiled code uses its address like any text. Its
-/// count never reaches one, so nothing writes to it or frees it.
+/// count is `STATIC`, so nothing writes to it or frees it.
 pub fn static_text(text: &str) -> Vec<u8> {
     let ascii = if text.is_ascii() { Ascii::Yes } else { Ascii::No };
-    let head = Head { count: IMMORTAL, kind: Kind::Text { ascii } };
+    let head = Head { count: AtomicI64::new(STATIC), kind: Kind::Text { ascii } };
     let mut value = image(Text { head, len: text.len() as u64, cap: text.len() as u64 });
     value.extend_from_slice(text.as_bytes());
     value
@@ -284,7 +292,7 @@ pub fn static_text(text: &str) -> Vec<u8> {
 
 /// A record with no slots as static data, for a variant with no fields.
 pub fn static_record(tag: usize) -> Vec<u8> {
-    let head = Head { count: IMMORTAL, kind: Kind::Record };
+    let head = Head { count: AtomicI64::new(STATIC), kind: Kind::Record };
     image(Record { head, tag: tag as u64, len: 0, counted: 0 })
 }
 
@@ -384,7 +392,7 @@ unsafe fn add_bytes(first: *mut Text, part: &[u8]) -> *mut Text {
         };
         // Unknown stays unknown, so a scan waits until something needs it.
         let ascii = if ascii == Ascii::Yes && !part.is_ascii() { Ascii::No } else { ascii };
-        let text = if (*first).head.count == 1 && len as u64 <= (*first).cap {
+        let text = if unique(first.cast()) && len as u64 <= (*first).cap {
             first
         } else {
             let grown = text_with_room(len, len.saturating_mul(2));
@@ -442,9 +450,92 @@ pub unsafe extern "C" fn lucid_text_append_int(first: *mut Text, value: i64) -> 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lucid_retain(value: *mut Head) {
     // SAFETY: the caller guarantees a live value.
-    unsafe {
+    let count = unsafe {
         check_live(value);
-        (*value).count += 1;
+        &(*value).count
+    };
+    match count.load(Ordering::Relaxed) {
+        STATIC => {}
+        // A marked count grows downward. `Relaxed` is enough, as in `Arc`:
+        // the caller's own count keeps the value alive.
+        held if held < 0 => _ = count.fetch_sub(1, Ordering::Relaxed),
+        held => count.store(held + 1, Ordering::Relaxed),
+    }
+}
+
+/// True if this caller holds the only count of `value`, so it may write in
+/// place. A marked value with one count becomes plain again, as with
+/// `Arc::get_mut`. No other thread holds it, so none can add a count, and
+/// the acquire load orders their last use of it before this write.
+///
+/// # Safety
+///
+/// `value` must point to a live value that this caller has a count of.
+unsafe fn unique(value: *const Head) -> bool {
+    // SAFETY: the caller guarantees a live value.
+    let count = unsafe { &(*value).count };
+    match count.load(Ordering::Acquire) {
+        1 => true,
+        -1 => {
+            count.store(1, Ordering::Relaxed);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Marks `value` and all it reaches as shared by threads, by negating each
+/// positive count. Marking stops at a marked or static value, since all it
+/// reaches is marked or static already, so a value sent again costs nothing.
+/// `value` may be null. This needs no recursion, as with `lucid_release`.
+///
+/// # Safety
+///
+/// `value` must be null, or point to a live value that this caller has a
+/// count of. No other thread may hold an unmarked value that it reaches.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_mark(value: *mut Head) {
+    let mut todo = vec![value];
+    while let Some(value) = todo.pop() {
+        if value.is_null() {
+            continue;
+        }
+        // SAFETY: the caller guarantees live values, and `kind` tells each
+        // value's layout. Only this thread holds a value with a positive count.
+        unsafe {
+            check_live(value);
+            let count = (*value).count.load(Ordering::Relaxed);
+            if count <= 0 {
+                continue;
+            }
+            (*value).count.store(-count, Ordering::Relaxed);
+            let held = |slot: &i64| *slot as *mut Head;
+            match (*value).kind {
+                Kind::Text { .. } => {}
+                Kind::List { counted, .. } => {
+                    if counted {
+                        todo.extend(slots(value.cast()).iter().map(held));
+                    }
+                }
+                Kind::Map { key_counted, value_counted } => {
+                    for entry in entries(value.cast()).iter().filter(|entry| entry.hash != REMOVED)
+                    {
+                        if key_counted {
+                            todo.push(entry.key as *mut Head);
+                        }
+                        if value_counted {
+                            todo.push(entry.value as *mut Head);
+                        }
+                    }
+                }
+                Kind::Record => {
+                    let record = value.cast::<Record>();
+                    todo.extend(
+                        record_slots(record)[..(*record).counted as usize].iter().map(held),
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -467,7 +558,7 @@ pub unsafe extern "C" fn lucid_release(value: *mut Head) {
         drop_count(value, &mut pending);
         while !pending.is_null() {
             let value = pending;
-            pending = (*value).count as usize as *mut Head;
+            pending = (*value).count.load(Ordering::Relaxed) as usize as *mut Head;
             match (*value).kind {
                 Kind::Text { .. } => free(value, text_size((*value.cast::<Text>()).cap as usize)),
                 Kind::List { counted, small } => {
@@ -514,15 +605,37 @@ unsafe fn drop_count(value: *mut Head, pending: &mut *mut Head) {
     }
     // SAFETY: the caller guarantees a live value.
     unsafe {
-        if cfg!(debug_assertions) && (*value).count == DEAD {
+        let count = &(*value).count;
+        let held = count.load(Ordering::Relaxed);
+        if cfg!(debug_assertions) && held == DEAD {
             trap(b"trap: runtime bug: double free");
         }
-        (*value).count -= 1;
-        if (*value).count == 0 {
-            (*value).count = *pending as u64;
+        // A plain count comes first: it is by far the most common.
+        let last = if held > 0 {
+            if held > 1 {
+                count.store(held - 1, Ordering::Relaxed);
+            }
+            held == 1
+        } else {
+            held < 0 && drop_marked(count)
+        };
+        if last {
+            count.store(*pending as i64, Ordering::Relaxed);
             *pending = value;
         }
     }
+}
+
+/// Gives up one count of a marked value, and returns true for the last. As
+/// in `Arc`, each drop releases this thread's writes, and the last acquires
+/// them all before the value is freed. Cold, so plain counts stay compact.
+#[cold]
+fn drop_marked(count: &AtomicI64) -> bool {
+    let last = count.fetch_add(1, Ordering::Release) == -1;
+    if last {
+        fence(Ordering::Acquire);
+    }
+    last
 }
 
 /// A slot of a counted collection may be null while compiled code writes
@@ -739,7 +852,7 @@ pub unsafe extern "C" fn lucid_text_lower(text: *const Text) -> *mut Text {
 }
 
 fn list_alloc(cap: usize, counted: bool, small: bool) -> *mut List {
-    let head = Head { count: 1, kind: Kind::List { counted, small } };
+    let head = Head { count: AtomicI64::new(1), kind: Kind::List { counted, small } };
     object(list_size(cap, small), List { head, len: 0, cap: cap as u64 })
 }
 
@@ -793,7 +906,7 @@ unsafe fn unique_list(list: *mut List, cap: usize) -> *mut List {
     // SAFETY: the caller guarantees a live list, and each path below keeps its
     // one count: moved to the copy, or dropped because the copy retains.
     unsafe {
-        let shared = (*list).head.count > 1;
+        let shared = !unique(list.cast());
         if !shared && (*list).cap >= cap as u64 {
             return list;
         }
@@ -807,7 +920,9 @@ unsafe fn unique_list(list: *mut List, cap: usize) -> *mut List {
             if counted {
                 slots(list).iter().for_each(|&slot| retain_slot(slot));
             }
-            (*list).head.count -= 1;
+            // Another thread may give up its count meanwhile, so this one
+            // can be the last.
+            lucid_release(list.cast());
         } else {
             free(list.cast(), list_size((*list).cap as usize, small));
         }
@@ -968,7 +1083,7 @@ pub unsafe extern "C" fn lucid_list_slice(list: *mut List, start: i64, end: i64)
 /// the caller gives.
 #[unsafe(no_mangle)]
 pub extern "C" fn lucid_record_new(tag: u64, len: u32, counted: u32) -> *mut Record {
-    let head = Head { count: 1, kind: Kind::Record };
+    let head = Head { count: AtomicI64::new(1), kind: Kind::Record };
     object(record_size(len as usize), Record { head, tag, len, counted })
 }
 
@@ -1019,7 +1134,7 @@ pub unsafe extern "C" fn lucid_record_set(
 pub unsafe extern "C" fn lucid_record_unique(record: *mut Record) -> *mut Record {
     // SAFETY: the caller guarantees this.
     unsafe {
-        if (*record).head.count == 1 {
+        if unique(record.cast()) {
             return record;
         }
         let (tag, len, counted) = ((*record).tag, (*record).len, (*record).counted);
@@ -1027,7 +1142,7 @@ pub unsafe extern "C" fn lucid_record_unique(record: *mut Record) -> *mut Record
         let old = record_slots(record);
         std::ptr::copy_nonoverlapping(old.as_ptr(), copy.add(1).cast(), len as usize);
         old[..counted as usize].iter().for_each(|&held| retain_slot(held));
-        (*record).head.count -= 1;
+        lucid_release(record.cast());
         copy
     }
 }
@@ -1094,7 +1209,7 @@ fn map_alloc(
     value_counted: bool,
     keys: Option<KeyTasks>,
 ) -> *mut Map {
-    let head = Head { count: 1, kind: Kind::Map { key_counted, value_counted } };
+    let head = Head { count: AtomicI64::new(1), kind: Kind::Map { key_counted, value_counted } };
     let map = object(map_size(cap), Map { head, len: 0, used: 0, cap, keys });
     // SAFETY: `object` made room for the table, and zero is `TABLE_EMPTY`.
     unsafe { table_start(map).write_bytes(0, 2 * cap) };
@@ -1211,7 +1326,7 @@ unsafe fn unique_map(map: *mut Map) -> *mut Map {
     // SAFETY: the caller guarantees a live map. As in `unique_list`, each path
     // keeps its one count, and the live entries fill less than the new `cap`.
     unsafe {
-        let shared = (*map).head.count > 1;
+        let shared = !unique(map.cast());
         let full = (*map).used == (*map).cap;
         if !shared && !full {
             return map;
@@ -1233,7 +1348,7 @@ unsafe fn unique_map(map: *mut Map) -> *mut Map {
             }
         }
         if shared {
-            (*map).head.count -= 1;
+            lucid_release(map.cast());
         } else {
             free(map.cast(), map_size((*map).cap));
         }
@@ -2052,6 +2167,59 @@ mod tests {
         LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    /// Threads share a marked list and its text, then the last holder writes
+    /// to the list in place. In a debug build the leak count proves that each
+    /// value is freed once.
+    #[test]
+    fn marked_counts_hold_across_threads() {
+        let _serial = serial();
+        let start = LIVE.load(Ordering::Relaxed);
+        let count = |value: *mut List| unsafe { (*value).head.count.load(Ordering::Relaxed) };
+        // SAFETY: each pointer is live for as long as a count of it is held.
+        unsafe {
+            let text = text_from(b"shared");
+            let list = lucid_list_push(lucid_list_new(0, true, false), text as i64);
+            lucid_mark(list.cast());
+            lucid_mark(list.cast());
+            assert_eq!((count(list), (*text).head.count.load(Ordering::Relaxed)), (-1, -1));
+            let threads: Vec<_> = (0..8)
+                .map(|_| {
+                    lucid_retain(list.cast());
+                    let list = list as usize;
+                    std::thread::spawn(move || {
+                        let list = list as *mut List;
+                        for _ in 0..10_000 {
+                            let text = *slots(list).first().unwrap() as *mut Head;
+                            lucid_retain(text);
+                            lucid_retain(list.cast());
+                            lucid_release(list.cast());
+                            lucid_release(text);
+                        }
+                        lucid_release(list.cast());
+                    })
+                })
+                .collect();
+            threads.into_iter().for_each(|thread| thread.join().unwrap());
+            assert_eq!(count(list), -1);
+            assert_eq!(lucid_list_unique(list), list);
+            assert_eq!(count(list), 1);
+            lucid_release(list.cast());
+            // A static value, as compiled code sees one, aligned as a header.
+            let image = static_record(0);
+            let mut words = vec![0u64; image.len().div_ceil(8)];
+            std::ptr::copy_nonoverlapping(image.as_ptr(), words.as_mut_ptr().cast(), image.len());
+            let fixed = words.as_mut_ptr().cast::<Head>();
+            lucid_retain(fixed);
+            lucid_mark(fixed);
+            lucid_release(fixed);
+            assert!(!unique(fixed));
+            assert_eq!((*fixed).count.load(Ordering::Relaxed), STATIC);
+        }
+        if cfg!(debug_assertions) {
+            assert_eq!(LIVE.load(Ordering::Relaxed), start);
+        }
+    }
+
     #[cfg(debug_assertions)]
     #[test]
     fn counts_reach_the_leak_check() {
@@ -2123,7 +2291,7 @@ mod tests {
             assert!(lucid_list_swap(copy, -1, 0).is_null());
             lucid_release(copy.cast());
             lucid_release(list.cast());
-            assert_eq!((*text).head.count, 1);
+            assert_eq!((*text).head.count.load(Ordering::Relaxed), 1);
             lucid_release(text.cast());
         }
     }
@@ -2157,12 +2325,15 @@ mod tests {
             lucid_retain(list.cast());
             let popped = lucid_list_pop(list);
             assert_ne!(popped, list);
-            assert_eq!(((*list).len, (*popped).len, (*text).head.count), (1, 0, 2));
+            assert_eq!(
+                ((*list).len, (*popped).len, (*text).head.count.load(Ordering::Relaxed)),
+                (1, 0, 2)
+            );
             lucid_release(list.cast());
             lucid_retain(text.cast());
             let list = lucid_list_push(popped, text as i64);
             let popped = lucid_list_pop(list);
-            assert_eq!((popped, (*text).head.count), (list, 1));
+            assert_eq!((popped, (*text).head.count.load(Ordering::Relaxed)), (list, 1));
             lucid_release(popped.cast());
             lucid_release(text.cast());
         }
@@ -2244,7 +2415,7 @@ mod tests {
             assert_eq!((*map).len, 1);
             assert_eq!(*lucid_map_find(map, b as i64), 2);
             let map = lucid_map_remove(map, b as i64);
-            assert_eq!(((*map).len, (*a).head.count), (0, 1));
+            assert_eq!(((*map).len, (*a).head.count.load(Ordering::Relaxed)), (0, 1));
             lucid_release(map.cast());
             lucid_release(a.cast());
             lucid_release(b.cast());
