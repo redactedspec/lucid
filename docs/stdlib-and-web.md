@@ -17,8 +17,8 @@ Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/
 | `std.net` | TCP sockets | M7, built |
 | `std.http` | HTTP/1.1 server, and client with TLS | M7, built |
 | `std.html` | Escaped HTML building | M7, built |
-| `std.sql` | SQLite first, parameterized queries only | M8 |
-| `std.crypto` | Hashes, random, and vetted primitives | M8 |
+| `std.sql` | SQLite, with values only through `?` marks and queries of type `sql`, by decisions 194 and 195 | M8, planned |
+| `std.crypto` | SHA-256, SHA-512, HMAC, constant-time compare, random bytes, Argon2id passwords, hex, by decision 193 | M8, planned |
 
 Never hand-roll cryptography primitives. Wrap a vetted implementation.
 

@@ -118,11 +118,20 @@ Designed by decisions 169 to 180, see "Threads" in `compiler.md`. OS threads, by
 
 ## M8: Ecosystem
 
-- [ ] Package registry and `lucid.lock`
-- [ ] LSP server for editors
-- [ ] `std.sql`, `std.crypto`
-- [ ] Linux and macOS support
-- [ ] Spec review, then version 1.0 stability promise
+Designed by decisions 188 to 204, see "Ecosystem" in `compiler.md`. Build in this order:
+
+- [ ] Prelude text tasks `starts_with`, `ends_with`, `contains`, `find`, and `trim`, by decision 189
+- [ ] Compile only reachable tasks, by decision 190
+- [ ] Linux x86-64: `run`, `test`, and `build`, with a fresh private staging directory, by decision 191. All tests pass in WSL
+- [ ] macOS arm64, by decision 191, and a GitHub Actions job that runs `cargo test` there, by decision 192
+- [ ] `std.crypto`, by decision 193
+- [ ] `std.sql` and the `sql` type, by decisions 194 and 195
+- [ ] Orphan rule, by decision 196
+- [ ] Registry, `lucid package`, version selection, `lucid.lock`, and the fetch client in Lucid, by decisions 197 to 201. Tests use a local directory registry
+- [ ] `lucid lsp`, by decision 202
+- [ ] Spec review, then the version 1.0 promise, by decisions 203 and 204
+
+**Exit:** a package that uses a registry package with `std.sql` and `std.crypto` builds and passes `lucid test` on Windows, Linux, and macOS, and an editor shows its diagnostics through `lucid lsp`.
 
 ## M9: Self-hosted front end
 

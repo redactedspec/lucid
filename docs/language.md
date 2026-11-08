@@ -134,6 +134,8 @@ let bad = "4x".to_int()      # none
 
 `x.upper()` and `x.lower()` change case by Unicode's default rules, which do not depend on a language. So the length can change, as `"ß".upper()` is `"SS"`.
 
+Planned for M8, by decision 189: `x.starts_with(part)`, `x.ends_with(part)`, `x.contains(part)`, `x.find(part)`, which gives the `int?` index of the first match, and `x.trim()`.
+
 `x.to_int()` gives the `int` that the whole text spells, or `none`. It takes an optional `+` or `-`, then ASCII digits, and nothing else: no space, `_`, or base prefix. A number that does not fit in `int` gives `none`.
 
 ## Collections
@@ -361,6 +363,8 @@ if ada.is_adult()
 ```
 
 `x.f(a)` runs the task `f` whose `self` type is the type of `x`. A `self` type can be an `any`, except for a task of its own trait. So one name can have one task per type, and such a name stays out of the shared namespace of "Choices". `f(x, a)` is an error, since one job has one form. `self` needs a type, which cannot be a bare type parameter, and `self: list[T]` covers every list. Two tasks of one name whose receivers can overlap are an error, counting each type parameter as free, and so is a built-in name on a built-in type, such as `len` on `text`. A dot call does not widen its receiver: an `int` does not reach `self: int?`. `x is empty` calls `x.is_empty()`.
+
+Planned for M8, by decision 196: in a package, a task with `self` needs its receiver's type, or a trait that names the task, declared in that package. A built-in type belongs to `std`. A file with no `lucid.toml` is exempt.
 
 The receiver must be a `var`, or a path into one, when `self` is `change`, and it follows the rules for a `change` argument. The `change` keyword is not repeated on a dot call, but it is required on any other argument. `x is empty` cannot call an `is_empty` that changes `self`.
 
@@ -629,7 +633,7 @@ version = "0.1.0"
 markdown = { path = "../markdown" }
 ```
 
-`name` uses lowercase letters, digits, and `_`, and cannot be a keyword or `std`. `version` is three numbers. A dependency needs a `path`, relative to the file that names it, until a registry exists at M8. Its key must equal the name of the package that it reaches. The manifest also holds permissions, see [security.md](security.md). A manifest that breaks these rules is error E0338.
+`name` uses lowercase letters, digits, and `_`, and cannot be a keyword or `std`. `version` is three numbers. A dependency needs a `path`, relative to the file that names it. Planned for M8: a dependency with only a `version` comes from a registry, by decisions 197 to 199. Its key must equal the name of the package that it reaches. The manifest also holds permissions, see [security.md](security.md). A manifest that breaks these rules is error E0338.
 
 A package is a program, with `src/main.lcd`, or a library, with `src/lib.lcd`. It cannot be both, only a library can be a dependency, and only a program can run. `src/lib.lcd` follows the rule for imported modules, so it runs no code. A fault in the shape of a package or a dependency is error E0339.
 

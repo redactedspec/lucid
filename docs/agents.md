@@ -28,6 +28,7 @@ Every tool has a stable `--json` output.
 | `lucid fmt [--check] [PATH]` | Put a file, or every file of a package, in the one canonical layout, changing only space and line breaks. `--check` changes nothing, lists each file that would change, and exits with 1 if any would. A file with a lexer error gets its diagnostics and stays as it is |
 | `lucid context [--json] MODULE` | Compact public API of a file, a package directory, or `std.NAME`: each public header with its `##` doc comments, and the fields, variants, or tasks of a type, choice, or trait, with no bodies. `--json` gives `module`, `line`, `kind`, `name`, `signature`, and `doc` |
 | `lucid doc --json` | Full docs as data |
+| `lucid lsp` | Planned for M8, by decision 202: diagnostics, formatting, go to definition, and hover in an editor, on stdin and stdout |
 | `lucid check --unsafe` | `unsafe` blocks and `extern` tasks: `file:line:column: unsafe: kind` on stdout, or `kind`, `file`, `line`, and `column` with `--json`. `kind` is `block` or `extern`. `std` stays out |
 | `lucid check --costs` | Copy and reference count sites: `file:line:column: kind: message` on stdout, or `kind`, `type`, `file`, `line`, and `column` with `--json`. A `copy` is a value held twice that a later write changes, which costs O(n) if both holders stay. A `count` costs one count operation. Exit code 0. A program with an error or an unbuilt feature reports that instead, with exit code 1 |
 

@@ -52,7 +52,7 @@ mailer = { path = "../mailer", allow = ["net"] }
 | Permission | Value | Unlocks |
 | --- | --- | --- |
 | `net` | `true` | `std.net`, `std.http` |
-| `files` | `true`, or a list of paths | `std.fs`, limited to the listed paths |
+| `files` | `true`, or a list of paths | `std.fs`, and `std.sql` when planned for M8, limited to the listed paths |
 | `env` | `true`, or a list of names | `std.env`, limited to the listed names |
 | `process` | `true` | `std.process` |
 | `unsafe` | `true` | `unsafe` blocks and `extern` declarations |
@@ -83,7 +83,9 @@ Permissions are not a sandbox. They limit what dependencies can do by accident o
 
 ## Supply chain
 
-- `lucid.lock` will pin every dependency by content hash, at M8 with the registry. Today a dependency is a local path, so nothing pins it.
+- `lucid.lock` will pin every registry package by the SHA-256 of its archive, by decision 199. A hash that differs is an error, never a new fetch. Planned for M8. Today a dependency is a local path, so nothing pins it.
+- The lock protects only after the first download. Lucid has no checksum log like Go's, so a registry that serves a bad archive to a new user is not caught.
+- An archive holds only paths of lowercase ASCII letters, digits, `_`, `-`, `.`, and `/`, with no `.` or `..` part, so it cannot write outside its cache directory, by decision 200. A registry package cannot have a `path` dependency.
 - Packages have no build scripts and no install hooks. Compiling a dependency never runs its code.
 - A compile-time execution feature, if ever added, must have no access to files or the network.
 
@@ -91,9 +93,10 @@ Permissions are not a sandbox. They limit what dependencies can do by accident o
 
 - HTML building escapes by default. `std.html` escapes every text and attribute value, and traps on what `std.dom` traps on, by decision 180. It also traps on a tag or attribute name that is not plain letters, digits, and `-`, by decision 186, since a name such as `a onclick=x` would add an attribute that no escape covers.
 - `std.dom` never reads text as HTML: `dom.Text` makes a text node, and an attribute is set with `setAttribute`. It traps on a `script` element, an attribute whose name starts with `on`, `formaction`, `srcdoc`, and a `javascript:` or `data:text/html` value, by decision 168, so a page runs only code that the program wrote, even when an attribute's value comes from a user. Handlers go through `dom.On`. A trap in a handler stops the page from taking events.
-- SQL APIs take parameters, and they reject plain interpolated text through a distinct `sql` type.
+- `std.sql` takes values only through `?` marks, and a query has the type `sql`, which only text literals and `sql + sql` make, by decision 195. So text from a user cannot become part of a query. Planned for M8.
+- `std.crypto` hashes passwords with Argon2id at OWASP's setting, and compares secrets in constant time, by decision 193. Planned for M8.
 - TLS verification is always on, by decisions 179 and 187: `connection.secure(host)`, and the `std.http` client for an `https` URL, check that the certificate is for the host and chains to a root that `webpki-roots` holds, and there is no option to turn the check off. The `std.http` client takes only a URL of printable ASCII, so a URL cannot add a line to the request, and traps on a media type with a line break. It refuses a response with two lengths, a length with chunks, or another coding, a head over 16 KiB, or a body over 16 MiB, and fails after 30 seconds with no bytes. It follows no redirect, so it never sends a body to a host the program did not name.
 - `net.listen` listens on `127.0.0.1`, so only this machine can connect, unless the program passes `host: "0.0.0.0"`, by decision 185. A `Connection` has `set_timeout`, so a silent client cannot hold a thread forever.
 - By decisions 178 and 186, the `std.http` server rejects a request with both `Content-Length` and `Transfer-Encoding`, two `Content-Length` values, a coding other than `chunked`, or a folded header, and closes the connection, so a proxy in front cannot read one request where the server reads two. A request head over 16 KiB, a body over 1 MiB, and a connection silent for 30 seconds are refused, and at most 256 connections run at once. It also rejects an HTTP/1.1 request with no `Host` or two, and a space before a header's colon. A handler cannot set `Content-Length`, `Transfer-Encoding`, or `Connection`, nor a header with a line break: each one traps, since it would let a handler write a second response.
-- Secrets use a `secret` type that prints as `***`.
-- Random values default to a cryptographic source.
+- Planned, with no milestone: a `secret` type that prints as `***`.
+- Random values come from a cryptographic source: `crypto.random_bytes`, planned for M8. There is no other source of random values.
