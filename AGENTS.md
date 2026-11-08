@@ -45,7 +45,7 @@ Docs describe what is true now. Mark planned items as planned, and remove claims
 
 ## Commits
 
-- Commit every finished change locally. No remote: never add one or push.
+- Commit every finished change locally. The remote is the private GitHub repository `redactedspec/lucid`. Push only when the owner asks.
 - No `Co-authored-by` or other attribution lines.
 - Strict Conventional Commits. Allowed types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
 - Subject at most 50 characters, imperative mood, lowercase start, no trailing period.
