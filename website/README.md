@@ -57,6 +57,7 @@ Live since 2026-11-08, on the Cloudflare Pages free plan.
 | Registrar | Porkbun, with nameservers pointed at Cloudflare |
 | DNS | Cloudflare, zone `lucidlang.dev` on the same account as the Pages project |
 | TLS | Cloudflare certificate. `http://` redirects to `https://` with a 301 |
+| `www` | Redirects to `https://lucidlang.dev` with a 301. See "Custom domain" below |
 | Source | `main` of `redactedspec/lucid`, root directory `website/` |
 
 **Deploys are automatic.** Every push to `main` builds and publishes the site, so a pushed commit that changes `website/` or the files it reads is public within minutes. By Cloudflare's default, a push to another branch makes a preview deploy at its own `pages.dev` address. Run the checks under "Commands" before pushing.
@@ -86,7 +87,16 @@ The build reads `../docs/errors.md` and `../docs/agent-guide.md`, and `../exampl
 
 **Custom domain.** Cloudflare requires the apex domain `lucidlang.dev` to be a zone on the same Cloudflare account, so the domain was added to Cloudflare and its Porkbun nameservers pointed there. Then, in the Pages project: Custom domains, Set up a domain, `lucidlang.dev`. Cloudflare added the DNS record, and reports the domain Active with SSL.
 
-`www.lucidlang.dev` is not set up: on 2026-11-08 it gave Cloudflare error 525. To serve it, add it in Custom domains the same way, then redirect it to the apex with a Cloudflare redirect rule, which the free plan includes.
+**www.** `www.lucidlang.dev` redirects to the apex with the Cloudflare redirect rule `Redirect www to apex`, on the free plan:
+
+| Field | Value |
+| --- | --- |
+| Match | `http.host eq "www.lucidlang.dev"` |
+| Destination | `concat("https://lucidlang.dev", http.request.uri.path)` |
+| Status | 301 |
+| Preserve query string | on |
+
+Checked on 2026-11-08: `curl -I https://www.lucidlang.dev/docs/?q=1` gives `301` with `Location: https://lucidlang.dev/docs/?q=1`, and `http://www.lucidlang.dev/` gives `301` to `https://lucidlang.dev/`.
 
 ## Planned install design
 
