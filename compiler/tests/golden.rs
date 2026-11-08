@@ -1151,7 +1151,8 @@ fn web_rejects_foreign_code() {
 fn web_rejects_spawn() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("web_spawn");
     fs::create_dir_all(&dir).expect("cannot make directory");
-    for (name, says) in [("spawn", "`spawn`"), ("std_net", "`std.net`"), ("std_http", "`std.http`")] {
+    for (name, says) in [("spawn", "`spawn`"), ("std_net", "`std.net`"), ("std_http", "`std.http`")]
+    {
         let file = format!("{name}.lcd");
         fs::copy(repo().join("tests/run").join(&file), dir.join(&file)).expect("cannot copy");
         let output = lucid(&dir, &["build", "--target", "web", &file]);
