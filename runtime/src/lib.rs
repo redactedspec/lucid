@@ -2677,6 +2677,18 @@ pub struct Socket {
 enum Endpoint {
     Listener(TcpListener),
     Stream(TcpStream),
+    #[cfg(not(target_arch = "wasm32"))]
+    Tls(Box<Tls>),
+}
+
+/// A client's TLS session, by decision 179. `socket` is a second handle to
+/// the session's stream, for timeouts and the port.
+// ponytail: one lock per session, so a read that blocks holds up a write
+// from another thread. Split the session if a program needs both at once.
+#[cfg(not(target_arch = "wasm32"))]
+struct Tls {
+    socket: TcpStream,
+    session: Mutex<rustls::StreamOwned<rustls::ClientConnection, TcpStream>>,
 }
 
 /// The most that one `read` takes, so `read(max)` with a huge `max` does not
@@ -2743,6 +2755,8 @@ unsafe fn stream<'a>(socket: *const Socket) -> &'a TcpStream {
     // SAFETY: the caller guarantees a live socket.
     match unsafe { endpoint(socket) } {
         Endpoint::Stream(stream) => stream,
+        #[cfg(not(target_arch = "wasm32"))]
+        Endpoint::Tls(tls) => &tls.socket,
         Endpoint::Listener(_) => trap(b"trap: a listener used as a connection"),
     }
 }
@@ -2778,7 +2792,7 @@ pub unsafe extern "C" fn lucid_net_port(listener: *const Socket) -> i64 {
     // SAFETY: the caller guarantees a live socket.
     let address = match unsafe { endpoint(listener) } {
         Endpoint::Listener(listener) => listener.local_addr(),
-        Endpoint::Stream(stream) => stream.local_addr(),
+        _ => unsafe { stream(listener) }.local_addr(),
     };
     address.map_or(0, |address| i64::from(address.port()))
 }
@@ -2818,14 +2832,18 @@ pub unsafe extern "C" fn lucid_net_connect(host: *const Text, port_number: i64) 
 /// `connection` must point to a live socket of a connection.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lucid_net_read(connection: *const Socket, max: i64) -> *mut List {
-    // SAFETY: the caller guarantees a live socket.
-    let mut stream = unsafe { stream(connection) };
     let Ok(max @ 1..) = usize::try_from(max) else {
         net_problem("a read needs a `max` of at least 1");
         return byte_list(&[]);
     };
     let mut buffer = vec![0; max.min(READ_LIMIT)];
-    let read = net_result(stream.read(&mut buffer)).unwrap_or(0);
+    // SAFETY: the caller guarantees a live socket.
+    let read = match unsafe { endpoint(connection) } {
+        #[cfg(not(target_arch = "wasm32"))]
+        Endpoint::Tls(tls) => lock(&tls.session).read(&mut buffer),
+        _ => unsafe { stream(connection) }.read(&mut buffer),
+    };
+    let read = net_result(read).unwrap_or(0);
     byte_list(&buffer[..read])
 }
 
@@ -2838,8 +2856,73 @@ pub unsafe extern "C" fn lucid_net_read(connection: *const Socket, max: i64) -> 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lucid_net_write(connection: *const Socket, data: *const List) {
     // SAFETY: the caller guarantees both.
-    let (mut stream, data) = unsafe { (stream(connection), list_bytes(data)) };
-    net_result(stream.write_all(data));
+    let (endpoint, data) = unsafe { (endpoint(connection), list_bytes(data)) };
+    let written = match endpoint {
+        #[cfg(not(target_arch = "wasm32"))]
+        Endpoint::Tls(tls) => {
+            let mut session = lock(&tls.session);
+            session.write_all(data).and_then(|()| session.flush())
+        }
+        // SAFETY: the caller guarantees a live socket.
+        _ => unsafe { stream(connection) }.write_all(data),
+    };
+    net_result(written);
+}
+
+/// Starts TLS as a client on `connection`, and checks that the server's
+/// certificate is for `host` and chains to a root of `webpki-roots`, by
+/// decision 179. There is no way to turn the check off.
+///
+/// # Safety
+///
+/// `connection` must point to a live socket of a connection, and `host` to a
+/// live text.
+#[cfg(not(target_arch = "wasm32"))]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_net_tls(
+    connection: *const Socket,
+    host: *const Text,
+) -> *mut Socket {
+    // SAFETY: the caller guarantees both.
+    let (stream, host) = unsafe { (stream(connection), system_text(host)) };
+    socket(tls(stream, host).map(|tls| Endpoint::Tls(Box::new(tls))))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn tls(stream: &TcpStream, host: &str) -> Option<Tls> {
+    static CONFIG: OnceLock<Arc<rustls::ClientConfig>> = OnceLock::new();
+    let config = CONFIG.get_or_init(|| {
+        let roots = rustls::RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let config = rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .expect("ring has the default TLS versions")
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        Arc::new(config)
+    });
+    let Ok(name) = rustls::pki_types::ServerName::try_from(host.to_string()) else {
+        net_problem("a TLS host is a name or an IP address");
+        return None;
+    };
+    let mut session = match rustls::ClientConnection::new(config.clone(), name) {
+        Ok(session) => session,
+        Err(e) => {
+            net_problem(&e.to_string());
+            return None;
+        }
+    };
+    let mut io = net_result(stream.try_clone())?;
+    // The handshake runs here, so a bad certificate fails this call, and not
+    // the first read or write.
+    while session.is_handshaking() {
+        if net_result(session.complete_io(&mut io))? == (0, 0) {
+            net_problem("the connection closed during the TLS handshake");
+            return None;
+        }
+    }
+    let socket = net_result(stream.try_clone())?;
+    Some(Tls { socket, session: Mutex::new(rustls::StreamOwned::new(session, io)) })
 }
 
 /// Makes each later read and write fail after `nanos` with no progress.

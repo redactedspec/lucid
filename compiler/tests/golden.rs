@@ -1028,7 +1028,7 @@ fn copy_dir(from: &Path, to: &Path) {
 /// "WebAssembly" in docs/compiler.md.
 #[test]
 fn web_programs_match_run() {
-    const HOST_ONLY: [&str; 10] = [
+    const HOST_ONLY: [&str; 11] = [
         "channel_threads",
         "spawn",
         "spawn_overflow",
@@ -1036,6 +1036,7 @@ fn web_programs_match_run() {
         "std_args_env",
         "std_fs",
         "std_http",
+        "std_http_client",
         "std_net",
         "std_time",
         "unsafe",

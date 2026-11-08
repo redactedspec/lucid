@@ -9,3 +9,8 @@ license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
 [features]
 # The C `main` of a built program. Only `compiler/build.rs` turns it on.
 exe = []
+
+# TLS for the `std.http` client, by decision 179. Native targets only.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1.0.11"

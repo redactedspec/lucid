@@ -87,7 +87,7 @@ Build a thin end-to-end path first. Depth comes later.
 
 **Exit:** `examples/todo.lcd` builds to a standalone `.exe` and works.
 
-## M6: Browser
+## M6: Browser (done)
 
 Designed by decisions 156 to 164, see "WebAssembly" in `compiler.md`. Build in this order:
 
@@ -100,7 +100,7 @@ Designed by decisions 156 to 164, see "WebAssembly" in `compiler.md`. Build in t
 
 **Exit:** an interactive page written only in Lucid runs in a browser.
 
-## M7: Concurrency and servers
+## M7: Concurrency and servers (done)
 
 Designed by decisions 169 to 180, see "Threads" in `compiler.md`. OS threads, by decision 169. Build in this order:
 
@@ -112,7 +112,7 @@ Designed by decisions 169 to 180, see "Threads" in `compiler.md`. OS threads, by
 - [x] `std.net`, by decisions 177 and 185
 - [x] `std.html` and the `std.http` server, by decisions 178, 180, and 186, and `examples/website.lcd`
 - [x] Load test: a Rust test that sends requests from 64 threads at once, and holds one slow connection open, to the built example. `website_serves_under_load` in `golden.rs`
-- [ ] `std.http` client with TLS, by decision 179
+- [x] `std.http` client with TLS, by decisions 179 and 187
 
 **Exit:** `examples/website.lcd` serves pages under a load test.
 

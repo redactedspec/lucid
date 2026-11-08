@@ -1,12 +1,13 @@
-# An HTTP/1.1 server, written in Lucid on `std.net`, by decision 178. It
-# reads requests strictly, as RFC 9112 allows, so that a proxy in front of it
-# cannot read one request where it reads two.
+# An HTTP/1.1 server and client, written in Lucid on `std.net`, by decisions
+# 178 and 179. It reads requests and responses strictly, as RFC 9112 allows,
+# so that a proxy in front of it cannot read one request where it reads two.
 
 use std.html as markup
 use std.json as encoding
 use std.net
 use std.net.Connection
 use std.net.NetError
+use std.net.Failed
 use std.time
 
 ## A header: its name, and its value. A request's names are in lowercase.
@@ -52,6 +53,7 @@ unsafe extern task lucid_bytes_text(data: list[byte]) -> text
 # The most that a request head and a request body can hold.
 let HEAD_LIMIT = 16384
 let BODY_LIMIT = 1048576
+let RESPONSE_LIMIT = 16777216
 
 ## Runs `handler` for a `GET` of `path`, and for a `HEAD`, with no body.
 public task get(change self: App, path: text, handler: task(Request) -> Response)
@@ -78,15 +80,212 @@ task with_type(kind: text, content: text) -> Response
 
 ## The value of the first header named `name`, in any case.
 public task header(self: Request, name: text) -> text?
-    let wanted = name.lower()
-    for h in self.headers
-        if h.name == wanted
-            return h.value
-    return none
+    return find_header(self.headers, name)
 
 ## The body as text, or `none` if it is not UTF-8.
 public task body_text(self: Request) -> text?
     return to_text(self.body)
+
+## The value of the first header named `name`, in any case.
+public task header(self: Response, name: text) -> text?
+    return find_header(self.headers, name)
+
+## The body as text, or `none` if it is not UTF-8.
+public task body_text(self: Response) -> text?
+    return to_text(self.body)
+
+task find_header(headers: list[Header], name: text) -> text?
+    let wanted = name.lower()
+    for h in headers
+        if h.name.lower() == wanted
+            return h.value
+    return none
+
+## Sends a `GET` for `url`, which starts with `http://` or `https://`, and
+## gives the response, with header names in lowercase. It follows no
+## redirect, so a 3xx response comes back as it is.
+public task get(url: text) -> Response or NetError
+    return fetch("GET", url, "", [])
+
+## Sends `body` to `url` in a `POST`, as the media type `kind`, such as
+## "application/json".
+public task post(url: text, kind: text, body: list[byte]) -> Response or NetError
+    return fetch("POST", url, kind, body)
+
+# Where a request goes.
+type Target
+    secure: bool
+    host: text
+    port: int
+    # The path and query, which start with `/`.
+    path: text
+
+task fetch(method: text, url: text, kind: text, body: list[byte]) -> Response or NetError
+    let target = try parse_url(url)
+    let plain = try net.connect(target.host, target.port)
+    try plain.set_timeout(time.seconds(30))
+    var connection = plain
+    if target.secure
+        connection = try plain.secure(target.host)
+    var host = target.host
+    if target.port != (if target.secure then 443 else 80)
+        host = "{host}:{target.port}"
+    # One request for each connection, so the end of a body with no length
+    # is where the server closes.
+    var head = "{method} {target.path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: lucid\r\nConnection: close\r\n"
+    if method == "POST"
+        let refused = bad_header(Header(name: "Content-Type", value: kind))
+        expect refused == ""
+        head = "{head}Content-Type: {kind}\r\nContent-Length: {body.len()}\r\n"
+    var data = "{head}\r\n".bytes()
+    for b in body
+        data.push(b)
+    try connection.write(data)
+    return read_response(connection)
+
+# Splits a URL. It must be printable ASCII, so that it cannot add a line to
+# the request, and its host a name or an IPv4 address.
+task parse_url(url: text) -> Target or NetError
+    for c in url
+        if c <= " " or c > "~"
+            return Failed(detail: "a URL needs printable ASCII, with other characters percent-encoded")
+    var secure = false
+    var rest = ""
+    if starts(url, "https://")
+        secure = true
+        rest = url[8..url.len()]
+    else if starts(url, "http://")
+        rest = url[7..url.len()]
+    else
+        return Failed(detail: "a URL starts with http:// or https://")
+    var end = rest.len()
+    var i = 0
+    for c in rest
+        if c == "/" or c == "?" or c == "#"
+            end = i
+            break
+        i += 1
+    let authority = rest[0..end]
+    var path = rest[end..rest.len()]
+    let hash = index_of(path, "#")
+    if hash >= 0
+        path = path[0..hash]
+    if path.is_empty() or starts(path, "?")
+        path = "/{path}"
+    for c in authority
+        let plain = (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9")
+        if not plain and c != "-" and c != "." and c != ":"
+            return Failed(detail: "the host of a URL is a name or an IPv4 address, with no user name or password")
+    var host = authority
+    var port = if secure then 443 else 80
+    let colon = index_of(authority, ":")
+    if colon >= 0
+        host = authority[0..colon]
+        let n = authority[colon + 1..authority.len()].to_int()
+        if n is none or n < 1 or n > 65535
+            return Failed(detail: "the port of a URL is from 1 to 65535")
+        port = n
+    if host.is_empty()
+        return Failed(detail: "a URL needs a host")
+    return Target(secure: secure, host: host, port: port, path: path)
+
+# Reads the response to the one request on `connection`, strictly, as RFC
+# 9112 asks. It skips any 1xx response before it.
+task read_response(connection: Connection) -> Response or NetError
+    var buffer: list[byte] = []
+    while true
+        var end = -1
+        var from = 0
+        while end < 0
+            end = find_blank_line(buffer, from)
+            if end < 0
+                if buffer.len() > HEAD_LIMIT
+                    return Failed(detail: "the response head is longer than 16384 bytes")
+                from = max(0, buffer.len() - 3)
+                let got = try fill(connection, change buffer)
+                if not got
+                    return Failed(detail: "the server closed before the end of the response head")
+        if end > HEAD_LIMIT
+            return Failed(detail: "the response head is longer than 16384 bytes")
+        let raw = to_text(buffer[0..end])
+        buffer = buffer[end + 4..buffer.len()]
+        if raw is none
+            return Failed(detail: "the response head is not UTF-8")
+        let lines = raw.split("\r\n")
+        let start = lines[0]
+        # `HTTP/1.1 200 OK`, where the reason may be empty, or hold spaces.
+        let version = start[0..min(9, start.len())]
+        let code = if start.len() >= 12 then start[9..12].to_int() else none
+        let after = if start.len() > 12 then start[12..13] else " "
+        if (version != "HTTP/1.1 " and version != "HTTP/1.0 ") or code is none or code < 100 or after != " "
+            return Failed(detail: "the response does not start with an HTTP/1.1 status line")
+        var response = Response(status: code)
+        for line in lines[1..lines.len()]
+            let h = parse_header(line)
+            if h is none
+                return Failed(detail: "the response has a bad header line")
+            response.headers.push(h)
+        if code >= 200
+            return read_body(connection, change buffer, response)
+    return Failed(detail: "unreachable")
+
+# Reads the body of `response`, which has its head, by the rules of RFC 9112
+# section 6.3.
+task read_body(connection: Connection, change buffer: list[byte], response: Response) -> Response or NetError
+    var result = response
+    if response.status == 204 or response.status == 304
+        return result
+    var lengths = 0
+    var length = 0
+    var chunked = false
+    for h in response.headers
+        if h.name == "content-length"
+            lengths += 1
+            let n = h.value.to_int()
+            if n is none or n < 0
+                return Failed(detail: "the response has a bad Content-Length")
+            length = n
+        else if h.name == "transfer-encoding"
+            if chunked or h.value.lower() != "chunked"
+                return Failed(detail: "the response has a transfer coding other than chunked")
+            chunked = true
+    # Two lengths, or a length with chunks, can make two readers see two
+    # different responses.
+    if lengths > 1 or (chunked and lengths > 0)
+        return Failed(detail: "the response has two ways to find its length")
+    if length > RESPONSE_LIMIT
+        return Failed(detail: "the response body is longer than 16 MiB")
+    if chunked
+        let body = read_chunks(connection, change buffer, RESPONSE_LIMIT)
+        match body
+            Got(chunks, _) ->
+                result.body = chunks.body
+                return result
+            Bad(status) ->
+                if status == 413
+                    return Failed(detail: "the response body is longer than 16 MiB")
+                return Failed(detail: "the response has a bad chunk")
+            Gone -> return Failed(detail: "the server closed or went silent before the end of the body")
+    if lengths == 1
+        while buffer.len() < length
+            let got = try fill(connection, change buffer)
+            if not got
+                return Failed(detail: "the server closed before the end of the body")
+        result.body = buffer[0..length]
+        return result
+    # With no length, the body ends where the server closes.
+    while try fill(connection, change buffer)
+        if buffer.len() > RESPONSE_LIMIT
+            return Failed(detail: "the response body is longer than 16 MiB")
+    result.body = buffer
+    return result
+
+# Reads more bytes into `buffer`. False if the server closed.
+task fill(connection: Connection, change buffer: list[byte]) -> bool or NetError
+    let data = try connection.read(65536)
+    for b in data
+        buffer.push(b)
+    return not data.is_empty()
 
 ## Serves HTTP/1.1 on `port`, with each connection on a thread of its own, and
 ## at most 256 at once. Only this machine can connect, unless `host` is
@@ -271,7 +470,7 @@ task read_request(connection: Connection, change buffer: list[byte]) -> Read
     if length > BODY_LIMIT
         return Bad(status: 413)
     if chunked
-        let body = read_chunks(connection, change buffer)
+        let body = read_chunks(connection, change buffer, BODY_LIMIT)
         match body
             Got(chunks, _) ->
                 request.body = chunks.body
@@ -286,7 +485,7 @@ task read_request(connection: Connection, change buffer: list[byte]) -> Read
 
 # The body of a chunked request, in the `body` of a `Got`. Chunk extensions
 # and trailer fields are read and dropped, as RFC 9112 allows.
-task read_chunks(connection: Connection, change buffer: list[byte]) -> Read
+task read_chunks(connection: Connection, change buffer: list[byte], limit: int) -> Read
     var body: list[byte] = []
     while true
         let line = read_line(connection, change buffer)
@@ -307,7 +506,7 @@ task read_chunks(connection: Connection, change buffer: list[byte]) -> Read
                 if trailer.is_empty()
                     break
             return Got(request: Request(method: "", path: "", body: body), close: false)
-        if body.len() + size > BODY_LIMIT
+        if body.len() + size > limit
             return Bad(status: 413)
         while buffer.len() < size + 2
             if not more(connection, change buffer)
@@ -415,6 +614,9 @@ task hex(digits: text) -> int?
 
 task max(a: int, b: int) -> int
     return if a > b then a else b
+
+task min(a: int, b: int) -> int
+    return if a < b then a else b
 
 task to_text(data: list[byte]) -> text?
     # Both tasks only read `data`, and the second builds a new text.

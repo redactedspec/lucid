@@ -1,0 +1,22 @@
+true 200 text/plain [hello]
+true 201 none [hélo]
+true 200 none [until close]
+true 204 none []
+true error: the response has two ways to find its length
+true error: the response has two ways to find its length
+true error: the server closed before the end of the body
+true error: the response has a transfer coding other than chunked
+true error: the response has a bad header line
+true error: the response does not start with an HTTP/1.1 status line
+true error: the response does not start with an HTTP/1.1 status line
+true error: the response has a bad chunk
+true
+error: a URL starts with http:// or https://
+error: a URL needs printable ASCII, with other characters percent-encoded
+error: a URL needs printable ASCII, with other characters percent-encoded
+error: a URL needs printable ASCII, with other characters percent-encoded
+error: the host of a URL is a name or an IPv4 address, with no user name or password
+error: the host of a URL is a name or an IPv4 address, with no user name or password
+error: the port of a URL is from 1 to 65535
+error: the port of a URL is from 1 to 65535
+error: a URL needs a host

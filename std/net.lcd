@@ -35,6 +35,7 @@ unsafe extern task lucid_net_connect(host: text, port: int) -> socket
 unsafe extern task lucid_net_read(connection: socket, max: int) -> list[byte]
 unsafe extern task lucid_net_write(connection: socket, data: list[byte])
 unsafe extern task lucid_net_set_timeout(connection: socket, nanos: int)
+unsafe extern task lucid_net_tls(connection: socket, host: text) -> socket
 unsafe extern task lucid_net_failure() -> int
 unsafe extern task lucid_net_detail() -> text
 
@@ -98,3 +99,14 @@ public task set_timeout(self: Connection, length: Duration) -> none or NetError
     unsafe
         lucid_net_set_timeout(self.socket, length.nanos)
     try failure()
+
+## Starts TLS on the connection, as a client. It checks that the server's
+## certificate is for `host`, and that it comes from a root that Mozilla
+## trusts, and there is no way to turn the check off. Use only the
+## connection that it gives, which keeps the timeout.
+public task secure(self: Connection, host: text) -> Connection or NetError
+    # The runtime only reads the socket and `host`, and gives a new socket.
+    unsafe
+        let socket = lucid_net_tls(self.socket, host)
+        try failure()
+        return Connection(socket: socket)

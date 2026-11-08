@@ -1,0 +1,79 @@
+# The `std.http` client, by decision 179. A fake server on a spawned thread
+# checks the exact request bytes, and answers raw bytes, then closes.
+
+use std.http
+use std.http.Response
+use std.net
+use std.net.Listener
+use std.net.NetError
+
+# Accepts one connection, reads as many bytes as `want` has, answers `reply`,
+# and tells if the request was `want`. The connection closes when this task
+# ends.
+task fake(listener: Listener, want: text, reply: text) -> bool
+    let connection = listener.accept()
+    if connection is NetError
+        return false
+    var got: list[byte] = []
+    while got.len() < want.bytes().len()
+        let data = connection.read(65536)
+        if data is NetError or data.is_empty()
+            return false
+        for b in data
+            got.push(b)
+    if connection.write(reply.bytes()) is NetError
+        return false
+    return got == want.bytes()
+
+task show(got: Response or NetError) -> text
+    if got is NetError
+        return "error: {got.error_message()}"
+    let kind = got.header("content-TYPE") else "none"
+    let body = got.body_text() else "not text"
+    return "{got.status} {kind} [{body}]"
+
+# Sends a GET of `path`, or a POST if `kind` is not empty, to a fake server.
+task exchange(listener: Listener, path: text, kind: text, want: text, reply: text) -> text
+    let server = spawn fake(listener, want, reply)
+    let url = "http://127.0.0.1:{listener.port}{path}"
+    let got = if kind.is_empty() then http.get(url) else http.post(url, kind, "héllo".bytes())
+    let checked = server.wait()
+    return "{checked} {show(got)}"
+
+let listener = try net.listen(0)
+let host = "Host: 127.0.0.1:{listener.port}\r\nUser-Agent: lucid\r\nConnection: close\r\n"
+
+# A body by length. The fragment is not sent.
+print exchange(listener, "/a?b=1#top", "", "GET /a?b=1 HTTP/1.1\r\n{host}\r\n", "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhelloEXTRA")
+# A 1xx response first, then chunks with an extension and a trailer.
+print exchange(listener, "", "", "GET / HTTP/1.1\r\n{host}\r\n", "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 201 \r\nTransfer-Encoding: chunked\r\n\r\n3;x=y\r\nhé\r\n2\r\nlo\r\n0\r\nT: 1\r\n\r\n")
+# No length: the body ends where the server closes.
+print exchange(listener, "?q", "", "GET /?q HTTP/1.1\r\n{host}\r\n", "HTTP/1.0 200 OK\r\n\r\nuntil close")
+# A POST, and a 204 with no body.
+print exchange(listener, "/p", "text/plain", "POST /p HTTP/1.1\r\n{host}Content-Type: text/plain\r\nContent-Length: 6\r\n\r\nhéllo", "HTTP/1.1 204 No Content\r\n\r\n")
+
+# Responses that break the rules.
+print exchange(listener, "/", "", "GET / HTTP/1.1\r\n{host}\r\n", "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")
+print exchange(listener, "/", "", "GET / HTTP/1.1\r\n{host}\r\n", "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 1\r\n\r\nx")
+print exchange(listener, "/", "", "GET / HTTP/1.1\r\n{host}\r\n", "HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nshort")
+print exchange(listener, "/", "", "GET / HTTP/1.1\r\n{host}\r\n", "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\n\r\n")
+print exchange(listener, "/", "", "GET / HTTP/1.1\r\n{host}\r\n", "HTTP/1.1 200 OK\r\nX : 1\r\n\r\n")
+print exchange(listener, "/", "", "GET / HTTP/1.1\r\n{host}\r\n", "HTTP/2 200\r\n\r\n")
+print exchange(listener, "/", "", "GET / HTTP/1.1\r\n{host}\r\n", "HTTP/1.1 20 OK\r\n\r\n")
+print exchange(listener, "/", "", "GET / HTTP/1.1\r\n{host}\r\n", "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n")
+
+# A server that does not speak TLS fails the handshake.
+let server = spawn fake(listener, "", "HTTP/1.1 200 OK\r\n\r\n")
+print http.get("https://127.0.0.1:{listener.port}/") is NetError
+let served = server.wait()
+
+# URLs that are refused before any connection.
+print show(http.get("ftp://a/"))
+print show(http.get("http://a b/"))
+print show(http.get("http://a/\r\nX: 1"))
+print show(http.get("http://é/"))
+print show(http.get("http://user@a/"))
+print show(http.get("http://[::1]/"))
+print show(http.get("http://a:0/"))
+print show(http.get("http://a:70000/"))
+print show(http.get("http://:80/"))

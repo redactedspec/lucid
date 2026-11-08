@@ -209,6 +209,17 @@ Level: **Read**, 2026-11-08, for decision 185.
 
 `tests/run/std_net.lcd` checks each failure on Windows. A connection to a closed port there takes about 2 seconds to be refused, since Windows retries the connection. Not checked: Linux and macOS, which wait for M8.
 
+### HTTP client (M7)
+
+Level: **Read**, and **checked** against live servers, 2026-11-08, for decision 187.
+
+- RFC 9112 §6.3 ([text](https://www.rfc-editor.org/rfc/rfc9112.html)), rule 3: with both `Transfer-Encoding` and `Content-Length`, "the Transfer-Encoding overrides the Content-Length", and such a message "ought to be handled as an error." Rule 4: in a response where chunked "is not the final encoding", the length is found "by reading the connection until it is closed by the server." Rule 5: an invalid or differing `Content-Length` makes the framing invalid, and "the recipient MUST treat it as an unrecoverable error", unless "all values in the list are the same". Rule 8: a response with no declared length ends at "the server closing the connection."
+- RFC 9112 §8: a message "is incomplete if the size of the message body received (in octets) is less than the value given by Content-Length."
+- RFC 9112 §4: "status-line = HTTP-version SP status-code SP [ reason-phrase ]", and a server "MUST send the space" even when the reason is absent.
+- RFC 9112 §9.6: "A client that sends a "close" connection option MUST NOT send further requests on that connection" and "MUST close the connection after reading the final response message".
+
+Live check on Windows, with `lucid run` and a built `.exe`: `https://example.com/` and `http://example.com/` gave 200, `https://www.rust-lang.org/` gave 301, and a `POST` of JSON to `https://httpbin.org/post` gave 200. `expired.badssl.com` failed with "certificate expired", `wrong.host.badssl.com` with "certificate not valid for name", and `self-signed.badssl.com` with "UnknownIssuer". `tests/run/std_http_client.lcd` checks the request bytes and each response rule offline. No test in `cargo test` reaches a real TLS server, since none runs offline with a trusted certificate. Not checked: Linux and macOS, which wait for M8.
+
 ### HTTP server (M7)
 
 Level: **Read**, 2026-11-08, for decisions 178 and 186.
@@ -269,7 +280,7 @@ Decisions 169 to 180. Level: **Snippet** for web sources, read through search su
 - **Traps in servers.** The `net/http` documentation says a panic in `ServeHTTP` is recovered, and the connection closed. On golang-nuts, Ian Lance Taylor writes that the Go team considers that recovery a historical mistake. Go issue 76763 asks the docs to say so.
 - **Deadlock.** Go's `checkdead` reports "all goroutines are asleep" when no thread runs and no goroutine can wake. Go turns it off for programs linked with C, since C code may still make progress.
 - **HTTP framing.** RFC 9112, section 6.1, lets a server reject a request with both `Transfer-Encoding` and `Content-Length`, or else use `Transfer-Encoding` and close the connection after. Crystal's 2026 post-mortem and an http4s advisory report request smuggling from parsers that read `Content-Length` first. The RFC text itself was not read.
-- **TLS.** `rustls` 0.23 made `aws-lc-rs` the default provider, whose build needs `cmake`, and NASM on Windows. `ring` stays available with default features off.
+- **TLS.** `rustls` 0.23 made `aws-lc-rs` the default provider, whose build needs `cmake`, and NASM on Windows. `ring` stays available with default features off. **Checked** at M7 step 9: `rustls` 0.23.46 with `ring` 0.17.14 builds on Windows with only MSVC, see "HTTP client (M7)".
 - **Cost of signed counts.** Measured, see "Signed counts (M7)" below: within 2% on the M4 benchmarks, but only after the runtime release path was reordered.
 - **Cost of the hidden stack limit.** Measured, see "Stack limit parameter (M7)" below: within 2% on the M4 benchmarks, and up to 10% on `fib`, which does nothing but call.
 
