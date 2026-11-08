@@ -565,6 +565,17 @@ pub struct Program {
     pub datas: Vec<Shape>,
     /// The tasks with a `self` parameter, by name.
     pub methods: HashMap<String, Vec<usize>>,
+    /// Each written name that the checker resolved. Only `lucid lsp` reads it.
+    pub refs: Vec<Ref>,
+}
+
+/// A written name, and the name that declares it: a binding's type, or `None`
+/// for a task or type, which `lucid lsp` shows from its declaration.
+#[derive(Clone, Copy)]
+pub struct Ref {
+    pub at: Span,
+    pub to: Span,
+    pub ty: Option<Ty>,
 }
 
 pub struct TestCase {

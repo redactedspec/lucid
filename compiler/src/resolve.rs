@@ -54,6 +54,23 @@ public task sort[T: Order](change self: list[T])
         width *= 2
 ";
 
+thread_local! {
+    /// Texts that `lucid lsp` holds for open documents, by canonical path. The
+    /// loader reads them in place of the files.
+    pub static OPEN: std::cell::RefCell<HashMap<PathBuf, String>> = Default::default();
+}
+
+/// The text an editor holds for a file, if it holds one.
+fn open_text(path: &str) -> Option<String> {
+    OPEN.with_borrow(|open| {
+        if open.is_empty() {
+            return None;
+        }
+        let real = std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
+        open.get(&real).cloned()
+    })
+}
+
 /// The standard library, inside the compiler, so that a program needs no files
 /// beside it. Each module sits at `@std/name.lcd`, a path that no `use` can write.
 /// The source of the `std` module with this name, as `fs`.
@@ -251,6 +268,15 @@ pub fn package_files(package: &str) -> Vec<String> {
 pub fn load(path: &str, run: bool) -> (Source, Option<ast::File>, Vec<Diagnostic>) {
     let (source, file, diags, fetch) = load_once(path, run);
     let Some(fetch) = fetch else { return (source, file, diags) };
+    // `lucid lsp` checks on each keystroke, so it must not fetch, write the
+    // lock, or wait on the network. It reports what is missing instead.
+    if OPEN.with_borrow(|open| !open.is_empty()) {
+        let missing = fetch.uncovered.into_iter().map(|(name, version, span)| {
+            let message = format!("`{name}` {version} is not in `lucid.lock` or the cache");
+            Diagnostic::new("E0343", message, span).note("run `lucid check` to fetch it")
+        });
+        return (source, None, missing.collect());
+    }
     let found = fetch.run();
     if !found.is_empty() {
         return (source, None, found);
@@ -485,6 +511,9 @@ impl Loader {
         }
         if path == FETCH_PATH {
             return Some((self.source.add(shown, FETCH), FETCH.to_string()));
+        }
+        if let Some(text) = open_text(path) {
+            return Some((self.source.add(shown, &text), text));
         }
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,

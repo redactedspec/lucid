@@ -1426,3 +1426,137 @@ fn json_text(text: &str) -> String {
     }
     out + "\""
 }
+
+/// `lucid lsp` driven over pipes, as an editor drives it, by decision 202.
+#[test]
+fn language_server_answers_an_editor() {
+    use io::{BufRead, Read, Write};
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("lsp");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("src")).expect("cannot make directory");
+    let write =
+        |file: &str, content: &str| fs::write(dir.join(file), content).expect("cannot write");
+    write("lucid.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\n");
+    write(
+        "src/util.lcd",
+        "## Adds one to a number.\npublic task add_one(n: int) -> int\n    return n + 1\n",
+    );
+    // The file on disk is empty, so only the editor's text can give the results.
+    write("src/main.lcd", "");
+    let real = fs::canonicalize(dir.join("src/main.lcd")).expect("cannot find main.lcd");
+    let real = real.display().to_string();
+    let real = real.strip_prefix(r"\\?\").unwrap_or(&real).replace('\\', "/");
+    let uri =
+        if real.starts_with('/') { format!("file://{real}") } else { format!("file:///{real}") };
+
+    let mut server = Command::new(LUCID)
+        .arg("lsp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("cannot start lucid lsp");
+    let input = std::cell::RefCell::new(server.stdin.take().expect("a piped stdin"));
+    let mut output = io::BufReader::new(server.stdout.take().expect("a piped stdout"));
+    let send_raw = |raw: &str| {
+        let mut input = input.borrow_mut();
+        input.write_all(raw.as_bytes()).expect("cannot write");
+        input.flush().expect("cannot flush");
+    };
+    let send = |body: String| send_raw(&format!("Content-Length: {}\r\n\r\n{body}", body.len()));
+    // Reads messages until one holds `wanted`.
+    let mut receive = |wanted: &str| loop {
+        let mut length = 0;
+        loop {
+            let mut line = String::new();
+            assert_ne!(output.read_line(&mut line).expect("cannot read"), 0, "no `{wanted}`");
+            match line.trim_end().split_once(": ") {
+                Some(("Content-Length", n)) => length = n.parse().expect("a length"),
+                None => break,
+                _ => {}
+            }
+        }
+        let mut body = vec![0; length];
+        output.read_exact(&mut body).expect("cannot read a message");
+        let body = String::from_utf8(body).expect("UTF-8");
+        if body.contains(wanted) {
+            return body;
+        }
+    };
+    let quoted = json_text;
+    let change = |version: usize, text: &str| {
+        format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{uri}","version":{version}}},"contentChanges":[{{"text":{}}}]}}}}"#,
+            quoted(text)
+        )
+    };
+    let at = |id: usize, method: &str, line: usize, character: usize| {
+        format!(
+            r#"{{"jsonrpc":"2.0","id":{id},"method":"textDocument/{method}","params":{{"textDocument":{{"uri":"{uri}"}},"position":{{"line":{line},"character":{character}}}}}}}"#
+        )
+    };
+
+    send(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.into());
+    let reply = receive(r#""id":1"#);
+    assert!(reply.contains(r#""positionEncoding":"utf-16""#), "{reply}");
+    send(r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.into());
+
+    let text = "use ./util\n\nlet x = util.add_one(2)\nprint x\nprint missing\n";
+    send(format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{uri}","languageId":"lucid","version":1,"text":{}}}}}}}"#,
+        quoted(text)
+    ));
+    let found = receive("publishDiagnostics");
+    assert!(found.contains(&uri), "{found}");
+    assert!(found.contains(r#""code":"E0301""#), "{found}");
+    assert!(found.contains(r#""start":{"line":4,"character":6}"#), "{found}");
+
+    send(change(2, "use ./util\n\nlet x = util.add_one(2)\nprint x\n"));
+    let cleared = receive("publishDiagnostics");
+    assert!(cleared.contains(r#""diagnostics":[]"#), "{cleared}");
+
+    // `add_one` in `util.add_one(2)`, then `x` in `print x`.
+    send(at(2, "definition", 2, 15));
+    let place = receive(r#""id":2"#);
+    assert!(place.contains("util.lcd"), "{place}");
+    assert!(place.contains(r#""start":{"line":1,"character":12}"#), "{place}");
+    send(at(3, "hover", 2, 15));
+    let shown = receive(r#""id":3"#);
+    assert!(shown.contains("public task add_one(n: int) -> int"), "{shown}");
+    assert!(shown.contains("Adds one to a number."), "{shown}");
+    send(at(4, "hover", 3, 6));
+    let shown = receive(r#""id":4"#);
+    assert!(shown.contains("x: int"), "{shown}");
+
+    send(change(3, "use ./util\n\nlet x  =  util.add_one(2)\nprint x\n"));
+    receive("publishDiagnostics");
+    send(format!(
+        r#"{{"jsonrpc":"2.0","id":5,"method":"textDocument/formatting","params":{{"textDocument":{{"uri":"{uri}"}},"options":{{"tabSize":4,"insertSpaces":true}}}}}}"#
+    ));
+    let edits = receive(r#""id":5"#);
+    assert!(
+        edits.contains(r#""newText":"use ./util\n\nlet x = util.add_one(2)\nprint x\n""#),
+        "{edits}"
+    );
+
+    // A parameter, in a task after one with a `let` in the same local slot.
+    send(change(
+        4,
+        "task a() -> int\n    let y = 1\n    return y\n\ntask b(n: int) -> int\n    return n\n\nprint b(a())\n",
+    ));
+    receive("publishDiagnostics");
+    send(at(7, "definition", 5, 11));
+    let place = receive(r#""id":7"#);
+    assert!(place.contains(r#""start":{"line":4,"character":7}"#), "{place}");
+    send(at(8, "hover", 5, 11));
+    let shown = receive(r#""id":8"#);
+    assert!(shown.contains("n: int"), "{shown}");
+
+    // A frame with no length gets an error, and the server goes on.
+    send_raw("X-Nothing: 1\r\n\r\n");
+    receive(r#""code":-32700"#);
+
+    send(r#"{"jsonrpc":"2.0","id":6,"method":"shutdown"}"#.into());
+    receive(r#""id":6"#);
+    send(r#"{"jsonrpc":"2.0","method":"exit"}"#.into());
+    assert_eq!(server.wait().expect("cannot wait").code(), Some(0));
+}

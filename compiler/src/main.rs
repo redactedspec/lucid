@@ -9,6 +9,7 @@ mod diag;
 #[cfg(test)]
 mod fuzz;
 mod lexer;
+mod lsp;
 mod manifest;
 mod mir;
 mod mono;
@@ -23,7 +24,7 @@ use resolve::{load, package_files, package_root};
 use std::io::Write;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--target web] [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\n       lucid fix [--json] [PATH]\n       lucid explain [--json] CODE\n       lucid context [--json] MODULE\n       lucid fmt [--check] [PATH]\n       lucid package [PATH]\nPATH is a file or a package directory, by default the current directory.";
+const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--target web] [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\n       lucid fix [--json] [PATH]\n       lucid explain [--json] CODE\n       lucid context [--json] MODULE\n       lucid fmt [--check] [PATH]\n       lucid package [PATH]\n       lucid lsp\nPATH is a file or a package directory, by default the current directory.";
 
 /// Set for the child process of `lucid test`, to the place of its first test.
 const TEST_FROM: &str = "LUCID_TEST_FROM";
@@ -63,6 +64,8 @@ fn cli(args: &[String]) -> ExitCode {
         ("package", []) => return package("."),
         ("package", [path]) if !path.starts_with('-') => return package(path),
         ("package", _) => return usage(),
+        ("lsp", []) => return lsp::serve(),
+        ("lsp", _) => return usage(),
         _ => {}
     }
     // What follows the path of `lucid run` belongs to the program.
@@ -565,7 +568,30 @@ fn fmt(rest: &[&str]) -> ExitCode {
     }
 }
 
-/// True if two token lists differ only in their spans.
+/// Formats a text as `lucid fmt` formats a file, for `lucid lsp`: through a
+/// file in a new private directory, so the same checks run. The error is what
+/// `lucid fmt` printed.
+fn format_text(text: &str) -> Result<String, String> {
+    let dir = stage().map_err(|e| format!("cannot make a staging directory: {e}"))?;
+    let file = dir.join("document.lcd");
+    let formatted = std::fs::write(&file, text)
+        .and_then(|()| {
+            let lucid = std::env::current_exe()?;
+            std::process::Command::new(lucid).arg("fmt").arg(&file).output()
+        })
+        .map_err(|e| format!("cannot start the formatter: {e}"))
+        .and_then(|output| {
+            if output.status.success() {
+                std::fs::read_to_string(&file).map_err(|e| e.to_string())
+            } else {
+                let printed = String::from_utf8_lossy(&output.stderr);
+                Err(printed.trim().replace(&file.display().to_string(), "the document"))
+            }
+        });
+    let _ = std::fs::remove_dir_all(&dir);
+    formatted
+}
+
 /// True if `new` is `old` with only space and line breaks changed, as the
 /// formatter promises: the same tokens, and the same other characters, which
 /// covers comments. A byte order mark may go. Bytes that are not UTF-8 are a

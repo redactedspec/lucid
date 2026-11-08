@@ -8,8 +8,8 @@ use crate::ast::{
 };
 use crate::diag::{Diagnostic, Source, SourceFile, Span, file_index};
 use crate::mir::{
-    Expr, ExprKind, Local, Program, Shape, ShapeVariant, Stmt, Task, TestCase, Ty, Types, Update,
-    Visit, inner, json_tags,
+    Expr, ExprKind, Local, Program, Ref, Shape, ShapeVariant, Stmt, Task, TestCase, Ty, Types,
+    Update, Visit, inner, json_tags,
 };
 use crate::native::find_symbol;
 use std::collections::{HashMap, HashSet};
@@ -60,7 +60,18 @@ const TEST_UNION: &str = "test it first, as in `if x is not none`. Only a name n
 /// names and types that feature would supply make any other error unreliable.
 /// With `keep_tests` false, `test` blocks are dropped unread.
 pub fn check(file: &ast::File, source: &Source, keep_tests: bool) -> (Program, Vec<Diagnostic>) {
+    check_with(file, source, keep_tests, false)
+}
+
+/// `check`, and with `index`, `Program::refs` for `lucid lsp`.
+pub fn check_with(
+    file: &ast::File,
+    source: &Source,
+    keep_tests: bool,
+    index: bool,
+) -> (Program, Vec<Diagnostic>) {
     let mut checker = Checker {
+        index,
         src: &source.text,
         files: &source.files,
         no_unsafe: &source.no_unsafe,
@@ -111,8 +122,11 @@ pub fn check(file: &ast::File, source: &Source, keep_tests: bool) -> (Program, V
     if diags.iter().any(|d| d.code == "E0901") {
         diags.retain(|d| d.code == "E0901");
     }
-    let unsafe_sites = checker.unsafe_sites;
-    (Program { tasks, tests, unsafe_sites, main, types: checker.table, datas, methods }, diags)
+    let (unsafe_sites, refs) = (checker.unsafe_sites, checker.refs);
+    (
+        Program { tasks, tests, unsafe_sites, main, types: checker.table, datas, methods, refs },
+        diags,
+    )
 }
 
 /// Type parameters in scope, with the type that each one stands for.
@@ -124,6 +138,8 @@ type TypeEnv<'a> = Vec<(&'a str, Ty)>;
 struct Frame<'a> {
     scopes: Vec<HashMap<&'a str, Local>>,
     locals: Vec<Ty>,
+    /// Where each local's name is written. A hidden local has an empty span.
+    spans: Vec<Span>,
     mutable: Vec<bool>,
     /// The return type, or `None` at top level.
     returns: Option<Ty>,
@@ -338,6 +354,9 @@ struct Checker<'a> {
     first_lifted: usize,
     /// The id in `lifted` of the code behind each task used as a value.
     task_values: HashMap<usize, usize>,
+    /// See `Program::refs`. Recorded only with `index`, for `lucid lsp`.
+    refs: Vec<Ref>,
+    index: bool,
 }
 
 /// The parameters that a declaration brings into scope, by position.
@@ -977,6 +996,11 @@ impl<'a> Checker<'a> {
             let message = format!("`{name}` is a trait, not a type");
             let note = format!("use it as a bound, as in `[T: {name}]`");
             return self.report(Diagnostic::new("E0303", message, span).note(note)).ty;
+        }
+        if let Some(Named::Known(Ty::Data(_, id, _)) | Named::Generic(id)) =
+            self.types.get(name).copied()
+        {
+            self.refer_data(id, span);
         }
         match self.types.get_key_value(name) {
             Some((_, &Named::Known(known))) => {
@@ -1664,8 +1688,10 @@ impl<'a> Checker<'a> {
             task.text == name && self.package_of(task.span) == Some(package)
         });
         if owner != Some(package) && !named {
-            let message =
-                format!("`{name}` adds a task to `{}`, a type from outside this package", receiver.name());
+            let message = format!(
+                "`{name}` adds a task to `{}`, a type from outside this package",
+                receiver.name()
+            );
             let note = "take the value as a plain argument, or hold it in a type of this package";
             self.report(Diagnostic::new("E0342", message, span).note(note));
         }
@@ -1869,6 +1895,13 @@ impl<'a> Checker<'a> {
                 lowered.push(set);
             }
         }
+        for param in &def.sig.params {
+            if let Some(&local) = scope.get(param.name.text.as_str()) {
+                self.frame.spans[local] = param.name.span;
+                let ty = Some(self.frame.locals[local]);
+                self.record(Ref { at: param.name.span, to: param.name.span, ty });
+            }
+        }
         self.frame.scopes.push(scope);
         lowered.extend(self.stmts(body));
         let mut body = lowered;
@@ -1880,6 +1913,7 @@ impl<'a> Checker<'a> {
         self.type_params.clear();
         self.bounds.clear();
         let locals = std::mem::take(&mut self.frame.locals);
+        self.frame.spans.clear();
         let captures = Vec::new();
         self.frame.params = 0;
         let params = params.len();
@@ -2061,6 +2095,7 @@ impl<'a> Checker<'a> {
         self.frame.mutable.clear();
         let name: &'static str = format!("test \"{name}\"").leak();
         let locals = std::mem::take(&mut self.frame.locals);
+        self.frame.spans.clear();
         let (captures, change, take) = (Vec::new(), Vec::new(), Vec::new());
         let (params, type_params, returns, borrowed) = (0, 0, Ty::None, Vec::new());
         Task {
@@ -2086,6 +2121,7 @@ impl<'a> Checker<'a> {
         self.open_spawns(&mut body);
         let span = Span { start: 0, end: 0 };
         let locals = std::mem::take(&mut self.frame.locals);
+        self.frame.spans.clear();
         let (captures, change, take) = (Vec::new(), Vec::new(), Vec::new());
         let (params, type_params, returns, borrowed) = (0, 0, Ty::None, Vec::new());
         let name = "top level";
@@ -2107,6 +2143,7 @@ impl<'a> Checker<'a> {
     fn new_local(&mut self, ty: Ty, mutable: bool) -> Local {
         self.frame.locals.push(ty);
         self.frame.mutable.push(mutable);
+        self.frame.spans.push(Span { start: 0, end: 0 });
         self.frame.locals.len() - 1
     }
 
@@ -2121,7 +2158,40 @@ impl<'a> Checker<'a> {
         }
         let local = self.new_local(ty, mutable);
         self.frame.scopes.last_mut().expect("a scope is open").insert(text, local);
+        self.frame.spans[local] = name.span;
+        self.record(Ref { at: name.span, to: name.span, ty: Some(ty) });
         local
+    }
+
+    fn record(&mut self, found: Ref) {
+        if self.index {
+            self.refs.push(found);
+        }
+    }
+
+    /// Records where a written name of a binding is declared, in this task or
+    /// one around it.
+    fn refer_local(&mut self, name: &str, at: Span) {
+        if !self.index {
+            return;
+        }
+        let frames = std::iter::once(&self.frame).chain(self.frames.iter().rev());
+        let found = frames.into_iter().find_map(|frame| {
+            let local = frame.scopes.iter().rev().find_map(|scope| scope.get(name))?;
+            Some(Ref { at, to: frame.spans[*local], ty: Some(frame.locals[*local]) })
+        });
+        self.refs.extend(found.filter(|found| found.to.end > 0));
+    }
+
+    /// Records the declaration of a task or of a type's constructor.
+    fn refer_task(&mut self, id: usize, at: Span) {
+        self.record(Ref { at, to: self.signatures[id].name.span, ty: None });
+    }
+
+    fn refer_data(&mut self, id: usize, at: Span) {
+        if let Some(data) = self.datas.get(id) {
+            self.record(Ref { at, to: data.name.span, ty: None });
+        }
     }
 
     /// `bind` for `let` and `var`, where an error must then be read.
@@ -2425,6 +2495,7 @@ impl<'a> Checker<'a> {
             let param = index + 1;
             if take || self.frame.locals[param].is_counted() {
                 let own = self.new_local(self.frame.locals[param], take);
+                self.frame.spans[own] = name.span;
                 let scope = self.frame.scopes.last_mut().expect("a scope is open");
                 scope.insert(&name.text, own);
                 moves.push(Stmt::Set(own, self.read(param, name.span)));
@@ -4137,6 +4208,7 @@ impl<'a> Checker<'a> {
     }
 
     fn name(&mut self, name: &str, span: Span) -> Expr {
+        self.refer_local(name, span);
         if let Some(local) = self.lookup(name) {
             self.mark_read(local);
             return view(self.read(local, span), self.current(local));
@@ -4166,9 +4238,11 @@ impl<'a> Checker<'a> {
             }
         }
         if let Some(&id) = self.task_ids.get(name) {
+            self.refer_task(id, span);
             return self.task_value(id, name, None, span);
         }
         if let Some(&(id, variant)) = self.constructors.get(name) {
+            self.refer_data(id, span);
             if self.datas[id].variants[variant].fields.is_empty() {
                 return self.construct((id, variant), None, None, &[], span);
             }
@@ -5069,6 +5143,7 @@ impl<'a> Checker<'a> {
             Ast::Index { base, indices } => {
                 if let Ast::Name(name) = &base.kind {
                     if let Some(target) = self.constructor(name) {
+                        self.refer_data(target.0, base.span);
                         let count = self.datas[target.0].type_params.len();
                         let Some(types) = self.explicit(indices, count, name, span) else {
                             return self.poison_args(args, span);
@@ -5076,6 +5151,7 @@ impl<'a> Checker<'a> {
                         return self.construct_call(target, name, Some(&types), None, args, span);
                     }
                     if let Some(id) = self.task_named(name) {
+                        self.refer_task(id, base.span);
                         let count = self.signatures[id].type_params.len();
                         let Some(types) = self.explicit(indices, count, name, span) else {
                             return self.poison_args(args, span);
@@ -5088,9 +5164,11 @@ impl<'a> Checker<'a> {
             }
             Ast::Name(name) => {
                 if let Some(target) = self.constructor(name) {
+                    self.refer_data(target.0, callee.span);
                     return self.construct_call(target, name, None, want, args, span);
                 }
                 if let Some(id) = self.task_named(name) {
+                    self.refer_task(id, callee.span);
                     return self.task_call(id, name, None, None, args, span);
                 }
                 if self.visible(name) || self.top.contains_key(name.as_str()) {
@@ -5485,6 +5563,13 @@ impl<'a> Checker<'a> {
         }
         let text = name.text.as_str();
         if !builtin_method(ty, text) {
+            // `method_call` finds the task again. Only the server pays twice.
+            let found = (self.index)
+                .then(|| self.trait_task(ty, text).or_else(|| Some(self.find_method(text, ty)?.0)))
+                .flatten();
+            if let Some(id) = found {
+                self.refer_task(id, name.span);
+            }
             return self.method_call(value, Some(written), text, args, span);
         }
         if text == "pop" {

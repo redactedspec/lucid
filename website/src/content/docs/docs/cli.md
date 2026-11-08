@@ -33,8 +33,7 @@ lucid package [PATH]
 | `lucid explain CODE` | Prints the cause, an example, and a fix for an error code |
 | `lucid context MODULE` | Prints the public API of a file, a package, or a `std` module, with its doc comments |
 | `lucid package` | Checks a library, writes its archive `NAME-VERSION.lpk` to the current directory, and prints its line of the registry's index |
-
-`lucid lsp`, a language server, is planned for M8.
+| `lucid lsp` | A language server on stdin and stdout, for an editor: diagnostics, formatting, go to definition, and hover |
 
 ## JSON output
 

@@ -48,4 +48,10 @@ This writes `target/release/lucid`. The build needs:
 
 ## Editor support
 
-There is no editor extension yet. `lucid lsp`, a language server, is planned for M8.
+Point any editor with a language server client at the command `lucid lsp`, for files ending in `.lcd`. It syncs whole documents. No editor extension ships yet, by decision 202, so VS Code, which needs one, has no support. In Neovim 0.11 or later:
+
+```lua
+vim.filetype.add({ extension = { lcd = 'lucid' } })
+vim.lsp.config('lucid', { cmd = { 'lucid', 'lsp' }, filetypes = { 'lucid' }, root_markers = { 'lucid.toml' } })
+vim.lsp.enable('lucid')
+```

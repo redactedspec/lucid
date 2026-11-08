@@ -29,9 +29,19 @@ Every tool has a stable `--json` output.
 | `lucid package [PATH]` | Check a library, write its archive `NAME-VERSION.lpk` to the current directory, and print its line of the registry's index, for upload to a registry |
 | `lucid context [--json] MODULE` | Compact public API of a file, a package directory, or `std.NAME`: each public header with its `##` doc comments, and the fields, variants, or tasks of a type, choice, or trait, with no bodies. `--json` gives `module`, `line`, `kind`, `name`, `signature`, and `doc` |
 | `lucid doc --json` | Full docs as data |
-| `lucid lsp` | Planned for M8, by decision 202: diagnostics, formatting, go to definition, and hover in an editor, on stdin and stdout |
+| `lucid lsp` | A language server on stdin and stdout, for an editor: diagnostics, formatting, go to definition, and hover with a name's type or declaration and `##` comment. Positions count UTF-16 units. See "Editors" below |
 | `lucid check --unsafe` | `unsafe` blocks and `extern` tasks: `file:line:column: unsafe: kind` on stdout, or `kind`, `file`, `line`, and `column` with `--json`. `kind` is `block` or `extern`. `std` stays out |
 | `lucid check --costs` | Copy and reference count sites: `file:line:column: kind: message` on stdout, or `kind`, `type`, `file`, `line`, and `column` with `--json`. A `copy` is a value held twice that a later write changes, which costs O(n) if both holders stay. A `count` costs one count operation. Exit code 0. A program with an error or an unbuilt feature reports that instead, with exit code 1 |
+
+## Editors
+
+Point any editor with a language server client at the command `lucid lsp`, for files ending in `.lcd`. It syncs whole documents. No editor extension ships yet, by decision 202, so VS Code, which needs one, has no support. In Neovim 0.11 or later:
+
+```lua
+vim.filetype.add({ extension = { lcd = 'lucid' } })
+vim.lsp.config('lucid', { cmd = { 'lucid', 'lsp' }, filetypes = { 'lucid' }, root_markers = { 'lucid.toml' } })
+vim.lsp.enable('lucid')
+```
 
 ## Diagnostics format
 

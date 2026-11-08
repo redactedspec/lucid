@@ -613,7 +613,7 @@ Fix: take the value as a plain argument, as `shout(t: text)`, or declare a `type
 
 ## E0343: A registry cannot give a package
 
-The registry has no index for the package, or no such version, or cannot be reached, or gives an index line or archive that is not valid. An archive may hold only `lucid.toml`, `README.md`, `LICENSE`, and `.lcd` files under `src` with plain lowercase paths, by decision 200. After a fetch, a package whose `lucid.toml` names a dependency that its index line does not is this error too. The test is `registry_fetches_and_locks` in `compiler/tests/golden.rs`, since it needs a registry.
+The registry has no index for the package, or no such version, or cannot be reached, or gives an index line or archive that is not valid. An archive may hold only `lucid.toml`, `README.md`, `LICENSE`, and `.lcd` files under `src` with plain lowercase paths, by decision 200. After a fetch, a package whose `lucid.toml` names a dependency that its index line does not is this error too. `lucid lsp` never fetches, so there it means that `lucid.lock` or the cache does not cover a dependency, and `lucid check` fetches it. The test is `registry_fetches_and_locks` in `compiler/tests/golden.rs`, since it needs a registry.
 
 Fix: check the name and version in `lucid.toml` against the registry's `index/NAME`, and check `[registry] url`. For a broken archive, ask its author to publish a new version.
 
