@@ -4624,7 +4624,8 @@ impl<'a> Checker<'a> {
                 match value.ty {
                     Ty::Error => poisoned(span),
                     ty if ty.is_integer() => {
-                        let ones = if ty.int_range().0 < 0 { -1 } else { ty.int_range().1 as u64 as i64 };
+                        let ones =
+                            if ty.int_range().0 < 0 { -1 } else { ty.int_range().1 as u64 as i64 };
                         let ones = Expr { kind: ExprKind::Int(ones), ty, span };
                         let kind = ExprKind::Binary(BinaryOp::BitXor, value.into(), ones.into());
                         Expr { kind, ty, span }
@@ -4788,7 +4789,8 @@ impl<'a> Checker<'a> {
         let ty = left.ty;
         let equality = matches!(op, BinaryOp::Eq | BinaryOp::Ne);
         let order = matches!(op, BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge);
-        let int_only = is_math(op) && !matches!(op, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div);
+        let int_only = is_math(op)
+            && !matches!(op, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div);
         let valid = match ty {
             ty if ty.is_integer() => true,
             ty if ty.is_float() => !int_only,

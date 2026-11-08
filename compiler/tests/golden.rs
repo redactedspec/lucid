@@ -973,9 +973,15 @@ stderr: {got_errors}",
             ));
         }
     }
-    assert!(failures.is_empty(), "
-{}", failures.join("
-"));
+    assert!(
+        failures.is_empty(),
+        "
+{}",
+        failures.join(
+            "
+"
+        )
+    );
 }
 
 /// By decision 162, a user `extern` cannot run on the web.

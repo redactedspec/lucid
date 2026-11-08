@@ -1258,7 +1258,10 @@ mod tests {
         assert_eq!(expr("(a + b) * c"), "(Mul (Add a b) c)");
         assert_eq!(expr("a - b - c"), "(Sub (Sub a b) c)");
         assert_eq!(expr("a // b % c"), "(Rem (FloorDiv a b) c)");
-        assert_eq!(expr("a | b ^ c & d << e + f"), "(BitOr a (BitXor b (BitAnd c (Shl d (Add e f)))))");
+        assert_eq!(
+            expr("a | b ^ c & d << e + f"),
+            "(BitOr a (BitXor b (BitAnd c (Shl d (Add e f)))))"
+        );
         assert_eq!(expr("a & 1 == 0"), "(Eq (BitAnd a 1) 0)");
         assert_eq!(expr("a >> b << c"), "(Shl (Shr a b) c)");
         assert_eq!(expr("0..a | b"), "(Range 0 (BitOr a b))");
