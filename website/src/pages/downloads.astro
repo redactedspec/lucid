@@ -1,0 +1,86 @@
+---
+import Base from '../layouts/Base.astro';
+import Terminal from '../components/Terminal.astro';
+
+const platforms = [
+  { name: 'Windows x86-64', state: 'Works in development', tag: 'done', detail: '`lucid run`, `test`, `check`, `build` to `.exe`, and `build --target web`.' },
+  { name: 'Linux x86-64', state: 'In progress, M8', tag: 'active', detail: '`run`, `test`, and `build`, checked under WSL.' },
+  { name: 'Browser and Node', state: 'Works as an output target', tag: 'done', detail: '`lucid build --target web` writes a `.js` file that runs anywhere WebAssembly does.' },
+  { name: 'macOS', state: 'Deferred', tag: 'planned', detail: 'No milestone yet.' },
+];
+const code = (s: string) => s.replace(/`([^`]+)`/g, '<code>$1</code>');
+---
+<Base
+  title="Downloads"
+  description="Lucid has no public release yet. Supported platforms, what works today, and how official installers will work."
+>
+  <div class="wrap">
+    <header class="page-head">
+      <p class="eyebrow">Downloads</p>
+      <h1>No public release yet.</h1>
+      <p>
+        Lucid is in development, and there are no binaries to download. The source repository is private for now,
+        so the compiler cannot be built outside the project either. This page will list each release, with checksums, when one exists.
+      </p>
+    </header>
+
+    <section class="block" aria-labelledby="platforms-title">
+      <h2 id="platforms-title">Platforms</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th scope="col">Platform</th><th scope="col">State</th><th scope="col">What works</th></tr></thead>
+          <tbody>
+            {platforms.map((p) => (
+              <tr>
+                <th scope="row">{p.name}</th>
+                <td><span class={`tag tag-${p.tag}`}>{p.state}</span></td>
+                <td set:html={code(p.detail)} />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="block split" aria-labelledby="install-title">
+      <div class="prose">
+        <h2 id="install-title">Installers, once there is a release</h2>
+        <p>These two commands are reserved. Today each script prints that no release exists and stops with an error. It downloads nothing.</p>
+        <p>The real installers will:</p>
+        <ul>
+          <li>read the release list published on <code>lucidlang.dev</code>, with no hard-coded download URL,</li>
+          <li>download over HTTPS only, and check the SHA-256 of each archive before using it,</li>
+          <li>stop with a clear message on an unsupported system, a failed download, or a bad checksum,</li>
+          <li>install into your user directory, with no administrator rights,</li>
+          <li>run nothing they download, and change no shell profile without asking,</li>
+          <li>update in place when run again, and do nothing when already current.</li>
+        </ul>
+      </div>
+      <div class="terms">
+        <Terminal title="Windows · PowerShell" lines={[{ cmd: 'irm https://lucidlang.dev/install.ps1 | iex' }, { out: 'Lucid has no public release yet.' }]} />
+        <Terminal title="Linux · sh" lines={[{ cmd: 'curl -fsSL https://lucidlang.dev/install.sh | sh' }, { out: 'Lucid has no public release yet.' }]} />
+      </div>
+    </section>
+
+    <section class="block prose" aria-labelledby="follow-title">
+      <h2 id="follow-title">Until then</h2>
+      <p>Read the <a href="/docs/">documentation</a>, follow the <a href="/roadmap/">roadmap</a>, or see what a build from source needs on <a href="/docs/installation/">Installation</a>.</p>
+    </section>
+  </div>
+</Base>
+
+<style>
+  .block { padding-block: 3rem; border-top: 1px solid var(--line); }
+  h2 { font-size: 1.5rem; margin-bottom: 1.25rem; color: var(--text); }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9375rem; min-width: 36rem; }
+  th, td { text-align: left; padding: 0.9rem 1rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th { font: 500 0.75rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); background: var(--bg-raised); }
+  tbody tr:last-child > * { border-bottom: 0; }
+  tbody th { font-weight: 500; white-space: nowrap; }
+  td { color: var(--text-muted); }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(2rem, 5vw, 4rem); align-items: start; }
+  .prose ul { margin: 0; padding-left: 1.2rem; display: grid; gap: 0.45rem; }
+  .terms { display: grid; gap: 1rem; min-width: 0; }
+  @media (max-width: 60rem) { .split { grid-template-columns: 1fr; } }
+</style>

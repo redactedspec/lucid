@@ -1,0 +1,93 @@
+{
+  "name": "lucid",
+  "scopeName": "source.lucid",
+  "fileTypes": ["lcd"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#text-block" },
+    { "include": "#text" },
+    { "include": "#declaration" },
+    { "include": "#keyword" },
+    { "include": "#constant" },
+    { "include": "#number" },
+    { "include": "#type" },
+    { "include": "#call" },
+    { "include": "#operator" }
+  ],
+  "repository": {
+    "comment": {
+      "patterns": [
+        { "name": "comment.line.documentation.lucid", "match": "##.*$" },
+        { "name": "comment.line.number-sign.lucid", "match": "#.*$" }
+      ]
+    },
+    "escape": { "name": "constant.character.escape.lucid", "match": "\\\\[ntr\\\\\"]|\\{\\{|\\}\\}" },
+    "interpolation": {
+      "name": "meta.interpolation.lucid",
+      "begin": "\\{",
+      "end": "\\}",
+      "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.lucid" } },
+      "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.lucid" } },
+      "contentName": "source.lucid.embedded",
+      "patterns": [{ "include": "$self" }]
+    },
+    "text-block": {
+      "name": "string.quoted.triple.lucid",
+      "begin": "\"\"\"",
+      "end": "\"\"\"",
+      "patterns": [{ "include": "#escape" }, { "include": "#interpolation" }]
+    },
+    "text": {
+      "name": "string.quoted.double.lucid",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [{ "include": "#escape" }, { "include": "#interpolation" }]
+    },
+    "declaration": {
+      "patterns": [
+        {
+          "match": "\\b(task)\\s+([a-z_][A-Za-z0-9_]*)",
+          "captures": { "1": { "name": "keyword.declaration.task.lucid" }, "2": { "name": "entity.name.function.lucid" } }
+        },
+        {
+          "match": "\\b(type|choice|trait)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": { "1": { "name": "keyword.declaration.type.lucid" }, "2": { "name": "entity.name.type.lucid" } }
+        },
+        { "name": "keyword.declaration.lucid", "match": "\\b(let|var|task|type|choice|trait|test|use|public|extern)\\b" }
+      ]
+    },
+    "keyword": {
+      "patterns": [
+        { "name": "keyword.control.lucid", "match": "\\b(if|else|then|while|for|in|return|break|continue|match|try|spawn|expect)\\b" },
+        { "name": "keyword.other.mode.lucid", "match": "\\b(change|take|shared|weak|unsafe|any|as|self)\\b" },
+        { "name": "keyword.operator.word.lucid", "match": "\\b(and|or|not|is|empty)\\b" },
+        { "name": "support.function.builtin.lucid", "match": "\\bprint\\b" }
+      ]
+    },
+    "constant": { "name": "constant.language.lucid", "match": "\\b(true|false|none)\\b" },
+    "number": {
+      "name": "constant.numeric.lucid",
+      "match": "\\b[0-9][0-9_]*(\\.[0-9][0-9_]*)?([eE][+-]?[0-9]+)?\\b"
+    },
+    "type": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.lucid",
+          "match": "\\b(int|float|bool|text|byte|i8|i16|i32|i64|u8|u16|u32|u64|f32|list|map|set|pointer|channel|lock|spawned)\\b"
+        },
+        { "name": "entity.name.type.lucid", "match": "\\b[A-Z][A-Za-z0-9_]*\\b" }
+      ]
+    },
+    "call": {
+      "match": "\\b([a-z_][A-Za-z0-9_]*)(?=[\\[(])",
+      "captures": { "1": { "name": "entity.name.function.call.lucid" } }
+    },
+    "operator": {
+      "patterns": [
+        { "name": "keyword.operator.arrow.lucid", "match": "->|=>" },
+        { "name": "keyword.operator.range.lucid", "match": "\\.\\.=?" },
+        { "name": "keyword.operator.lucid", "match": "==|!=|<=|>=|<<|>>|//|[-+*/%<>=&|^~]=?|\\?" }
+      ]
+    }
+  }
+}

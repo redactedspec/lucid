@@ -1,0 +1,18 @@
+---
+interface Props { size?: number }
+const { size = 26 } = Astro.props;
+---
+<span class="wordmark">
+  <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+    <rect width="32" height="32" rx="7" fill="#0b0d10" />
+    <rect x=".75" y=".75" width="30.5" height="30.5" rx="6.25" fill="none" stroke="#2c333d" stroke-width="1.5" />
+    <path d="M10.5 7.5v16.75h12" fill="none" stroke="#7fd4ef" stroke-width="3.5" stroke-linecap="square" />
+    <rect x="19" y="7.5" width="3.5" height="9.5" fill="#eef2f6" />
+  </svg>
+  <span class="name">lucid</span>
+</span>
+
+<style>
+  .wordmark { display: inline-flex; align-items: center; gap: 0.6rem; }
+  .name { font: 500 1.125rem/1 var(--mono); letter-spacing: -0.02em; color: var(--text); }
+</style>

@@ -211,6 +211,7 @@ runtime/           Rust crate `lucid_rt`: allocator, counting, text, traps
 std/               standard library in Lucid, held inside the compiler
 tools/             `fmt.lcd`, the formatter in Lucid, held inside the compiler
 tests/             golden tests
+website/           lucidlang.dev: Astro and Starlight, built with npm, apart from cargo
 benchmarks/        Lucid and Rust versions of each program
     agent-trial/   tasks, reference answers, and runner of the M3 trial
     agent-bench/   tasks, reference, runner, and scorer of the M5 agent benchmark

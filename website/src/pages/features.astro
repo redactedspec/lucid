@@ -1,0 +1,59 @@
+---
+import Base from '../layouts/Base.astro';
+import CodeWindow from '../components/CodeWindow.astro';
+import Terminal from '../components/Terminal.astro';
+import { features } from '../data/features';
+import { inline } from '../lib/inline';
+---
+<Base
+  title="Features"
+  description="What Lucid does today: readable syntax, inferred ownership, memory safety without a garbage collector, Cranelift native code, WebAssembly, explicit errors, and tools for AI agents."
+>
+  <div class="wrap">
+    <header class="page-head">
+      <p class="eyebrow">Features</p>
+      <h1>What Lucid does, and what it costs.</h1>
+      <p>Every capability here runs in the compiler today. Each one lists its limits, since a language is a set of trade-offs.</p>
+      <nav aria-label="On this page" class="toc">
+        <ul>{features.map((f) => <li><a href={`#${f.id}`}>{f.title}</a></li>)}</ul>
+      </nav>
+    </header>
+
+    {features.map((f, i) => (
+      <section id={f.id} class="feature" aria-labelledby={`${f.id}-title`}>
+        <div class="text">
+          <span class="num">{String(i + 1).padStart(2, '0')}</span>
+          <h2 id={`${f.id}-title`}>{f.title}</h2>
+          <div class="prose">
+            {f.body.map((p) => <p set:html={inline(p)} />)}
+            {f.limits && <p class="limits"><strong>Limits.</strong> <span set:html={inline(f.limits)} /></p>}
+          </div>
+          <a href={f.docs.href} class="link">{f.docs.label} docs</a>
+        </div>
+        <div class="demo">
+          {f.code && <CodeWindow code={f.code.source} title={f.code.file} />}
+          {f.terminal && <Terminal lines={f.terminal} />}
+        </div>
+      </section>
+    ))}
+  </div>
+</Base>
+
+<style>
+  .toc ul { list-style: none; margin: 0.5rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .toc a {
+    display: inline-block; padding: 0.4rem 0.7rem; border: 1px solid var(--line-strong); border-radius: 4px;
+    color: var(--text-muted); text-decoration: none; font-size: 0.875rem;
+  }
+  .toc a:hover { color: var(--text); background: var(--bg-hover); }
+  .feature {
+    display: grid; grid-template-columns: 1fr 1.1fr; gap: clamp(2rem, 5vw, 4rem); align-items: start;
+    padding-block: clamp(3rem, 7vw, 5rem); border-top: 1px solid var(--line);
+  }
+  .text { display: grid; gap: 1.1rem; justify-items: start; }
+  .num { font: 500 0.75rem/1 var(--mono); color: var(--accent); }
+  h2 { font-size: clamp(1.5rem, 3vw, 2rem); }
+  .limits { border-left: 2px solid var(--line-strong); padding-left: 1rem; }
+  .demo { display: grid; gap: 1rem; min-width: 0; }
+  @media (max-width: 60rem) { .feature { grid-template-columns: 1fr; } }
+</style>

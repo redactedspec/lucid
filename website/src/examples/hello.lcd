@@ -1,0 +1,4 @@
+task greet(name: text) -> text
+    return "Hello, {name}"
+
+print greet("world")

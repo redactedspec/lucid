@@ -1,0 +1,29 @@
+/* Starlight theme, matched to the marketing pages. */
+:root {
+  --sl-font: 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  --sl-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+:root[data-theme='dark'] {
+  --sl-color-accent-low: #0b2a34;
+  --sl-color-accent: #3aa9cc;
+  --sl-color-accent-high: #a8e6f7;
+  --sl-color-white: #f2f5f8;
+  --sl-color-gray-1: #e2e6eb;
+  --sl-color-gray-2: #bcc3cc;
+  --sl-color-gray-3: #8e97a2;
+  --sl-color-gray-4: #5d6570;
+  --sl-color-gray-5: #2c333d;
+  --sl-color-gray-6: #14181e;
+  --sl-color-black: #07080a;
+  --sl-color-bg-nav: #07080a;
+  --sl-color-bg-sidebar: #07080a;
+  --sl-color-hairline-light: #1b2028;
+  --sl-color-hairline: #1b2028;
+}
+:root[data-theme='light'] {
+  --sl-color-accent-low: #d6f1f9;
+  --sl-color-accent: #0a6f8c;
+  --sl-color-accent-high: #063f50;
+}
+.site-title { font-family: var(--sl-font-mono); font-weight: 500; letter-spacing: -0.01em; }
+.site-title img { height: 1.6rem; width: 1.6rem; }

@@ -1,0 +1,10 @@
+type User
+    name: text
+    age: int = 0
+
+task is_adult(self: User) -> bool
+    return self.age >= 18
+
+let ada = User(name: "Ada", age: 36)
+if ada.is_adult()
+    print "{ada.name} may enter"

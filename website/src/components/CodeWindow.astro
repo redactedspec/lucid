@@ -1,0 +1,57 @@
+---
+import { Code } from 'astro:components';
+import lucid from '../lucid.tmLanguage.json';
+import theme from '../lucid-dark.theme.json';
+
+interface Props {
+  code: string;
+  title: string;
+  lang?: 'lucid' | 'sh' | 'toml' | 'json';
+}
+
+const { code, title, lang = 'lucid' } = Astro.props;
+const language = lang === 'lucid' ? ({ ...lucid } as any) : lang;
+---
+<figure class="window">
+  <figcaption>
+    <span class="title">{title}</span>
+    <button type="button" class="copy" data-copy={code} aria-label={`Copy ${title}`}>
+      <span class="label">Copy</span>
+    </button>
+  </figcaption>
+  <Code code={code.trimEnd()} lang={language} theme={theme as any} />
+</figure>
+
+<script>
+  for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-copy]')) {
+    button.addEventListener('click', async () => {
+      const label = button.querySelector('.label');
+      try {
+        await navigator.clipboard.writeText(button.dataset.copy ?? '');
+        if (label) label.textContent = 'Copied';
+      } catch {
+        if (label) label.textContent = 'Copy failed';
+      }
+      setTimeout(() => { if (label) label.textContent = 'Copy'; }, 1600);
+    });
+  }
+</script>
+
+<style>
+  .window { margin: 0; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg-raised); overflow: hidden; min-width: 0; }
+  figcaption {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: 0.5rem 0.5rem 0.5rem 1rem; border-bottom: 1px solid var(--line);
+  }
+  .title { font: 400 0.8125rem/1 var(--mono); color: var(--text-muted); }
+  .copy {
+    font: 500 0.75rem/1 var(--mono); color: var(--text-muted); background: transparent;
+    border: 1px solid var(--line-strong); border-radius: 4px; padding: 0.45rem 0.65rem; cursor: pointer; min-height: 2rem;
+  }
+  .copy:hover { color: var(--text); border-color: #3a424d; }
+  .label { display: inline-block; min-width: 3.2em; }
+  .window :global(pre) {
+    margin: 0; padding: 1.1rem 1.25rem; overflow-x: auto;
+    font-size: 0.875rem; line-height: 1.7; background: var(--bg-raised) !important;
+  }
+</style>

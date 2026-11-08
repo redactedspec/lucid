@@ -1,0 +1,35 @@
+---
+import { milestones } from '../data/roadmap';
+
+const label = { done: 'Done', active: 'In progress', planned: 'Planned' } as const;
+---
+<ol class="strip">
+  {milestones.map((m) => {
+    const steps = m.steps ? `${m.steps.filter((s) => s.done).length} of ${m.steps.length} steps` : '';
+    return (
+      <li class={m.status}>
+        <span class="id">{m.id}</span>
+        <span class="title">{m.title}</span>
+        <span class={`tag tag-${m.status}`}>{label[m.status]}</span>
+        {steps && <span class="steps">{steps}</span>}
+      </li>
+    );
+  })}
+</ol>
+
+<style>
+  .strip {
+    list-style: none; margin: 0; padding: 0;
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    border-top: 1px solid var(--line); border-left: 1px solid var(--line);
+  }
+  li {
+    display: grid; gap: 0.5rem; align-content: start; justify-items: start;
+    padding: 1.1rem 1.1rem 1.3rem; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  }
+  .id { font: 500 0.8125rem/1 var(--mono); color: var(--text-faint); }
+  .title { font-weight: 500; }
+  .steps { font: 400 0.75rem/1 var(--mono); color: var(--text-muted); }
+  .active { background: linear-gradient(var(--bg-raised), var(--bg-raised)); box-shadow: inset 0 2px 0 var(--warn); }
+  @media (max-width: 52rem) { .strip { grid-template-columns: repeat(2, 1fr); } }
+</style>

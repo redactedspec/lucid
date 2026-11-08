@@ -1,0 +1,146 @@
+---
+import Base from '../layouts/Base.astro';
+import CodeWindow from '../components/CodeWindow.astro';
+import Terminal from '../components/Terminal.astro';
+import MilestoneStrip from '../components/MilestoneStrip.astro';
+import hello from '../examples/hello.lcd?raw';
+import { features } from '../data/features';
+import { inline } from '../lib/inline';
+---
+<Base
+  title="Lucid"
+  description="Lucid is a readable, memory-safe programming language that compiles to native code with Cranelift and to WebAssembly. Inferred ownership, explicit errors, and machine-readable diagnostics for people and AI agents."
+>
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow">Programming language · in development</p>
+        <h1>Clarity, compiled.</h1>
+        <p class="lede">
+          Lucid reads like plain English and compiles to native code and WebAssembly.
+          Ownership is inferred, errors are values, and every diagnostic has a stable code,
+          so people and AI agents can read a program and know what it does.
+        </p>
+        <div class="actions">
+          <a href="/docs/" class="btn btn-primary">Read the docs</a>
+          <a href="/learn/" class="btn">Take the tour</a>
+        </div>
+        <p class="note">No public release yet. <a href="/downloads/" class="link">See availability</a>.</p>
+      </div>
+      <div class="hero-code">
+        <CodeWindow code={hello} title="hello.lcd" />
+        <Terminal lines={[{ cmd: 'lucid run hello.lcd' }, { out: 'Hello, world' }]} />
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="features-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Design</p>
+        <h2 id="features-title">Explicit where it matters. Quiet everywhere else.</h2>
+        <p>Signatures say everything: inputs, mutation, ownership, and failure. The compiler infers the rest.</p>
+      </div>
+      <ol class="features">
+        {features.map((f, i) => (
+          <li>
+            <span class="num">{String(i + 1).padStart(2, '0')}</span>
+            <h3>{f.title}</h3>
+            <p set:html={inline(f.short)} />
+          </li>
+        ))}
+      </ol>
+      <a href="/features/" class="link more">All features, with examples and limits</a>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="status-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Status</p>
+        <h2 id="status-title">Eight milestones done. The ecosystem is next.</h2>
+        <p>
+          The language runs today on Windows, natively and in the browser. M8 adds Linux, a package registry,
+          SQLite, cryptography, a language server, and the 1.0 stability promise. There is no 1.0 release yet.
+        </p>
+      </div>
+      <MilestoneStrip />
+      <a href="/roadmap/" class="link more">Full roadmap</a>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="start-title">
+    <div class="wrap start">
+      <div class="section-head">
+        <p class="eyebrow">Getting started</p>
+        <h2 id="start-title">A handful of commands.</h2>
+        <p>
+          Write a <code>.lcd</code> file, then run, check, test, and build it.
+          Every command also speaks JSON with <code>--json</code>.
+        </p>
+        <p class="note">
+          Binaries are not published yet, and the source repository is not public.
+          <a href="/docs/installation/" class="link">What you need to build from source</a>.
+        </p>
+      </div>
+      <Terminal
+        title="Terminal"
+        lines={[
+          { cmd: 'lucid run hello.lcd' },
+          { out: 'Hello, world' },
+          { cmd: 'lucid check hello.lcd' },
+          { out: '# no output: no errors' },
+          { cmd: 'lucid test hello.lcd' },
+          { out: '0 tests, 0 failed' },
+          { cmd: 'lucid build hello.lcd' },
+          { out: '# writes hello.exe on Windows' },
+          { cmd: 'lucid build --target web hello.lcd' },
+          { out: '# writes hello.js, for a browser or Node' },
+        ]}
+      />
+    </div>
+  </section>
+</Base>
+
+<style>
+  .hero { position: relative; padding-block: clamp(3.5rem, 9vw, 7rem); }
+  .hero::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background-image:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 48px 48px;
+    background-position: -1px -1px;
+    mask-image: linear-gradient(to bottom, #000 30%, transparent);
+    -webkit-mask-image: linear-gradient(to bottom, #000 30%, transparent);
+  }
+  .hero > .wrap { position: relative; }
+  .hero-grid { display: grid; grid-template-columns: 1.05fr 1fr; gap: clamp(2rem, 5vw, 4.5rem); align-items: center; }
+  .hero-copy { display: grid; gap: 1.5rem; }
+  h1 { font-size: clamp(2.75rem, 7vw, 4.75rem); letter-spacing: -0.035em; font-weight: 600; }
+  .lede { font-size: clamp(1.0625rem, 1.6vw, 1.1875rem); color: var(--text-muted); max-width: 34rem; }
+  .actions { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+  .note { color: var(--text-faint); font-size: 0.9375rem; }
+  .hero-code { display: grid; gap: 1rem; }
+
+  .features {
+    list-style: none; margin: 0; padding: 0;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+    border-top: 1px solid var(--line); border-left: 1px solid var(--line);
+  }
+  .features li {
+    display: grid; gap: 0.6rem; align-content: start; padding: 1.75rem 1.5rem 2rem;
+    border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  }
+  .num { font: 500 0.75rem/1 var(--mono); color: var(--accent); }
+  h3 { font-size: 1.0625rem; letter-spacing: -0.01em; }
+  .features p { color: var(--text-muted); font-size: 0.9375rem; }
+  .more { display: inline-block; margin-top: 2rem; font-size: 0.9375rem; }
+
+  .start { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(2rem, 5vw, 4rem); align-items: start; }
+  .start .section-head { margin-bottom: 0; }
+
+  @media (max-width: 60rem) {
+    .hero-grid, .start { grid-template-columns: 1fr; }
+  }
+</style>

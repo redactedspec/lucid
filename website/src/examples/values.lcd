@@ -1,0 +1,5 @@
+var a = [1, 2, 3]
+var b = a  # b is its own value
+b.push(4)
+print a  # [1, 2, 3]
+print b  # [1, 2, 3, 4]

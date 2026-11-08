@@ -1,0 +1,18 @@
+use std.dom
+
+choice Message
+    Increment
+    Decrement
+
+task update(count: int, message: Message) -> int
+    return match message
+        Increment -> count + 1
+        Decrement -> count - 1
+
+task button(label: text, message: Message) -> dom.Node[Message]
+    return dom.Element(tag: "button", attrs: [dom.On(event: "click", message: _ => message)], children: [dom.Text(content: label)])
+
+task view(count: int) -> dom.Node[Message]
+    return dom.Element(tag: "p", children: [button("-", Decrement), dom.Text(content: " {count} "), button("+", Increment)])
+
+dom.app(0, view, update)

@@ -1,0 +1,9 @@
+task find(names: list[text], wanted: text) -> int?
+    for i in 0..names.len()
+        if names[i] == wanted
+            return i
+    return none
+
+let index = find(["Ada", "Linus"], "Linus")
+if index is not none
+    print "found at {index}"  # index is an int here

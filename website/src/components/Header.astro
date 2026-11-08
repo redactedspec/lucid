@@ -1,0 +1,75 @@
+---
+import Wordmark from './Wordmark.astro';
+
+const nav = [
+  { href: '/docs/', label: 'Docs' },
+  { href: '/learn/', label: 'Learn' },
+  { href: '/features/', label: 'Features' },
+  { href: '/roadmap/', label: 'Roadmap' },
+  { href: '/downloads/', label: 'Downloads' },
+];
+
+const path = Astro.url.pathname;
+const current = (href: string) => (path.startsWith(href) ? 'page' : undefined);
+---
+<header class="site-header">
+  <div class="wrap bar">
+    <a href="/" class="home" aria-label="Lucid home"><Wordmark /></a>
+
+    <nav aria-label="Main" class="desktop">
+      <ul>
+        {nav.map((item) => <li><a href={item.href} aria-current={current(item.href)}>{item.label}</a></li>)}
+      </ul>
+    </nav>
+    <a href="/docs/" class="btn btn-primary cta desktop">Get started</a>
+
+    <details class="mobile">
+      <summary aria-label="Menu">
+        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.5" /></svg>
+      </summary>
+      <nav aria-label="Main">
+        <ul>
+          {nav.map((item) => <li><a href={item.href} aria-current={current(item.href)}>{item.label}</a></li>)}
+        </ul>
+      </nav>
+    </details>
+  </div>
+</header>
+
+<style>
+  .site-header {
+    position: sticky; top: 0; z-index: 10;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar { display: flex; align-items: center; gap: 2rem; height: 4rem; }
+  .home { text-decoration: none; margin-right: auto; display: inline-flex; padding: 0.25rem 0; }
+  ul { display: flex; gap: 0.25rem; list-style: none; margin: 0; padding: 0; }
+  nav a {
+    display: block; padding: 0.5rem 0.75rem; border-radius: var(--radius);
+    color: var(--text-muted); text-decoration: none; font-size: 0.9375rem;
+    transition: color 0.15s, background-color 0.15s;
+  }
+  nav a:hover { color: var(--text); background: var(--bg-hover); }
+  nav a[aria-current='page'] { color: var(--text); }
+  .cta { min-height: 2.25rem; font-size: 0.875rem; }
+
+  .mobile { display: none; position: relative; }
+  summary {
+    list-style: none; cursor: pointer; display: grid; place-items: center;
+    width: 2.75rem; height: 2.75rem; border: 1px solid var(--line-strong); border-radius: var(--radius); color: var(--text);
+  }
+  summary::-webkit-details-marker { display: none; }
+  .mobile nav {
+    position: absolute; right: 0; top: calc(100% + 0.5rem); min-width: 12rem;
+    background: var(--bg-raised); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 0.4rem;
+  }
+  .mobile ul { flex-direction: column; }
+  .mobile nav a { padding: 0.7rem 0.8rem; }
+
+  @media (max-width: 52rem) {
+    .desktop { display: none; }
+    .mobile { display: block; }
+  }
+</style>

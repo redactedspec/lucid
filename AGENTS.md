@@ -26,6 +26,7 @@ Docs must never go stale. Every commit that changes behavior, code, plans, or de
 | New evidence or benchmark results | `docs/research.md` |
 | Agent tooling, hooks, or Claude Code workflow | `docs/claude-code.md` |
 | Project status, or a doc added or removed | `README.md` |
+| Anything the public site states: syntax, commands, `std`, platforms, milestones | `website/src/content/docs/`, `website/src/data/` |
 
 Docs describe what is true now. Mark planned items as planned, and remove claims that stop being true.
 
@@ -41,7 +42,7 @@ Docs describe what is true now. Mark planned items as planned, and remove claims
 
 ## Commands
 
-`cargo test` runs unit and golden tests. It needs `node`, and the build needs `rustup target add wasm32-unknown-unknown`. Other commands are in `docs/compiler.md`.
+`cargo test` runs unit and golden tests. The website builds apart from cargo: see `website/README.md`, and run `npm run check:examples` there after a change to the language or to the site's docs. It needs `node`, and the build needs `rustup target add wasm32-unknown-unknown`. Other commands are in `docs/compiler.md`.
 
 ## Commits
 

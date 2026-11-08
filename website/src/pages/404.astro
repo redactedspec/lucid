@@ -1,0 +1,21 @@
+---
+import Base from '../layouts/Base.astro';
+---
+<Base title="Page not found" description="This page does not exist." noindex>
+  <div class="wrap">
+    <header class="page-head">
+      <p class="eyebrow">404</p>
+      <h1>No such page.</h1>
+      <p>The address may be wrong, or the page may have moved.</p>
+      <div class="actions">
+        <a href="/" class="btn btn-primary">Home</a>
+        <a href="/docs/" class="btn">Documentation</a>
+      </div>
+    </header>
+  </div>
+</Base>
+
+<style>
+  .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem; }
+  .page-head { padding-bottom: 6rem; }
+</style>

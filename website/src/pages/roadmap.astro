@@ -1,0 +1,72 @@
+---
+import Base from '../layouts/Base.astro';
+import { milestones, later } from '../data/roadmap';
+import { inline } from '../lib/inline';
+
+const label = { done: 'Done', active: 'In progress', planned: 'Planned' } as const;
+---
+<Base
+  title="Roadmap"
+  description="Lucid's development milestones: M0 to M7 are done, M8 (ecosystem, Linux, registry, language server, 1.0 promise) is in progress, and M9 self-hosting is planned."
+>
+  <div class="wrap">
+    <header class="page-head">
+      <p class="eyebrow">Roadmap</p>
+      <h1>One runnable result per milestone.</h1>
+      <p>Each milestone ends with an exit test that must pass before the next one starts. There is no release yet: the 1.0 stability promise is the last step of M8.</p>
+    </header>
+
+    <ol class="timeline">
+      {milestones.map((m) => (
+        <li class={m.status}>
+          <div class="marker" aria-hidden="true"></div>
+          <div class="body">
+            <div class="head">
+              <span class="id">{m.id}</span>
+              <h2>{m.title}</h2>
+              <span class={`tag tag-${m.status}`}>{label[m.status]}</span>
+            </div>
+            <p set:html={inline(m.summary)} />
+            {m.steps && (
+              <ul class="steps">
+                {m.steps.map((s) => (
+                  <li class={s.done ? 'step done' : 'step'}>
+                    <span class="sr-only">{s.done ? 'Done:' : 'To do:'}</span>
+                    <span set:html={inline(s.text)} />
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p class="exit"><span>Exit</span> <span set:html={inline(m.exit)} /></p>
+          </div>
+        </li>
+      ))}
+    </ol>
+    <p class="later">{later}</p>
+  </div>
+</Base>
+
+<style>
+  .timeline { list-style: none; margin: 0; padding: 0 0 2rem; }
+  .timeline > li { display: grid; grid-template-columns: 1.5rem 1fr; gap: 1.25rem; position: relative; padding-bottom: 2.25rem; }
+  .timeline > li::before {
+    content: ''; position: absolute; left: calc(0.75rem - 0.5px); top: 1.25rem; bottom: 0; width: 1px; background: var(--line-strong);
+  }
+  .timeline > li:last-child::before { display: none; }
+  .marker { width: 0.75rem; height: 0.75rem; margin: 0.45rem auto 0; border-radius: 50%; border: 1.5px solid var(--text-faint); background: var(--bg); position: relative; }
+  .done .marker { background: var(--ok); border-color: var(--ok); }
+  .active .marker { background: var(--warn); border-color: var(--warn); box-shadow: 0 0 0 4px #2a2211; }
+  .body { display: grid; gap: 0.7rem; max-width: 46rem; }
+  .head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+  .id { font: 500 0.875rem/1 var(--mono); color: var(--text-faint); }
+  h2 { font-size: 1.25rem; }
+  .body > p { color: var(--text-muted); }
+  .exit { font-size: 0.9375rem; }
+  .exit > span:first-child { font: 500 0.6875rem/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); margin-right: 0.4rem; }
+  .steps { list-style: none; margin: 0.25rem 0; padding: 0; display: grid; gap: 0.45rem; }
+  .step { position: relative; padding-left: 1.6rem; color: var(--text-muted); font-size: 0.9375rem; }
+  .step::before { content: ''; position: absolute; left: 0; top: 0.35em; width: 0.8rem; height: 0.8rem; border: 1.5px solid var(--line-strong); border-radius: 3px; }
+  .step.done { color: var(--text); }
+  .step.done::before { background: var(--ok); border-color: var(--ok); }
+  .later { color: var(--text-faint); padding: 1rem 0 3rem; border-top: 1px solid var(--line); }
+</style>

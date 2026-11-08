@@ -1,0 +1,17 @@
+use std.fs
+
+task load(path: text) -> text or fs.FileError
+    let content = try fs.read_text(path)  # try: may return the error
+    return content.trim()
+
+task bump(change total: int, by: int)
+    total += by
+
+task square(n: int) -> int
+    return n * n
+
+var total = 0
+bump(change total, 3)  # change: marked at the call
+let job = spawn square(total)  # spawn: runs on a new thread
+print job.wait()
+print load("missing.txt") else "no file"  # else: the error is handled

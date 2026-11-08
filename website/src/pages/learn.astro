@@ -1,0 +1,103 @@
+---
+import Base from '../layouts/Base.astro';
+import CodeWindow from '../components/CodeWindow.astro';
+import { repoFile } from '../lib/inline';
+
+const path = [
+  { href: '/docs/', title: 'Getting started', text: 'Write, run, check, and test a first program.' },
+  { href: '/docs/syntax/', title: 'Syntax', text: 'Indentation, statements, comments, and names.' },
+  { href: '/docs/variables-and-types/', title: 'Variables and types', text: '`let`, `var`, numbers, text, and why there are no implicit conversions.' },
+  { href: '/docs/control-flow/', title: 'Control flow', text: '`if`, `while`, `for`, ranges, and `then` expressions.' },
+  { href: '/docs/tasks/', title: 'Tasks', text: 'Functions, defaults, lambdas, and parameter modes.' },
+  { href: '/docs/collections/', title: 'Collections', text: 'Lists, maps, and sets as values.' },
+  { href: '/docs/types-and-choices/', title: 'Types, choices, and unions', text: 'Records, closed sets of variants, `match`, and narrowing.' },
+  { href: '/docs/errors/', title: 'Error handling', text: 'Errors as values, `try`, `else`, and traps.' },
+  { href: '/docs/ownership/', title: 'Ownership and memory', text: 'Value semantics, `change`, `take`, and what copies cost.' },
+  { href: '/docs/concurrency/', title: 'Concurrency', text: 'Threads, channels, and locks.' },
+];
+
+const examples = [
+  { file: 'examples/hello.lcd', about: 'Tasks, lists, a loop, `is empty`, and interpolation.' },
+  { file: 'examples/todo.lcd', about: 'A command-line to-do list that saves JSON to a file, with `std.args`, `std.fs`, and `std.json`.' },
+  { file: 'examples/workers.lcd', about: 'Threads that share work through a channel and a lock.' },
+  { file: 'examples/website.lcd', about: 'An HTTP server with a page and a JSON endpoint, from `std.http` and `std.html`.' },
+].map((e) => ({ ...e, source: repoFile(e.file), name: e.file.split('/').pop()! }));
+
+const code = (s: string) => s.replace(/`([^`]+)`/g, '<code>$1</code>');
+---
+<Base
+  title="Learn"
+  description="Learn Lucid: a guided path through the language docs, and complete example programs that run with the current compiler."
+>
+  <div class="wrap">
+    <header class="page-head">
+      <p class="eyebrow">Learn</p>
+      <h1>Learn Lucid in an afternoon.</h1>
+      <p>The language is small on purpose: its whole reference fits in one sitting. Follow the path in order, then read the example programs.</p>
+    </header>
+
+    <section aria-labelledby="path-title" class="block">
+      <h2 id="path-title">The path</h2>
+      <ol class="path">
+        {path.map((step, i) => (
+          <li>
+            <a href={step.href}>
+              <span class="num">{String(i + 1).padStart(2, '0')}</span>
+              <span class="title">{step.title}</span>
+              <span class="text" set:html={code(step.text)} />
+            </a>
+          </li>
+        ))}
+      </ol>
+    </section>
+
+    <section aria-labelledby="examples-title" class="block">
+      <h2 id="examples-title">Example programs</h2>
+      <p class="intro">These are the example programs from the Lucid repository. The compiler's test suite runs them, so they stay current.</p>
+      <div class="examples">
+        {examples.map((e) => (
+          <article>
+            <p set:html={code(e.about)} />
+            <CodeWindow code={e.source} title={e.name} />
+          </article>
+        ))}
+      </div>
+    </section>
+
+    <section aria-labelledby="agents-title" class="block agents">
+      <h2 id="agents-title">Teaching an agent</h2>
+      <p class="intro">
+        One file holds everything that runs today, sized for an agent's context window.
+        Give it to the agent with the task, and let it read diagnostics with <code>--json</code>.
+      </p>
+      <div class="actions">
+        <a class="btn" href="/agent-guide.md">agent-guide.md</a>
+        <a class="link" href="/docs/ai-agents/">Writing Lucid with agents</a>
+      </div>
+    </section>
+  </div>
+</Base>
+
+<style>
+  .block { padding-block: 3rem; border-top: 1px solid var(--line); }
+  h2 { font-size: 1.5rem; margin-bottom: 1.5rem; }
+  .intro { color: var(--text-muted); max-width: 44rem; margin: -0.75rem 0 1.75rem; }
+  .path {
+    list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+    border-top: 1px solid var(--line); border-left: 1px solid var(--line);
+  }
+  .path a {
+    display: grid; gap: 0.4rem; height: 100%; padding: 1.25rem 1.25rem 1.5rem; text-decoration: none;
+    border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); transition: background-color 0.15s;
+  }
+  .path a:hover { background: var(--bg-raised); }
+  .path a:hover .title { color: var(--accent); }
+  .num { font: 500 0.75rem/1 var(--mono); color: var(--text-faint); }
+  .title { font-weight: 500; }
+  .text { color: var(--text-muted); font-size: 0.9375rem; }
+  .examples { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem; }
+  article { display: grid; gap: 0.9rem; align-content: start; min-width: 0; }
+  article p { color: var(--text-muted); font-size: 0.9375rem; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 1.25rem; }
+  @media (max-width: 60rem) { .examples { grid-template-columns: 1fr; } }
+</style>
