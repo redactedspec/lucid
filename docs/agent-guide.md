@@ -741,9 +741,9 @@ markdown = { path = "../markdown", allow = [] }
 
 ## What is not available
 
-Some keywords parse but do not run yet, and report E0901: `shared`, `weak`. There is no `channel` or `lock` yet.
+Some keywords parse but do not run yet, and report E0901: `shared`, `weak`.
 
-There is no console input, and no tuples: use a `type`. These do not exist, so write your own: `sort`, `split`, `join`, `trim`, `contains`, `replace`, `abs`, `min`, `max`, `sum`, `range`, `enumerate`, `zip`, `.map`, `.filter`, `.keys`, `.values`, `.insert`, `.clear`, text to number, and number to text other than interpolation. There is no way to turn a number into a character. To map characters to numbers, search a text such as `"abcdefghijklmnopqrstuvwxyz"`.
+There is no console input, and no tuples: use a `type`. These do not exist, so write your own: `join`, `replace`, `abs`, `min`, `max`, `sum`, `range`, `enumerate`, `zip`, `.map`, `.filter`, `.keys`, `.values`, `.insert`, `.clear`, text to `float`, and number to text other than interpolation. There is no way to turn a number into a character. To map characters to numbers, search a text such as `"abcdefghijklmnopqrstuvwxyz"`.
 
 `print` is the only output, and it ends each value with a line break.
 
