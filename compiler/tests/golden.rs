@@ -84,6 +84,48 @@ fn programs_run() {
     });
 }
 
+/// A deadlock among threads traps, whichever thread waits last, so only the
+/// message is fixed. A wait at the end of a task counts too, by decision 174.
+#[test]
+fn deadlocks_across_threads_trap() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("deadlock");
+    fs::create_dir_all(&dir).expect("cannot make test dir");
+    let listen = "task listen(c: channel[int])
+    let x = c.receive()
+    print x
+
+";
+    let programs = [
+        (
+            "waits.lcd",
+            "let c = channel[int](1)
+let t = spawn listen(c)
+t.wait()
+",
+        ),
+        (
+            "joins.lcd",
+            "let c = channel[int](1)
+spawn listen(c)
+",
+        ),
+        (
+            "ends.lcd",
+            "let c = channel[int](1)
+let t = spawn listen(c)
+let y = c.receive()
+",
+        ),
+    ];
+    for (name, body) in programs {
+        fs::write(dir.join(name), format!("{listen}{body}")).expect("cannot write test file");
+        let output = lucid(&dir, &["run", name]);
+        let stderr = text(&output.stderr);
+        assert_eq!(output.status.code(), Some(101), "{name}: {stderr}");
+        assert!(stderr.contains("trap: deadlock: every thread waits"), "{name}: {stderr}");
+    }
+}
+
 #[test]
 fn bad_programs_fail() {
     golden("fail", "err", |output, expected| {
@@ -894,8 +936,16 @@ fn copy_dir(from: &Path, to: &Path) {
 /// "WebAssembly" in docs/compiler.md.
 #[test]
 fn web_programs_match_run() {
-    const HOST_ONLY: [&str; 7] =
-        ["spawn", "spawn_overflow", "spawn_trap", "std_args_env", "std_fs", "std_time", "unsafe"];
+    const HOST_ONLY: [&str; 8] = [
+        "channel_threads",
+        "spawn",
+        "spawn_overflow",
+        "spawn_trap",
+        "std_args_env",
+        "std_fs",
+        "std_time",
+        "unsafe",
+    ];
     let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("web");
     let _ = fs::remove_dir_all(&root);
     let mut failures = Vec::new();

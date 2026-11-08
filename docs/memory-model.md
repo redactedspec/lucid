@@ -91,7 +91,7 @@ Values are destroyed deterministically when their last owner ends. Destroying ne
 ## Reference count performance
 
 - Counts are non-atomic by default.
-- By decision 170, the sign of a count tells who holds it, as in Lean 4. Built in the runtime and compiled code. `spawn` marks what it passes. `send` and locks are planned for M7. A positive count belongs to one thread, and changes with plain instructions. A negative count is shared by threads, and changes atomically. A count of 0 is static data. A value that goes to another thread, through `spawn`, `send`, or a lock, is marked negative with everything it reaches, which costs its size once. A marked value with one count turns positive again before a write, so a list in a lock is written in place.
+- By decision 170, the sign of a count tells who holds it, as in Lean 4. Built in the runtime and compiled code. `spawn` marks what it passes, and so do `send` and a lock. A positive count belongs to one thread, and changes with plain instructions. A negative count is shared by threads, and changes atomically. A count of 0 is static data. A value that goes to another thread, through `spawn`, `send`, or a lock, is marked negative with everything it reaches, which costs its size once. A marked value with one count turns positive again before a write, so a list in a lock is written in place.
 - Reuse analysis could recycle a dying allocation of matching size for a new value. It is not built, see decision 100.
 - Borrow elision removes count pairs around read-only uses of a read parameter.
 

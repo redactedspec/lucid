@@ -1,0 +1,80 @@
+# Workers share one channel of jobs, one of results, and a lock.
+task worker(jobs: channel[int], results: channel[int], total: lock[int])
+    while true
+        let job = jobs.receive()
+        if job is none
+            break
+        results.send(job * job)
+        total.update(n => n + job)
+
+let jobs = channel[int](2)
+let results = channel[int](100)
+let total = lock(0)
+var workers: list[spawned[none]] = []
+for i in 0..4
+    workers.push(spawn worker(jobs, results, total))
+for n in 1..101
+    jobs.send(n)
+jobs.close()
+for w in workers
+    w.wait()
+results.close()
+var sum = 0
+var count = 0
+while true
+    let r = results.receive()
+    if r is none
+        break
+    sum += r
+    count += 1
+print count
+print sum
+print total.read()
+
+# Each update runs alone, so no step is lost.
+task bump(counter: lock[int], times: int)
+    for i in 0..times
+        counter.update(n => n + 1)
+
+task count_up(counter: lock[int])
+    for i in 0..8
+        spawn bump(counter, 1000)
+
+# `count_up` waits for its threads before it returns.
+let counter = lock(0)
+count_up(counter)
+print counter.read()
+
+# A list in a lock grows from many threads.
+task add(log: lock[list[text]], name: text)
+    task push_name(items: list[text]) -> list[text]
+        var out = items
+        out.push(name)
+        return out
+    log.update(push_name)
+
+let log: lock[list[text]] = lock([])
+var adders: list[spawned[none]] = []
+for i in 0..16
+    adders.push(spawn add(log, "t{i}"))
+for adder in adders
+    adder.wait()
+let names = log.read()
+print names.len()
+
+# A value sent to another thread is a copy: the sender keeps its own.
+task change_it(inbox: channel[list[int]], outbox: channel[list[int]])
+    var got = inbox.receive()
+    if got is list[int]
+        var mine = got
+        mine.push(4)
+        outbox.send(mine)
+
+let inbox = channel[list[int]](1)
+let outbox = channel[list[int]](1)
+let original = [1, 2, 3]
+spawn change_it(inbox, outbox)
+inbox.send(original)
+let back = outbox.receive()
+print back
+print original

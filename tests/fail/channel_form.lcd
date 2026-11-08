@@ -1,0 +1,8 @@
+let c = channel[int](1)
+print c.receive()
+let a = c.send(1)
+let b = channel(4)
+let l = lock(1)
+l.update()
+let same = c == c
+c.send("x")

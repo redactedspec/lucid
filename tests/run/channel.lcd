@@ -1,0 +1,52 @@
+# A channel and a lock work with one thread, on every target.
+let numbers = channel[int](3)
+numbers.send(1)
+numbers.send(2)
+# Copies share the channel.
+let copy = numbers
+copy.send(3)
+numbers.close()
+while true
+    let n = numbers.receive()
+    if n is none
+        break
+    print n
+let last = numbers.receive()
+print last
+
+let words: channel[text] = channel(1)
+words.send("hi")
+var word = words.receive()
+print word
+words.send("again")
+word = words.receive()
+print word
+print words
+
+let total = lock(10)
+total.update(n => n + 1)
+print total.read()
+let same = total
+same.update(n => n * 2)
+print total.read()
+print total
+
+# A nested task owns its argument, so each update writes in place.
+task log_steps()
+    task grow(items: list[int]) -> list[int]
+        var out = items
+        out.push(out.len())
+        return out
+    let log = lock([0])
+    for i in 0..3
+        log.update(grow)
+    var seen = log.read()
+    seen.push(99)
+    print seen
+    print log.read()
+
+log_steps()
+
+let maybe: lock[text?] = lock(none)
+maybe.update(old => "set")
+print maybe.read()

@@ -1,0 +1,1 @@
+channel_capacity.lcd:1:9: trap: a channel needs a capacity of at least 1

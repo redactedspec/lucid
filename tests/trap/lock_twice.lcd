@@ -1,0 +1,2 @@
+let total = lock(1)
+total.update(n => total.read() + n)

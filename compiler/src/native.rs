@@ -119,7 +119,9 @@ fn clif(ty: Ty) -> Type {
         | Ty::Union(_)
         | Ty::Any(_)
         | Ty::Task(..)
-        | Ty::Spawned(_) => types::I64,
+        | Ty::Spawned(_)
+        | Ty::Channel(_)
+        | Ty::Lock(_) => types::I64,
         Ty::Float => types::F64,
         Ty::F32 => types::F32,
         Ty::Bool | Ty::None => types::I8,
@@ -283,6 +285,16 @@ fn jit(
     builder.symbol("lucid_spawn_scope", lucid_rt::lucid_spawn_scope as *const u8);
     builder.symbol("lucid_spawn", lucid_rt::lucid_spawn as *const u8);
     builder.symbol("lucid_wait", lucid_rt::lucid_wait as *const u8);
+    builder.symbol("lucid_channel", lucid_rt::lucid_channel as *const u8);
+    builder.symbol("lucid_send", lucid_rt::lucid_send as *const u8);
+    builder.symbol("lucid_receive", lucid_rt::lucid_receive as *const u8);
+    builder.symbol("lucid_close", lucid_rt::lucid_close as *const u8);
+    builder.symbol("lucid_lock", lucid_rt::lucid_lock as *const u8);
+    builder.symbol("lucid_lock_read", lucid_rt::lucid_lock_read as *const u8);
+    builder.symbol("lucid_lock_take", lucid_rt::lucid_lock_take as *const u8);
+    builder.symbol("lucid_lock_put", lucid_rt::lucid_lock_put as *const u8);
+    builder.symbol("lucid_thread_failed", lucid_rt::lucid_thread_failed as *const u8);
+    builder.symbol("lucid_thread_failure", lucid_rt::lucid_thread_failure as *const u8);
     let mut module = JITModule::new(builder);
     let Compiled { main, ids, sites } = compile(&mut module, program, source, max_main_frame)?;
     module.finalize_definitions().expect(CODEGEN);

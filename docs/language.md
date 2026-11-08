@@ -645,7 +645,7 @@ Each package is one copy in a program, however many packages depend on it. Two p
 
 ## Concurrency
 
-Planned for M7, by decisions 169 to 176. `spawn`, `spawned`, and waiting at the end of a task are built. `channel` and `lock` are planned, and report E0301 today.
+Planned for M7, by decisions 169 to 176. `spawn`, `spawned`, waiting at the end of a task, `channel`, `lock`, and the deadlock trap are built.
 
 `spawn f(x)` runs the call `f(x)` on a new thread, and gives a `spawned[T]`, where `T` is what `f` returns. Its arguments run first, in the current thread. `.wait()` blocks until the thread ends, and gives its result. Every spawn ends before the task, lambda, or top level that ran it returns: that one waits for each spawn it did not wait for. Nothing outlives its parent, so no thread leaks. Spawns in a loop run at once. `spawn` takes a call of a task, with no `change` argument, or else gives E0341. A `spawned[T]` shows as its type, such as `spawned[int]`, and cannot be compared.
 
@@ -669,7 +669,7 @@ total.update(n => n + 1)           # runs while it holds the lock
 print total.read()                 # a copy
 ```
 
-`receive()` gives `T?`: the next value, or `none` once the channel is closed and empty. Like `.pop`, it must be a whole statement, or all of the value of `let`, `var`, `return`, or an assignment to a name. `send` after `close` traps. A capacity below 1 traps. `update(f)` takes a `task(T) -> T`, and keeps what it gives. A thread that takes a lock it already holds traps. When every thread waits in `wait`, `send`, `receive`, or a lock, the program traps with a deadlock. A trap in any thread ends the program.
+`channel[T](capacity)` makes a channel. Where the context gives the type, as in `let c: channel[int] = channel(16)`, `channel(16)` is enough, and with neither it is E0324. `lock(value)` takes its type from the value, or from the context. `receive()` gives `T?`: the next value, or `none` once the channel is closed and empty. Like `.pop`, it must be a whole statement, or all of the value of `let`, `var`, `return`, or an assignment to a name. `send`, `close`, and `update` give no value, so each must be a statement, or else E0303. `send` after `close` traps, and so does a second `close`. A capacity below 1 traps. `update(f)` takes a `task(T) -> T`, and keeps what it gives. While `f` runs, the value is out of the lock, so a write in `f` copies nothing. `read()` waits while another thread runs `update`. A thread that takes a lock it already holds, as `f` would by reading its own lock, traps. When every thread waits in `wait`, `send`, `receive`, a lock, or the end of a task, the program traps with a deadlock. A trap in any thread ends the program. A channel and a lock show as their type, such as `lock[int]`, and cannot be compared.
 
 There is no `async` or `await`. Tasks do not have colors: any task can block and any task can be spawned. Under `--target web`, `spawn` is error E0907, and a channel and a lock work with one thread.
 

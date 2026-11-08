@@ -1,0 +1,22 @@
+# Four threads share a channel of jobs and a lock that holds the total.
+task worker(jobs: channel[int], total: lock[int])
+    while true
+        let job = jobs.receive()
+        if job is none
+            break
+        total.update(n => n + job * job)
+
+task sum_of_squares(count: int) -> int
+    let jobs = channel[int](16)
+    let total = lock(0)
+    var workers: list[spawned[none]] = []
+    for i in 0..4
+        workers.push(spawn worker(jobs, total))
+    for n in 1..count + 1
+        jobs.send(n)
+    jobs.close()
+    for w in workers
+        w.wait()
+    return total.read()
+
+print sum_of_squares(100)

@@ -6,14 +6,15 @@
 use std::alloc::{Layout, alloc, dealloc};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::hash::BuildHasher;
 #[cfg(not(target_arch = "wasm32"))]
 use std::hash::RandomState as Keys;
 use std::io::{ErrorKind, Write};
 use std::mem::offset_of;
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering, fence};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering, fence};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::thread::JoinHandle;
 
 #[cfg(feature = "exe")]
@@ -76,6 +77,8 @@ enum Kind {
     Record,
     Spawned,
     Scope,
+    Channel,
+    Lock,
 }
 
 /// Whether a text holds only ASCII, which makes a character position a byte
@@ -190,14 +193,20 @@ pub struct Spawned {
 /// returns, as an address, once it ends. See `lucid_spawn`.
 #[derive(Default)]
 struct Job {
-    result: Mutex<Option<usize>>,
+    state: Mutex<Ended>,
     ended: Condvar,
+}
+
+#[derive(Default)]
+struct Ended {
+    result: Option<usize>,
+    waits: Waits,
 }
 
 impl Drop for Job {
     fn drop(&mut self) {
-        let result = self.result.get_mut().unwrap_or_else(|e| e.into_inner());
-        if let Some(result) = result.take() {
+        let state = self.state.get_mut().unwrap_or_else(|e| e.into_inner());
+        if let Some(result) = state.result.take() {
             // SAFETY: the job held a count of its result, and its thread has
             // ended, so no other thread holds an unmarked value it reaches.
             unsafe { lucid_release(result as *mut Head) };
@@ -215,6 +224,158 @@ pub struct Scope {
     /// At this many threads, `lucid_spawn` first drops those that have ended
     /// and that no handle reaches, so a loop that never ends stays small.
     prune_at: usize,
+}
+
+/// A `channel[T]`, by decision 173. Copies of it share `state`, which comes
+/// from `Box::into_raw`. Each item is a marked list that holds one value, so
+/// one queue holds every type.
+#[repr(C)]
+pub struct Channel {
+    head: Head,
+    state: *mut Shared<Queue>,
+}
+
+struct Queue {
+    items: VecDeque<usize>,
+    capacity: usize,
+    closed: bool,
+    waits: Waits,
+}
+
+/// A `lock[T]`, by decision 173. `value` is a marked list that holds the one
+/// value, or 0 while `update` has it out.
+#[repr(C)]
+pub struct Lock {
+    head: Head,
+    state: *mut Shared<Slot>,
+}
+
+struct Slot {
+    value: usize,
+    /// The thread that runs `update`, as the address of its `THREAD` local.
+    holder: Option<usize>,
+    waits: Waits,
+}
+
+/// State that threads share, and the one `Condvar` that each change wakes.
+/// ponytail: one `Condvar` wakes senders and receivers alike. Use two if a
+/// busy channel shows the wasted wakeups.
+struct Shared<T> {
+    state: Mutex<T>,
+    changed: Condvar,
+}
+
+/// The threads that wait on one `Condvar`, for the deadlock trap of decision
+/// 174. `wake` stops counting them, and changes `epoch`, which tells a thread
+/// that wakes whether it was woken or woke by itself.
+#[derive(Default)]
+struct Waits {
+    count: u64,
+    epoch: u64,
+}
+
+/// The threads that run compiled code, in the high 32 bits, and how many of
+/// them wait in `wait`, `send`, `receive`, or a lock, in the low 32 bits. One
+/// word, so that each change sees both counts at once. The main thread counts.
+static THREADS: AtomicU64 = AtomicU64::new(ONE_THREAD);
+const ONE_THREAD: u64 = 1 << 32;
+
+const DEADLOCK: &str = "deadlock: every thread waits";
+
+/// True if every thread waits, by decision 174. Only the start of a wait and
+/// the end of a thread bring the two counts closer, and both ask this.
+fn is_deadlock(threads: u64) -> bool {
+    let waiting = threads & (ONE_THREAD - 1);
+    threads >> 32 == waiting && waiting > 0
+}
+
+std::thread_local! {
+    /// Why the last runtime task for channels, locks, or threads failed. The
+    /// compiled code asks `lucid_thread_failed` right after each one, and
+    /// traps there, so the trap shows where the call is.
+    static FAILURE: Cell<&'static str> = const { Cell::new("") };
+}
+
+/// What a runtime task for threads gives when it fails: static data, whose
+/// count of 0 makes every count operation skip it, until the trap that
+/// `lucid_thread_failed` leads to. Nothing reads it.
+static FAILED: Head = Head { count: AtomicI64::new(0), kind: Kind::Record };
+
+fn failed<T>() -> *mut T {
+    (&raw const FAILED).cast_mut().cast()
+}
+
+/// Records why this thread's runtime task failed. See `FAILURE`.
+fn fail(why: &'static str) {
+    FAILURE.set(why);
+}
+
+/// True if the last runtime task for threads failed on this thread.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_thread_failed() -> bool {
+    !FAILURE.get().is_empty()
+}
+
+/// Why it failed, as a new text.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_thread_failure() -> *mut Text {
+    text_from(FAILURE.get().as_bytes())
+}
+
+/// Waits on `changed` until `ready` holds for what `guard` guards. Each wait
+/// counts toward the deadlock trap until `wake` stops counting it. Gives
+/// `None` if this wait is a deadlock, after `fail`.
+fn block<'a, T>(
+    mut guard: MutexGuard<'a, T>,
+    changed: &Condvar,
+    waits: impl Fn(&mut T) -> &mut Waits,
+    ready: impl Fn(&T) -> bool,
+) -> Option<MutexGuard<'a, T>> {
+    while !ready(&guard) {
+        let epoch = {
+            let waits = waits(&mut guard);
+            waits.count += 1;
+            waits.epoch
+        };
+        if is_deadlock(THREADS.fetch_add(1, Ordering::SeqCst) + 1) {
+            // Every thread waits, so nothing changes before the trap.
+            fail(DEADLOCK);
+            return None;
+        }
+        // A wakeup that no `wake` caused leaves this thread counted.
+        while waits(&mut guard).epoch == epoch {
+            guard = changed.wait(guard).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+    Some(guard)
+}
+
+/// Wakes each thread that waits on `changed`, and counts it as running again
+/// before it runs, so no other thread sees a deadlock that is not one.
+fn wake(waits: &mut Waits, changed: &Condvar) {
+    if waits.count > 0 {
+        THREADS.fetch_sub(waits.count, Ordering::SeqCst);
+        waits.count = 0;
+        waits.epoch += 1;
+        changed.notify_all();
+    }
+}
+
+/// Blocks until the thread of `job` ends, and gives its result, or `None`
+/// for a deadlock.
+fn wait_job(job: &Job) -> Option<usize> {
+    let state = block(lock(&job.state), &job.ended, |s| &mut s.waits, |s| s.result.is_some());
+    state.map(|state| state.result.expect("the thread has ended"))
+}
+
+std::thread_local! {
+    /// Its address tells one thread from another, as `ThreadId` does, with
+    /// no call on any target.
+    static THREAD: u8 = const { 0 };
+}
+
+fn this_thread() -> usize {
+    THREAD.with(|here| std::ptr::from_ref(here) as usize)
 }
 
 /// The stack of a spawned thread, by decision 175. Most of it is only
@@ -617,11 +778,13 @@ pub unsafe extern "C" fn lucid_mark(value: *mut Head) {
                 // A result that comes later is marked by `lucid_wait`.
                 Kind::Spawned => {
                     let job = &*(*value.cast::<Spawned>()).job;
-                    if let Some(result) = *lock(&job.result) {
+                    if let Some(result) = lock(&job.state).result {
                         todo.push(result as *mut Head);
                     }
                 }
                 Kind::Scope => unreachable!("a scope is a hidden local, which nothing holds"),
+                // What a channel or a lock holds is marked when it goes in.
+                Kind::Channel | Kind::Lock => {}
             }
         }
     }
@@ -684,10 +847,29 @@ pub unsafe extern "C" fn lucid_release(value: *mut Head) {
                 Kind::Scope => {
                     let threads = Box::from_raw((*value.cast::<Scope>()).threads);
                     for (job, thread) in *threads {
+                        // A wait that counts, for the deadlock trap. No
+                        // compiled code runs here, so the trap has no place.
+                        if wait_job(&job).is_none() {
+                            trap(b"trap: deadlock: every thread waits");
+                        }
                         join(thread);
                         drop(job);
                     }
                     free(value, size_of::<Scope>());
+                }
+                Kind::Channel => {
+                    let shared = Box::from_raw((*value.cast::<Channel>()).state);
+                    let queue = shared.state.into_inner().unwrap_or_else(|e| e.into_inner());
+                    for item in queue.items {
+                        drop_count(item as *mut Head, &mut pending);
+                    }
+                    free(value, size_of::<Channel>());
+                }
+                Kind::Lock => {
+                    let shared = Box::from_raw((*value.cast::<Lock>()).state);
+                    let slot = shared.state.into_inner().unwrap_or_else(|e| e.into_inner());
+                    drop_count(slot.value as *mut Head, &mut pending);
+                    free(value, size_of::<Lock>());
                 }
             }
         }
@@ -697,7 +879,7 @@ pub unsafe extern "C" fn lucid_release(value: *mut Head) {
 /// A trap in any thread ends the process, by decision 172, so compiled code
 /// never leaves a lock poisoned, and a runtime panic aborts, since every
 /// task here is `extern "C"`.
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -751,10 +933,16 @@ pub unsafe extern "C" fn lucid_spawn(scope: *mut Scope, task: *mut Record) -> *m
             lucid_release(task.cast());
             result
         };
-        *lock(&held.result) = Some(result as usize);
-        held.ended.notify_all();
+        let mut state = lock(&held.state);
+        state.result = Some(result as usize);
+        wake(&mut state.waits, &held.ended);
+        drop(state);
+        if is_deadlock(THREADS.fetch_sub(ONE_THREAD, Ordering::SeqCst) - ONE_THREAD) {
+            trap(b"trap: deadlock: every thread waits");
+        }
     };
     let builder = std::thread::Builder::new().stack_size(SPAWN_STACK_BYTES);
+    THREADS.fetch_add(ONE_THREAD, Ordering::SeqCst);
     let Ok(thread) = builder.spawn(run) else { trap(b"trap: cannot start a thread") };
     // SAFETY: the caller guarantees a live scope, which only this thread uses.
     let (threads, prune_at) = unsafe { (&mut *(*scope).threads, &mut (*scope).prune_at) };
@@ -776,7 +964,7 @@ pub unsafe extern "C" fn lucid_spawn(scope: *mut Scope, task: *mut Record) -> *m
 }
 
 /// Blocks until the thread of `spawned` ends, and gives a count of the list
-/// that holds its result. The result is not marked, by decision 170, unless
+/// that holds its result, or `failed()` for a deadlock, after `fail`. The result is not marked, by decision 170, unless
 /// other threads may hold the handle.
 ///
 /// # Safety
@@ -787,17 +975,210 @@ pub unsafe extern "C" fn lucid_wait(spawned: *mut Spawned) -> *mut Head {
     // SAFETY: the caller guarantees a live handle, which keeps its job alive.
     unsafe {
         check_live(spawned.cast());
-        let job = &*(*spawned).job;
-        let mut result = lock(&job.result);
-        while result.is_none() {
-            result = job.ended.wait(result).unwrap_or_else(|e| e.into_inner());
-        }
-        let value = result.expect("the thread has ended") as *mut Head;
+        let Some(value) = wait_job(&*(*spawned).job) else { return failed() };
+        let value = value as *mut Head;
         if (*spawned).head.count.load(Ordering::Acquire) < 0 {
             lucid_mark(value);
         }
         lucid_retain(value);
         value
+    }
+}
+
+/// Takes a count of `item`, a list that holds one value, and marks it, since
+/// another thread will read it, by decision 170.
+///
+/// # Safety
+///
+/// `item` must be a live list that this caller has a count of.
+unsafe fn share(item: *mut Head) -> usize {
+    // SAFETY: the caller guarantees a live value, and this thread is the only
+    // one that holds it unmarked.
+    unsafe {
+        lucid_retain(item);
+        lucid_mark(item);
+    }
+    item as usize
+}
+
+fn shared<T>(value: T) -> *mut Shared<T> {
+    Box::into_raw(Box::new(Shared { state: Mutex::new(value), changed: Condvar::new() }))
+}
+
+/// A new channel that holds at most `capacity` values, or `failed()`, after
+/// `fail`, for a capacity below 1.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_channel(capacity: i64) -> *mut Channel {
+    let Ok(capacity @ 1..) = usize::try_from(capacity) else {
+        fail("a channel needs a capacity of at least 1");
+        return failed();
+    };
+    let items = VecDeque::new();
+    let state = shared(Queue { items, capacity, closed: false, waits: Waits::default() });
+    let head = Head { count: AtomicI64::new(1), kind: Kind::Channel };
+    object(size_of::<Channel>(), Channel { head, state })
+}
+
+/// Adds `item`, a list that holds the value, and blocks while the channel is
+/// full. Fails if the channel is closed, or for a deadlock.
+///
+/// # Safety
+///
+/// `channel` must be a live channel, and `item` a live list, that this caller
+/// has a count of.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_send(channel: *mut Channel, item: *mut Head) {
+    const CLOSED: &str = "send on a closed channel";
+    // SAFETY: the caller guarantees live values, and the channel keeps its
+    // state alive.
+    let shared = unsafe {
+        check_live(channel.cast());
+        &*(*channel).state
+    };
+    let room = |q: &Queue| q.items.len() < q.capacity || q.closed;
+    let Some(mut queue) = block(lock(&shared.state), &shared.changed, |q| &mut q.waits, room)
+    else {
+        return;
+    };
+    if queue.closed {
+        return fail(CLOSED);
+    }
+    // SAFETY: the caller guarantees a live list.
+    queue.items.push_back(unsafe { share(item) });
+    wake(&mut queue.waits, &shared.changed);
+}
+
+/// Gives the list that holds the next value, and blocks while the channel is
+/// empty and open. Gives an empty list once it is closed and empty, and
+/// `failed()` for a deadlock, after `fail`.
+///
+/// # Safety
+///
+/// `channel` must be a live channel that this caller has a count of.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_receive(channel: *mut Channel) -> *mut Head {
+    // SAFETY: as in `lucid_send`.
+    let shared = unsafe {
+        check_live(channel.cast());
+        &*(*channel).state
+    };
+    let ready = |q: &Queue| !q.items.is_empty() || q.closed;
+    let Some(mut queue) = block(lock(&shared.state), &shared.changed, |q| &mut q.waits, ready)
+    else {
+        return failed();
+    };
+    let Some(item) = queue.items.pop_front() else {
+        return list_alloc(0, false, false).cast();
+    };
+    wake(&mut queue.waits, &shared.changed);
+    item as *mut Head
+}
+
+/// Closes the channel. Fails if it is closed already, as Go panics.
+///
+/// # Safety
+///
+/// `channel` must be a live channel that this caller has a count of.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_close(channel: *mut Channel) {
+    // SAFETY: as in `lucid_send`.
+    let shared = unsafe {
+        check_live(channel.cast());
+        &*(*channel).state
+    };
+    let mut queue = lock(&shared.state);
+    if queue.closed {
+        return fail("close of a closed channel");
+    }
+    queue.closed = true;
+    wake(&mut queue.waits, &shared.changed);
+}
+
+/// A new lock that holds `value`, a list that holds the one value.
+///
+/// # Safety
+///
+/// `value` must be a live list that this caller has a count of.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_lock(value: *mut Head) -> *mut Lock {
+    // SAFETY: the caller guarantees a live list.
+    let value = unsafe { share(value) };
+    let state = shared(Slot { value, holder: None, waits: Waits::default() });
+    let head = Head { count: AtomicI64::new(1), kind: Kind::Lock };
+    object(size_of::<Lock>(), Lock { head, state })
+}
+
+/// Blocks while another thread runs `update` on the lock, and gives the
+/// guarded slot. Fails, and gives `None`, if this thread runs `update` on
+/// it, or for a deadlock.
+///
+/// # Safety
+///
+/// `lock` must be a live lock that this caller has a count of.
+unsafe fn free_slot<'a>(value: *mut Lock) -> Option<MutexGuard<'a, Slot>> {
+    // SAFETY: the caller guarantees a live lock, which keeps its state alive.
+    let shared = unsafe {
+        check_live(value.cast());
+        &*(*value).state
+    };
+    let slot = lock(&shared.state);
+    if slot.holder == Some(this_thread()) {
+        fail("a thread takes a lock that it holds");
+        return None;
+    }
+    block(slot, &shared.changed, |s| &mut s.waits, |s| s.holder.is_none())
+}
+
+/// Gives a count of the list that holds the lock's value, or `failed()`,
+/// after `fail`.
+///
+/// # Safety
+///
+/// `lock` must be a live lock that this caller has a count of.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_lock_read(lock: *mut Lock) -> *mut Head {
+    // SAFETY: the caller guarantees a live lock, and the slot holds a live
+    // list while no thread runs `update`.
+    unsafe {
+        let Some(slot) = free_slot(lock) else { return failed() };
+        let value = slot.value as *mut Head;
+        lucid_retain(value);
+        value
+    }
+}
+
+/// Starts `update`: takes the list that holds the lock's value, with its
+/// count, and holds the lock until `lucid_lock_put`. Gives `failed()`, after
+/// `fail`, as `lucid_lock_read` does.
+///
+/// # Safety
+///
+/// `lock` must be a live lock that this caller has a count of.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_lock_take(lock: *mut Lock) -> *mut Head {
+    // SAFETY: the caller guarantees a live lock.
+    let Some(mut slot) = (unsafe { free_slot(lock) }) else { return failed() };
+    slot.holder = Some(this_thread());
+    std::mem::take(&mut slot.value) as *mut Head
+}
+
+/// Ends `update`: keeps `value`, a list that holds the new value, and lets
+/// other threads take the lock.
+///
+/// # Safety
+///
+/// `lock` must be a live lock that this thread took with `lucid_lock_take`,
+/// and `value` a live list, and this caller must have a count of each.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_lock_put(lock: *mut Lock, value: *mut Head) {
+    // SAFETY: the caller guarantees live values.
+    unsafe {
+        check_live(lock.cast());
+        let shared = &*(*lock).state;
+        let mut slot = self::lock(&shared.state);
+        slot.value = share(value);
+        slot.holder = None;
+        wake(&mut slot.waits, &shared.changed);
     }
 }
 

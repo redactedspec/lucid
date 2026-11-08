@@ -1,0 +1,4 @@
+# Nothing can send, so the only thread waits forever.
+let c = channel[int](1)
+let x = c.receive()
+print x

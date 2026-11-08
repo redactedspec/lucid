@@ -21,7 +21,8 @@ pub const PRELUDE_TRAITS: [&str; 1] = ["Error"];
 const LATER_TYPES: [&str; 1] = ["pointer"];
 
 /// Type names that a program cannot define for itself, beyond `number_type`.
-const BUILT_IN_TYPES: [&str; 6] = ["bool", "text", "list", "map", "set", "spawned"];
+const BUILT_IN_TYPES: [&str; 8] =
+    ["bool", "text", "list", "map", "set", "spawned", "channel", "lock"];
 
 /// The same limit as nesting in the parser, for a chain of aliases.
 const MAX_ALIASES: usize = 128;
@@ -41,6 +42,12 @@ const LATER_TRAITS: [&str; 1] = ["Copy"];
 /// Dot calls that change their receiver, so they only work as statements, or
 /// for `pop`, as the whole value of one.
 const CHANGING_CALLS: [&str; 5] = ["push", "swap", "add", "remove", "pop"];
+
+/// Dot calls on a channel or a lock that must be statements, since each one
+/// waits for another thread, or, for `receive`, must be the whole value of
+/// one, as `pop` must. None changes the name it is called on, since copies
+/// share the channel or lock.
+const THREAD_CALLS: [&str; 4] = ["send", "receive", "close", "update"];
 
 const JOIN_TEXT: &str = "join text with interpolation: \"{a}{b}\"";
 const TEST_UNION: &str = "test it first, as in `if x is not none`. Only a name narrows, so name a field or call with `let`";
@@ -378,6 +385,8 @@ fn builtin_method(ty: Ty, name: &str) -> bool {
         Ty::Map(..) => matches!(name, "len" | "is_empty" | "get" | "remove"),
         Ty::Set(_) => matches!(name, "len" | "is_empty" | "add" | "remove"),
         Ty::Spawned(_) => name == "wait",
+        Ty::Channel(_) => matches!(name, "send" | "receive" | "close"),
+        Ty::Lock(_) => matches!(name, "read" | "update"),
         _ => false,
     }
 }
@@ -906,7 +915,7 @@ impl<'a> Checker<'a> {
         if let Some(&(_, param)) = self.type_params.iter().find(|(known, _)| *known == name) {
             return if self.arity(name, 0, args.len(), span) { param } else { Ty::Error };
         }
-        if matches!(name, "list" | "map" | "set" | "spawned") {
+        if matches!(name, "list" | "map" | "set" | "spawned" | "channel" | "lock") {
             return self.collection_type(name, &args, span);
         }
         let plain = match name {
@@ -999,6 +1008,8 @@ impl<'a> Checker<'a> {
         match (name, args) {
             ("list", &[item]) => Ty::List(inner(item)),
             ("spawned", &[item]) => Ty::Spawned(inner(item)),
+            ("channel", &[item]) => Ty::Channel(inner(item)),
+            ("lock", &[item]) => Ty::Lock(inner(item)),
             ("set", &[item]) => {
                 self.check_key(item, span);
                 Ty::Set(inner(item))
@@ -1211,7 +1222,7 @@ impl<'a> Checker<'a> {
             Ty::Data(..) => self.variants_of(ty).into_iter().flatten().collect(),
             _ => Vec::new(),
         };
-        if name == "Equal" && matches!(ty, Ty::Task(..) | Ty::Spawned(_)) {
+        if name == "Equal" && (matches!(ty, Ty::Task(..)) || ty.is_handle()) {
             return false;
         }
         let parts = if name == "Hash" {
@@ -1229,7 +1240,7 @@ impl<'a> Checker<'a> {
             "Show" | "Equal" => true,
             "Json" => match ty {
                 Ty::Map(key, _) => *key == Ty::Text,
-                Ty::Any(_) | Ty::Task(..) | Ty::Spawned(_) => false,
+                Ty::Any(_) | Ty::Task(..) | Ty::Spawned(_) | Ty::Channel(_) | Ty::Lock(_) => false,
                 _ => true,
             },
             "Hash" => ty.is_key() || (ty.is_compound() && !matches!(ty, Ty::Any(_))),
@@ -2708,6 +2719,12 @@ impl<'a> Checker<'a> {
                 Ast::Field { base, name } if name.text == "pop" && self.is_builtin(base, "pop") => {
                     Some(self.pop(base, args, value.span))
                 }
+                Ast::Field { base, name }
+                    if name.text == "receive" && self.is_builtin(base, "receive") =>
+                {
+                    let channel = self.expr(base);
+                    Some(self.receive(channel, args, value.span))
+                }
                 _ => None,
             },
             _ => None,
@@ -2736,6 +2753,12 @@ impl<'a> Checker<'a> {
                         && self.is_builtin(base, &name.text) =>
                 {
                     return self.changing_call(base, name, args, span);
+                }
+                Ast::Field { base, name }
+                    if THREAD_CALLS.contains(&name.text.as_str())
+                        && self.is_builtin(base, &name.text) =>
+                {
+                    self.thread_call(base, name, args, span)
                 }
                 _ => self.discarded(value),
             },
@@ -4192,7 +4215,13 @@ impl<'a> Checker<'a> {
 
     /// True if `set` here means the built-in, and no name of the program hides it.
     fn is_set_call(&self, name: &str) -> bool {
-        name == "set"
+        self.is_built_in_call(name, "set")
+    }
+
+    /// True if `name` is the built-in `built_in`, which no name of the
+    /// program hides.
+    fn is_built_in_call(&self, name: &str, built_in: &str) -> bool {
+        name == built_in
             && !self.visible(name)
             && !self.top.contains_key(name)
             && !self.task_ids.contains_key(name)
@@ -4829,7 +4858,8 @@ impl<'a> Checker<'a> {
             Ty::Bool => equality,
             Ty::Text => equality || order,
             ty if (ty.is_compound()
-                || matches!(ty, Ty::Param(..) | Ty::Task(..) | Ty::Spawned(_)))
+                || ty.is_handle()
+                || matches!(ty, Ty::Param(..) | Ty::Task(..)))
                 && (equality || order) =>
             {
                 let trait_name = if equality { "Equal" } else { "Order" };
@@ -4893,6 +4923,15 @@ impl<'a> Checker<'a> {
                 self.dot_call(value, (base, reported), name, args, span)
             }
             Ast::Name(name) if self.is_set_call(name) => self.set_call(args, want, span),
+            Ast::Name(name) if self.is_built_in_call(name, "channel") => {
+                self.new_channel(None, args, want, span)
+            }
+            Ast::Name(name) if self.is_built_in_call(name, "lock") => {
+                self.new_lock(args, want, span)
+            }
+            Ast::Index { base, indices } if matches!(&base.kind, Ast::Name(name) if self.is_built_in_call(name, "channel")) => {
+                self.new_channel(Some(indices), args, want, span)
+            }
             Ast::Index { base, indices } => {
                 if let Ast::Name(name) = &base.kind {
                     if let Some(target) = self.constructor(name) {
@@ -5319,7 +5358,12 @@ impl<'a> Checker<'a> {
                            the value of `let`, `var`, `return`, or an assignment to a name";
             return self.fail("E0303", message.into(), span);
         }
-        if CHANGING_CALLS.contains(&text) {
+        if text == "receive" {
+            let message = "`receive` waits for a value, so it must be a whole statement, or all \
+                           of the value of `let`, `var`, `return`, or an assignment to a name";
+            return self.fail("E0303", message.into(), span);
+        }
+        if CHANGING_CALLS.contains(&text) || THREAD_CALLS.contains(&text) {
             let message = format!("`{text}` gives no value, so it must be a statement");
             return self.fail("E0303", message, span);
         }
@@ -5359,7 +5403,8 @@ impl<'a> Checker<'a> {
                 Expr { kind: ExprKind::Foreign("lucid_text_lower", vec![value]), ty, span }
             }
             (Ty::Text, "to_int") => self.text_to_int(value, span),
-            (Ty::Spawned(item), "wait") => self.wait(value, *item, span),
+            (Ty::Spawned(item), "wait") => self.first_of("lucid_wait", value, *item, span),
+            (Ty::Lock(item), "read") => self.first_of("lucid_lock_read", value, *item, span),
             (_, "len") => int(ExprKind::Len(boxed)),
             (_, "pointer") => {
                 self.need_unsafe("`.pointer()`", span);
@@ -5463,13 +5508,217 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `x.wait()` on a `spawned[T]`: the one item of the list that its thread
-    /// gave.
-    fn wait(&mut self, value: Expr, item: Ty, span: Span) -> Expr {
+    /// The one item of the list that the runtime task `symbol` gives for
+    /// `value`: the result of a thread for `.wait()`, or a copy of what a lock
+    /// holds for `.read()`.
+    fn first_of(&mut self, symbol: &'static str, value: Expr, item: Ty, span: Span) -> Expr {
         let list = Ty::List(inner(item));
-        let results = Expr { kind: ExprKind::Foreign("lucid_wait", vec![value]), ty: list, span };
+        let results = Expr { kind: ExprKind::Foreign(symbol, vec![value]), ty: list, span };
+        let results = self.checked(results);
         let first = Expr { kind: ExprKind::Int(0), ty: Ty::Int, span };
         Expr { kind: ExprKind::ListGet(results.into(), first.into()), ty: item, span }
+    }
+
+    /// Traps here if the runtime task for threads that just ran failed: for a
+    /// deadlock, a lock this thread holds, a closed channel, or a capacity
+    /// below 1. The runtime finds these, and the trap shows this place.
+    fn failure_check(&self, span: Span) -> Stmt {
+        let failed = ExprKind::Foreign("lucid_thread_failed", Vec::new());
+        let failed = Expr { kind: failed, ty: Ty::Bool, span };
+        let why = ExprKind::Foreign("lucid_thread_failure", Vec::new());
+        let why = Expr { kind: why, ty: Ty::Text, span };
+        Stmt::If { branches: vec![(failed, vec![Stmt::Fail(why, span)])], otherwise: Vec::new() }
+    }
+
+    /// `call`, a runtime task for threads, then `failure_check`.
+    fn checked(&mut self, call: Expr) -> Expr {
+        let (ty, span) = (call.ty, call.span);
+        let local = self.new_local(ty, false);
+        let setup = vec![Stmt::Set(local, call), self.failure_check(span)];
+        Expr { kind: ExprKind::Seq(setup, self.read(local, span).into()), ty, span }
+    }
+
+    /// The one positional argument of a built-in call, or E0307.
+    fn one_arg(&mut self, what: &str, args: &'a [ast::Arg], span: Span) -> Option<&'a ast::Expr> {
+        if let [ast::Arg { name: None, change: false, value }] = args {
+            return Some(value);
+        }
+        self.poison_args(args, span);
+        self.fail("E0307", format!("`{what}` takes one positional argument"), span);
+        None
+    }
+
+    /// A list of one item, which is how the runtime holds a value of any type
+    /// in a channel or a lock.
+    fn boxed_one(&mut self, value: Expr, item: Ty) -> Expr {
+        let span = value.span;
+        let value = self.widen(value, item);
+        Expr { kind: ExprKind::ListOf(vec![value]), ty: Ty::List(inner(item)), span }
+    }
+
+    /// `channel[T](capacity)`, or `channel(capacity)` where the context gives
+    /// the type.
+    fn new_channel(
+        &mut self,
+        indices: Option<&'a [ast::Expr]>,
+        args: &'a [ast::Arg],
+        want: Option<Ty>,
+        span: Span,
+    ) -> Expr {
+        let want = self.literal_want(want, |ty| matches!(ty, Ty::Channel(_)));
+        let item = match (indices, want) {
+            (Some(indices), _) => match self.explicit(indices, 1, "channel", span) {
+                Some(types) => Some(types[0]),
+                None => return self.poison_args(args, span),
+            },
+            (None, Some(Ty::Channel(item))) => Some(*item),
+            (None, Some(Ty::Error)) => return self.poison_args(args, span),
+            (None, _) => None,
+        };
+        let Some(capacity) = self.one_arg("channel", args, span) else { return poisoned(span) };
+        let capacity = self.expected(capacity, Some(Ty::Int));
+        self.expect(&capacity, Ty::Int, "the capacity of a channel");
+        let Some(item) = item else {
+            let message = "a channel needs the type of what it holds";
+            let diag = Diagnostic::new("E0324", message, span);
+            return self.report(diag.note("write it, as in `channel[int](16)`"));
+        };
+        let kind = ExprKind::Foreign("lucid_channel", vec![capacity]);
+        self.checked(Expr { kind, ty: Ty::Channel(inner(item)), span })
+    }
+
+    /// `lock(value)`, which holds the type of `value`, or the one that the
+    /// context gives.
+    fn new_lock(&mut self, args: &'a [ast::Arg], want: Option<Ty>, span: Span) -> Expr {
+        let want = self.literal_want(want, |ty| matches!(ty, Ty::Lock(_)));
+        let item = match want {
+            Some(Ty::Lock(item)) => Some(*item),
+            Some(Ty::Error) => Some(Ty::Error),
+            _ => None,
+        };
+        let Some(value) = self.one_arg("lock", args, span) else { return poisoned(span) };
+        let value = self.expected(value, item);
+        let item = item.unwrap_or(value.ty);
+        self.expect(&value, item, "the value of a lock");
+        if item == Ty::Error {
+            return poisoned(span);
+        }
+        let list = self.boxed_one(value, item);
+        Expr { kind: ExprKind::Foreign("lucid_lock", vec![list]), ty: Ty::Lock(inner(item)), span }
+    }
+
+    /// `send`, `close`, `receive`, and `update`, as statements.
+    fn thread_call(
+        &mut self,
+        base: &'a ast::Expr,
+        name: &'a ast::Name,
+        args: &'a [ast::Arg],
+        span: Span,
+    ) -> Stmt {
+        let handle = self.expr(base);
+        let none = |kind| Stmt::Expr(Expr { kind, ty: Ty::None, span });
+        match (handle.ty, name.text.as_str()) {
+            (Ty::Channel(&item), "send") => {
+                let Some(value) = self.one_arg("send", args, span) else {
+                    return Stmt::Expr(handle);
+                };
+                let value = self.expected(value, Some(item));
+                self.expect(&value, item, "this argument");
+                let list = self.boxed_one(value, item);
+                let send = none(ExprKind::Foreign("lucid_send", vec![handle, list]));
+                Stmt::Block(vec![send, self.failure_check(span)])
+            }
+            (Ty::Channel(_), "close") => {
+                if !args.is_empty() {
+                    self.poison_args(args, span);
+                    self.fail("E0307", "`close` takes no arguments".into(), span);
+                }
+                let close = none(ExprKind::Foreign("lucid_close", vec![handle]));
+                Stmt::Block(vec![close, self.failure_check(span)])
+            }
+            (Ty::Channel(_), "receive") => {
+                let (stmt, result) = self.receive(handle, args, span);
+                self.with_held(vec![stmt], result)
+            }
+            (Ty::Lock(item), "update") => self.update(handle, item, args, span),
+            _ => unreachable!("`is_builtin` found a channel or a lock call"),
+        }
+    }
+
+    /// `channel.receive()`: the next value, or `none` once the channel is
+    /// closed and empty. The runtime gives a list of one item, or an empty
+    /// one. Gives a statement and the local that holds the value.
+    fn receive(&mut self, channel: Expr, args: &'a [ast::Arg], span: Span) -> (Stmt, Local) {
+        let Ty::Channel(&item) = channel.ty else {
+            let ty = channel.ty.name();
+            self.fail("E0303", format!("`receive` does not work on `{ty}`"), span);
+            return (Stmt::Block(Vec::new()), self.new_local(Ty::Error, false));
+        };
+        if !args.is_empty() {
+            self.poison_args(args, span);
+            self.fail("E0307", "`receive` takes no arguments".into(), span);
+        }
+        let ty = self.union([item, Ty::None]);
+        let result = self.new_local(ty, false);
+        let list = Ty::List(inner(item));
+        let got = self.new_local(list, false);
+        let int = |value| Expr { kind: ExprKind::Int(value), ty: Ty::Int, span };
+        let read = Box::new(self.read(got, span));
+        let len = Expr { kind: ExprKind::Len(read.clone()), ty: Ty::Int, span };
+        let any = self.binary_values(BinaryOp::Gt, len, int(0), span);
+        let value = Expr { kind: ExprKind::ListGet(read, int(0).into()), ty: item, span };
+        let found = vec![Stmt::Set(result, self.widen(value, ty))];
+        let none = Expr { kind: ExprKind::None, ty: Ty::None, span };
+        let otherwise = vec![Stmt::Set(result, self.widen(none, ty))];
+        let receive =
+            Expr { kind: ExprKind::Foreign("lucid_receive", vec![channel]), ty: list, span };
+        let stmts = vec![
+            Stmt::Set(got, receive),
+            self.failure_check(span),
+            Stmt::If { branches: vec![(any, found)], otherwise },
+            Stmt::Clear(got),
+        ];
+        (Stmt::Block(stmts), result)
+    }
+
+    /// `lock.update(f)`: takes the value out of the lock, so that it has one
+    /// count, passes it to `f`, which owns it by decision 183, and keeps what
+    /// `f` gives. So a write in `f` is in place, as decision 173 needs. The
+    /// lock and `f` run first, in the order on the page.
+    fn update(&mut self, lock: Expr, item: &'static Ty, args: &'a [ast::Arg], span: Span) -> Stmt {
+        let Some(f) = self.one_arg("update", args, span) else { return Stmt::Expr(lock) };
+        let task = Ty::Task(std::slice::from_ref(item), item);
+        let f = self.expected(f, Some(task));
+        self.expect(&f, task, "this argument");
+        let list = Ty::List(item);
+        let (held, f_local, value, new) = (
+            self.new_local(lock.ty, false),
+            self.new_local(task, false),
+            self.new_local(*item, false),
+            self.new_local(*item, false),
+        );
+        let local = |local, ty| Expr { kind: ExprKind::Local(local), ty, span };
+        let taken = self.new_local(list, false);
+        let take = ExprKind::Foreign("lucid_lock_take", vec![local(held, lock.ty)]);
+        let first = Expr { kind: ExprKind::Int(0), ty: Ty::Int, span };
+        let get = ExprKind::ListGet(local(taken, list).into(), first.into());
+        let call = ExprKind::CallValue(local(f_local, task).into(), vec![local(value, *item)]);
+        let kept = self.boxed_one(local(new, *item), *item);
+        let put = ExprKind::Foreign("lucid_lock_put", vec![local(held, lock.ty), kept]);
+        Stmt::Block(vec![
+            Stmt::Set(held, lock),
+            Stmt::Set(f_local, f),
+            Stmt::Set(taken, Expr { kind: take, ty: list, span }),
+            self.failure_check(span),
+            Stmt::Set(value, Expr { kind: get, ty: *item, span }),
+            Stmt::Clear(taken),
+            Stmt::Set(new, Expr { kind: call, ty: *item, span }),
+            Stmt::Expr(Expr { kind: put, ty: Ty::None, span }),
+            Stmt::Clear(value),
+            Stmt::Clear(new),
+            Stmt::Clear(f_local),
+            Stmt::Clear(held),
+        ])
     }
 
     /// Lowers arguments of a call that already failed, to report their errors.

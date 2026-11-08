@@ -187,6 +187,8 @@ let a: int = "one"
 
 Fix: give a value of the needed type, or convert it, as in `text.to_int()` or `int.to_text()`.
 
+A call that gives no value, such as `push`, `send`, `close`, or `update`, used as a value is E0303 too, and so is `.pop()` or `.receive()` inside a larger expression. Make the call a statement, or the whole value of `let`, `var`, `return`, or an assignment. The test is `channel_form`.
+
 ## E0304: Name is already defined in this scope
 
 Two declarations in one scope use the same name.
@@ -430,7 +432,7 @@ task show(self: Point) -> int
 
 Fix: use the form of the derived task, here `task show(self: Point) -> text`, or pick another name.
 
-## E0324: Lambda has no task type to take from its context, or has `try` and no result type from it
+## E0324: Lambda or channel has no type to take from its context, or a lambda has `try` and no result type from it
 
 A lambda takes its parameter types from where it goes, such as a parameter of task type.
 
@@ -439,6 +441,8 @@ let double = n => n * 2
 ```
 
 Fix: annotate the name, as in `let double: task(int) -> int = n => n * 2`, or write a nested task.
+
+`channel(16)` with no type and no context to take one from is E0324 too. Fix: write `channel[int](16)`.
 
 ## E0325: Lambda or nested task captures a name that can change
 

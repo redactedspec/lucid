@@ -159,7 +159,7 @@ impl Mono<'_> {
         match ty {
             Ty::Text => Expr { kind: ExprKind::TextQuote(boxed(value)), ty, span },
             // A task value or a thread shows its type: its code has no text.
-            Ty::Task(..) | Ty::Spawned(_) => {
+            Ty::Task(..) | Ty::Spawned(_) | Ty::Channel(_) | Ty::Lock(_) => {
                 let name = Expr { kind: ExprKind::Text(ty.name()), ty: Ty::Text, span };
                 let kind = ExprKind::Seq(vec![Stmt::Expr(value)], boxed(name));
                 Expr { kind, ty: Ty::Text, span }

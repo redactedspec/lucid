@@ -1,0 +1,2 @@
+lock_twice.lcd:2:19: trap: a thread takes a lock that it holds
+    at lock_twice.lcd:2:1 in top level

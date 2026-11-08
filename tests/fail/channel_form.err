@@ -1,0 +1,7 @@
+channel_form.lcd:2:7: error E0303: `receive` waits for a value, so it must be a whole statement, or all of the value of `let`, `var`, `return`, or an assignment to a name
+channel_form.lcd:3:9: error E0303: `send` gives no value, so it must be a statement
+channel_form.lcd:4:9: error E0324: a channel needs the type of what it holds
+  note: write it, as in `channel[int](16)`
+channel_form.lcd:6:1: error E0307: `update` takes one positional argument
+channel_form.lcd:7:12: error E0320: `channel[int]` does not have `Equal`
+channel_form.lcd:8:8: error E0303: this argument needs `int`, found `text`

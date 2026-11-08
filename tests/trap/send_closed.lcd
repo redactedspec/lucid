@@ -1,0 +1,3 @@
+let c = channel[int](1)
+c.close()
+c.send(1)

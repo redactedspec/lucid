@@ -590,6 +590,28 @@ for job in jobs
 
 `spawn` takes one call of a task, runs it on a new thread, and gives a `spawned[T]`. The arguments run first, in this thread, and the thread gets copies: a later change here does not reach it. `.wait()` blocks and gives the result. A task waits for every thread it spawned before it returns. A trap in any thread ends the program. `spawn` with a `change` argument, or with anything but a task call, is E0341. Under `--target web`, `spawn` is E0907.
 
+```lucid
+task worker(jobs: channel[int], total: lock[int])
+    while true
+        let job = jobs.receive()       # int?, none once closed and empty
+        if job is none
+            break
+        total.update(n => n + job)    # runs while it holds the lock
+
+let jobs = channel[int](16)           # blocks `send` while 16 wait
+let total = lock(0)
+for i in 0..4
+    spawn worker(jobs, total)
+for n in 1..101
+    jobs.send(n)
+jobs.close()
+```
+
+- Copying a channel or a lock shares it. A value sent or kept is a copy.
+- `receive` is a whole statement or the whole value of `let`, `var`, `return`, or an assignment, like `.pop`. `send`, `close`, and `update` are statements.
+- `read()` gives a copy. Inside `update(f)`, reading the same lock traps. So do `send` after `close`, a second `close`, and a capacity below 1.
+- When every thread waits, the program traps with `deadlock: every thread waits`.
+
 ## Foreign code
 
 ```lucid
