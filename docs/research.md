@@ -182,6 +182,23 @@ What moved the numbers on the way there:
 
 Limits: one machine, with best times of the old compiler that moved by up to 8% between runs of `trees`. So 2% is near what this method can see, and the 40 round run of `trees` is the one to trust. No thread shares a value yet, so the atomic path is tested by `marked_counts_hold_across_threads` in `lucid_rt`, not timed.
 
+### Stack limit parameter (M7)
+
+Level: **Read** (own measurement), 2026-11-07, for decision 175. Same method as "Signed counts (M7)": the compiler from before the change in the `unchecked` slot. Ratio of new to old, best and median:
+
+| Program | Rounds | Best | Median |
+| --- | --- | --- | --- |
+| `nbody` | 20 | 0.99 | 1.00 |
+| `trees` | 40 | 0.94 | 0.99 |
+| `json` | 20 | 0.99 | 0.89 |
+| `hashmap` | 20 | 1.01 | 1.00 |
+| `strings` | 40 | 1.03 | 0.97 |
+| `fib` | 40 | 1.10 | 1.01 |
+| `collatz` | 20 | 0.88 | 0.90 |
+| `sum` | 20 | 1.00 | 0.94 |
+
+`fib` is not an M4 benchmark. It is almost only calls, and each call now passes one more register, where `lucid run` had the limit as a constant in the code. Its best time moved 10% while its median moved 1%, so the cost is real but small next to the noise. Limits: one machine, and best times that move up to 8% between runs. If call-heavy code matters later, decision 175 names Cranelift's pinned register as the next thing to try.
+
 ### First Lucid benchmarks (M2)
 
 Level: **Read** (own measurement). `sh benchmarks/run.sh`, 2026-11-05, on the development machine: 15 paired rounds, so drift hits every build alike. Lucid includes JIT compile time. Rust is `rustc -O`, and "Rust checked" adds `-C overflow-checks=on`.
@@ -228,7 +245,7 @@ Decisions 169 to 180. Level: **Snippet** for web sources, read through search su
 - **HTTP framing.** RFC 9112, section 6.1, lets a server reject a request with both `Transfer-Encoding` and `Content-Length`, or else use `Transfer-Encoding` and close the connection after. Crystal's 2026 post-mortem and an http4s advisory report request smuggling from parsers that read `Content-Length` first. The RFC text itself was not read.
 - **TLS.** `rustls` 0.23 made `aws-lc-rs` the default provider, whose build needs `cmake`, and NASM on Windows. `ring` stays available with default features off.
 - **Cost of signed counts.** Measured, see "Signed counts (M7)" below: within 2% on the M4 benchmarks, but only after the runtime release path was reordered.
-- **Weak ground.** The cost of the hidden stack limit parameter is not measured. It is a build step with a benchmark check.
+- **Cost of the hidden stack limit.** Measured, see "Stack limit parameter (M7)" below: within 2% on the M4 benchmarks, and up to 10% on `fib`, which does nothing but call.
 
 Sources: [Why async Rust?](https://without.boats/blog/why-async-rust/), [loom-dev, native methods and virtual threads](https://mail.openjdk.org/pipermail/loom-dev/2023-July/005934.html), [JEP 491](https://openjdk.org/jeps/491), [lean-rs-sys refcount.rs](https://docs.rs/crate/lean-rs-sys/latest/source/src/refcount.rs), [Rust Arc](https://doc.rust-lang.org/nightly/alloc/sync/struct.Arc.html), [golang-nuts on recovery](https://groups.google.com/g/golang-nuts/c/zzUfBynUVV8), [Go issue 76763](https://github.com/golang/go/issues/76763), [Go under the hood: deadlock](https://golang.design/under-the-hood/en/part5toolchain/ch16tools/deadlock/), [Go issue 46260](https://golang.org/issue/46260), [Crystal post-mortem](https://crystal-lang.org/2026/05/26/http-request-smuggling-vulnerability-in-http-server/), [http4s advisory](https://corgea.com/advisories/vulnerabilities/CVE-2026-69204), [rustls issue 1913](https://www.github.com/rustls/rustls/issues/1913), [rustls docs](https://docs.rs/rustls/).
 

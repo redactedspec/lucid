@@ -2,19 +2,14 @@
 //! that the compiler embeds has this, since the compiler has its own `main`.
 //! See "`lucid build`" in docs/compiler.md.
 
-use crate::{CallSite, EXE_STACK_BYTES, SITE_WORDS, STACK_MARGIN, set_call_sites, set_grants};
+use crate::{CallSite, EXE_STACK_BYTES, SITE_WORDS, STACK_MARGIN};
+use crate::{set_call_sites, set_grants, set_stack_limit};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-/// The lowest stack address that compiled code may use. Each task reads it on
-/// entry. Set once, before the program starts.
-#[unsafe(no_mangle)]
-#[allow(non_upper_case_globals)] // The C name of the symbol.
-pub static lucid_stack_limit: AtomicUsize = AtomicUsize::new(0);
 
 unsafe extern "C" {
-    /// The program's top level, from the object file.
-    fn lucid_main() -> u8;
+    /// The program's top level, from the object file. It takes the stack
+    /// limit, as every compiled task does.
+    fn lucid_main(stack_limit: usize) -> u8;
     /// A count, then that many rows of `SITE_WORDS` words, from the object file.
     static lucid_call_sites: usize;
     /// The text that rows of `lucid_call_sites` point into.
@@ -29,7 +24,7 @@ pub extern "C" fn main() -> i32 {
     // The linker gives the main thread `EXE_STACK_BYTES`, and little of it is
     // in use yet, as in `native::run`.
     let limit = (&raw const here) as usize - (EXE_STACK_BYTES - STACK_MARGIN);
-    lucid_stack_limit.store(limit, Ordering::Relaxed);
+    set_stack_limit(limit);
     // SAFETY: `native.rs` writes the table in the documented shape, and both
     // symbols live as long as the program.
     set_call_sites(unsafe { call_sites() });
@@ -37,8 +32,8 @@ pub extern "C" fn main() -> i32 {
     // UTF-8 from `lucid.toml` come before it.
     let grants = unsafe { std::ffi::CStr::from_ptr(&raw const lucid_grants) };
     set_grants(&grants.to_string_lossy());
-    // SAFETY: `lucid_main` takes nothing, and needs only the limit above.
-    unsafe { lucid_main() };
+    // SAFETY: `lucid_main` needs only the limit of this thread.
+    unsafe { lucid_main(limit) };
     // Unlike a return from a C `main`, this flushes stdout.
     std::process::exit(0)
 }

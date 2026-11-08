@@ -4,7 +4,7 @@
 //! never reuse their memory. So a leak or double free stops the program.
 
 use std::alloc::{Layout, alloc, dealloc};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::hash::BuildHasher;
 #[cfg(not(target_arch = "wasm32"))]
@@ -117,11 +117,29 @@ pub struct Map {
     keys: Option<KeyTasks>,
 }
 
-/// A compiled task that hashes a key, given a starting state.
+/// A compiled task that hashes a key, given a starting state. Native code
+/// takes its thread's stack limit first, by decision 175.
+#[cfg(not(target_arch = "wasm32"))]
+pub type HashTask = extern "C" fn(usize, i64, i64) -> i64;
+#[cfg(target_arch = "wasm32")]
 pub type HashTask = extern "C" fn(i64, i64) -> i64;
 
 /// A compiled task that gives 1 if two keys are equal, and otherwise 0.
+#[cfg(not(target_arch = "wasm32"))]
+pub type EqualTask = extern "C" fn(usize, i64, i64) -> u8;
+#[cfg(target_arch = "wasm32")]
 pub type EqualTask = extern "C" fn(i64, i64) -> u8;
+
+std::thread_local! {
+    /// The lowest stack address that compiled code on this thread may use.
+    static STACK_LIMIT: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Sets the stack limit that this thread passes to compiled code, before the
+/// runtime calls any of it.
+pub fn set_stack_limit(limit: usize) {
+    STACK_LIMIT.set(limit);
+}
 
 /// What the runtime cannot do alone for a compound key. Keys are borrowed, and
 /// these tasks only read them, so they may run during a search of a map.
@@ -129,6 +147,22 @@ pub type EqualTask = extern "C" fn(i64, i64) -> u8;
 struct KeyTasks {
     hash: HashTask,
     equal: EqualTask,
+}
+
+impl KeyTasks {
+    fn hash(self, key: i64) -> i64 {
+        #[cfg(not(target_arch = "wasm32"))]
+        return (self.hash)(STACK_LIMIT.get(), key, 0);
+        #[cfg(target_arch = "wasm32")]
+        return (self.hash)(key, 0);
+    }
+
+    fn equal(self, a: i64, b: i64) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        return (self.equal)(STACK_LIMIT.get(), a, b) != 0;
+        #[cfg(target_arch = "wasm32")]
+        return (self.equal)(a, b) != 0;
+    }
 }
 
 /// A counted `type` or `choice` value. `tag` is its variant. `len` 8-byte slots
@@ -1186,7 +1220,7 @@ unsafe fn hash_key(map: *const Map, key: i64) -> u64 {
     // SAFETY: the caller guarantees this.
     let hash = unsafe {
         match (*map).keys {
-            Some(tasks) => (tasks.hash)(key, 0) as u64,
+            Some(tasks) => tasks.hash(key) as u64,
             None if key_counted(map) => hasher().hash_one(bytes(key as *const Text)),
             None => hasher().hash_one(key),
         }
@@ -1281,7 +1315,7 @@ unsafe fn find(map: *mut Map, hash: u64, key: i64) -> Option<usize> {
                     let entry = *first.add(index - 1);
                     let same = entry.hash == hash
                         && match (*map).keys {
-                            Some(tasks) => (tasks.equal)(entry.key, key) != 0,
+                            Some(tasks) => tasks.equal(entry.key, key),
                             None => same_key(counted, entry.key, key),
                         };
                     if same {

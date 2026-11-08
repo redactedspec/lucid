@@ -106,7 +106,7 @@ Designed by decisions 169 to 180, see "Threads" in `compiler.md`. OS threads, by
 
 - [x] Bit operators, by decisions 153 and 181
 - [x] Counts safe across threads, by decision 170. The benchmarks of "M4 benchmarks" must not slow by more than 2%
-- [ ] Stack limit as a hidden parameter, by decision 175, with the same benchmark check
+- [x] Stack limit as a hidden parameter, by decision 175, with the same benchmark check
 - [ ] `spawn`, `spawned`, and waiting at the end of a task, by decisions 171 and 172, and E0907, by decision 176
 - [ ] `channel`, `lock`, and the deadlock trap, by decisions 173 and 174. A write through `update` to a value with one count is in place
 - [ ] `std.net`, by decision 177

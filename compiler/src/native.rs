@@ -48,15 +48,6 @@ const FLAGS: [(&str, &str); 4] = [
     ("preserve_frame_pointers", "true"),
 ];
 
-/// Where each task finds the lowest stack address it may use.
-#[derive(Clone, Copy)]
-enum StackLimit {
-    /// In the code, for the one thread of `lucid run`.
-    Fixed(usize),
-    /// In `lucid_stack_limit`, which the start of a built program sets.
-    Global(DataId),
-}
-
 /// What `compile` declared, and each call's return offset in its task.
 struct Compiled {
     main: FuncId,
@@ -67,12 +58,8 @@ struct Compiled {
 /// Compiles the program and runs it on this thread, whose stack is
 /// `stack_bytes` long. `source` places trap messages.
 pub fn run(program: &Program, source: &Source, stack_bytes: usize) -> Result<(), Vec<Diagnostic>> {
-    let here = 0u8;
-    // ponytail: a limit in the code fits one JIT thread. `lucid build` and
-    // `spawn` need a per-thread limit that the runtime sets up.
-    let stack_limit = (&raw const here) as usize - (stack_bytes - STACK_MARGIN);
-    let (entry, _) = jit(program, source, stack_limit, stack_bytes / 2)?;
-    run_entry(entry);
+    let (entry, _) = jit(program, source, stack_bytes / 2)?;
+    run_entry(entry, stack_bytes);
     Ok(())
 }
 
@@ -85,9 +72,7 @@ pub fn run_tests(
     stack_bytes: usize,
     from: usize,
 ) -> Result<(), Vec<Diagnostic>> {
-    let here = 0u8;
-    let stack_limit = (&raw const here) as usize - (stack_bytes - STACK_MARGIN);
-    let (_, tests) = jit(program, source, stack_limit, stack_bytes / 2)?;
+    let (_, tests) = jit(program, source, stack_bytes / 2)?;
     let mark = || {
         let mark = b"\0";
         // SAFETY: the range is `mark`.
@@ -95,17 +80,23 @@ pub fn run_tests(
     };
     for entry in tests.into_iter().skip(from) {
         mark();
-        run_entry(entry);
+        run_entry(entry, stack_bytes);
     }
     mark();
     Ok(())
 }
 
-fn run_entry(entry: *const u8) {
-    // SAFETY: `compile` built `entry` with no parameters and a one-byte `none`
-    // result. Its module is leaked, so the code stays mapped.
-    let entry = unsafe { std::mem::transmute::<*const u8, extern "C" fn() -> u8>(entry) };
-    entry();
+/// Runs `entry` on this thread, whose stack is `stack_bytes` long and has
+/// little in use yet.
+fn run_entry(entry: *const u8, stack_bytes: usize) {
+    let here = 0u8;
+    let stack_limit = (&raw const here) as usize - (stack_bytes - STACK_MARGIN);
+    lucid_rt::set_stack_limit(stack_limit);
+    // SAFETY: `compile` built `entry` with only the hidden stack limit as a
+    // parameter, and a one-byte `none` result. Its module is leaked, so the
+    // code stays mapped.
+    let entry = unsafe { std::mem::transmute::<*const u8, extern "C" fn(usize) -> u8>(entry) };
+    entry(stack_limit);
     lucid_rt::lucid_check_leaks();
 }
 
@@ -191,10 +182,12 @@ struct Runtime {
     bool_text: FuncId,
 }
 
+/// Parameter 0 is hidden: the stack limit of the thread, by decision 175.
 fn signature_of(module: &dyn Module, task: &Task) -> Signature {
     let mut signature = module.make_signature();
+    let pointer = module.target_config().pointer_type();
+    signature.params.push(AbiParam::new(pointer));
     for (local, &ty) in task.locals[..task.params].iter().enumerate() {
-        let pointer = module.target_config().pointer_type();
         let ty = if task.change.contains(&local) { pointer } else { clif(ty) };
         signature.params.push(AbiParam::new(ty));
     }
@@ -206,7 +199,6 @@ fn signature_of(module: &dyn Module, task: &Task) -> Signature {
 fn jit(
     program: &Program,
     source: &Source,
-    stack_limit: usize,
     max_main_frame: usize,
 ) -> Result<(*const u8, Vec<*const u8>), Vec<Diagnostic>> {
     let mut builder = JITBuilder::with_flags(&FLAGS, default_libcall_names()).expect(CODEGEN);
@@ -288,9 +280,7 @@ fn jit(
     builder.symbol("lucid_bytes_valid", lucid_rt::lucid_bytes_valid as *const u8);
     builder.symbol("lucid_bytes_text", lucid_rt::lucid_bytes_text as *const u8);
     let mut module = JITModule::new(builder);
-    let stack = StackLimit::Fixed(stack_limit);
-    let Compiled { main, ids, sites } =
-        compile(&mut module, program, source, stack, max_main_frame)?;
+    let Compiled { main, ids, sites } = compile(&mut module, program, source, max_main_frame)?;
     module.finalize_definitions().expect(CODEGEN);
     let entry = module.get_finalized_function(main);
     let tests = program.tests.iter();
@@ -315,10 +305,8 @@ pub fn object(program: &Program, source: &Source) -> Result<Vec<u8>, Vec<Diagnos
     let isa = isa.finish(settings::Flags::new(flags)).expect(CODEGEN);
     let builder = ObjectBuilder::new(isa, "lucid", default_libcall_names()).expect(CODEGEN);
     let mut module = ObjectModule::new(builder);
-    let limit = module.declare_data("lucid_stack_limit", Linkage::Import, false, false);
-    let stack = StackLimit::Global(limit.expect(CODEGEN));
     let max_main_frame = lucid_rt::EXE_STACK_BYTES / 2;
-    let Compiled { sites, .. } = compile(&mut module, program, source, stack, max_main_frame)?;
+    let Compiled { sites, .. } = compile(&mut module, program, source, max_main_frame)?;
 
     // Each name once, since every call in a file repeats the name of the file.
     let mut names = String::new();
@@ -370,7 +358,6 @@ fn compile(
     module: &mut dyn Module,
     program: &Program,
     source: &Source,
-    stack: StackLimit,
     max_main_frame: usize,
 ) -> Result<Compiled, Vec<Diagnostic>> {
     let pointer = module.target_config().pointer_type();
@@ -485,7 +472,7 @@ fn compile(
             statics,
             lines,
         }
-        .task(task, data_id, stack);
+        .task(task, data_id);
         module.define_function(id, &mut context).expect(CODEGEN);
         let code = context.compiled_code().expect(CODEGEN);
         let locs = code.buffer.get_srclocs_sorted();
@@ -571,14 +558,14 @@ struct Lower<'a, 'b> {
 }
 
 impl Lower<'_, '_> {
-    fn task(mut self, task: &Task, data_id: DataId, stack: StackLimit) {
+    fn task(mut self, task: &Task, data_id: DataId) {
         let entry = self.body.create_block();
         self.body.append_block_params_for_function_params(entry);
         self.body.switch_to_block(entry);
         self.body.seal_block(entry);
         self.vars = task.locals.iter().map(|&ty| self.body.declare_var(clif(ty))).collect();
         for local in 0..task.params {
-            let mut value = self.body.block_params(entry)[local];
+            let mut value = self.body.block_params(entry)[1 + local];
             if task.change.contains(&local) {
                 self.changed.push((self.vars[local], value));
                 let flags = MemFlagsData::trusted();
@@ -602,15 +589,7 @@ impl Lower<'_, '_> {
         }
 
         let sp = self.body.ins().get_stack_pointer(self.pointer);
-        let limit = match stack {
-            StackLimit::Fixed(limit) => self.body.ins().iconst(self.pointer, limit as i64),
-            StackLimit::Global(id) => {
-                let global = self.module.declare_data_in_func(id, self.body.func);
-                let address = self.body.ins().symbol_value(self.pointer, global);
-                let flags = MemFlagsData::trusted();
-                self.body.ins().load(self.pointer, flags, address, 0)
-            }
-        };
+        let limit = self.stack_limit();
         let low = self.body.ins().icmp(IntCC::UnsignedLessThan, sp, limit);
         self.trap_if(low, "stack overflow", task.span);
 
@@ -646,6 +625,12 @@ impl Lower<'_, '_> {
         let mut description = DataDescription::new();
         description.define(self.text.into_boxed_slice());
         self.module.define_data(data_id, &description).expect(CODEGEN);
+    }
+
+    /// The hidden parameter 0 of this task.
+    fn stack_limit(&self) -> Value {
+        let entry = self.body.func.layout.entry_block().expect("the task has begun");
+        self.body.block_params(entry)[0]
     }
 
     /// Ends the task with `value`, which is already owned or is not counted.
@@ -1519,7 +1504,8 @@ impl Lower<'_, '_> {
     /// A `change` argument goes through a stack slot. The task loads it when it
     /// starts and stores it when it ends, so it stays in a register between.
     fn call_task(&mut self, task: usize, args: &[Expr], span: Span) -> Value {
-        let mut values = Vec::with_capacity(args.len());
+        let mut values = Vec::with_capacity(1 + args.len());
+        values.push(self.stack_limit());
         let mut slots = Vec::new();
         for arg in args {
             let ExprKind::Change(local) = arg.kind else {
@@ -1572,16 +1558,17 @@ impl Lower<'_, '_> {
         }
     }
 
-    /// The record comes first in the call, so that the code finds its captures.
+    /// The record comes after the stack limit, so that the code finds its
+    /// captures.
     fn call_value(&mut self, callee: &Expr, args: &[Expr], span: Span) -> Value {
         let Ty::Task(params, returns) = callee.ty else { unreachable!("it has a task type") };
         let mut signature = self.module.make_signature();
-        signature.params.push(AbiParam::new(self.pointer));
+        signature.params.extend([AbiParam::new(self.pointer); 2]);
         signature.params.extend(params.iter().map(|&ty| AbiParam::new(clif(ty))));
         signature.returns.push(AbiParam::new(clif(*returns)));
         let signature = self.body.import_signature(signature);
         let record = self.expr(callee);
-        let mut values = vec![record];
+        let mut values = vec![self.stack_limit(), record];
         for arg in args {
             let value = self.expr(arg);
             values.push(value);
