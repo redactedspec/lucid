@@ -1,5 +1,6 @@
 # A small website with a page and a JSON endpoint. Run it, then open
-# http://127.0.0.1:8080 in a browser.
+# http://127.0.0.1:8080 in a browser. A first argument sets another port.
+use std.args
 use std.html as h
 use std.http
 
@@ -16,4 +17,5 @@ task status(request: http.Request) -> http.Response
 var app = http.App()
 app.get("/", home)
 app.get("/status", status)
-try app.serve(8080)
+let port = (args.get(0) else "8080").to_int() else 8080
+try app.serve(port)
