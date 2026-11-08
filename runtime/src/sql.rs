@@ -4,8 +4,8 @@
 //! both a `Sql` handle, which the last count closes.
 
 use super::{
-    AtomicI64, Head, Kind, List, Text, byte_list, check_live, failed, file_allowed, list_bytes,
-    object, system_text, text_from, trap,
+    AtomicI64, Head, Kind, List, OUTSIDE_FILES, Text, byte_list, check_live, failed, file_allowed,
+    list_bytes, object, system_text, text_from, trap,
 };
 use libsqlite3_sys as ffi;
 use std::cell::RefCell;
@@ -120,20 +120,30 @@ unsafe fn statement(sql: *const Sql) -> (*mut ffi::sqlite3, *mut ffi::sqlite3_st
     (sql.db, sql.statement)
 }
 
-/// Refuses `ATTACH`, which could open a file that the `files` permission
-/// does not list. `VACUUM` attaches an empty name, a temporary database, so
-/// it still works, and `VACUUM INTO` a file does not.
+/// Refuses what could open a file that the `files` permission does not
+/// list: `ATTACH`, and the pragmas that move temporary or data files.
+/// `VACUUM` attaches the literal empty name, a temporary database, so it
+/// still works, and `VACUUM INTO` a file does not. SQLite gives a null name
+/// for any name that is not a literal, such as a `?` mark, so null is refused.
 unsafe extern "C" fn authorize(
     _: *mut c_void,
     action: c_int,
-    file: *const c_char,
+    first: *const c_char,
     _: *const c_char,
     _: *const c_char,
     _: *const c_char,
 ) -> c_int {
     // SAFETY: SQLite gives a live C string, or null.
-    let temporary = || file.is_null() || unsafe { *file } == 0;
-    if action == ffi::SQLITE_ATTACH && !temporary() { ffi::SQLITE_DENY } else { ffi::SQLITE_OK }
+    let name = || (!first.is_null()).then(|| unsafe { CStr::from_ptr(first) }.to_bytes());
+    let refused = match action {
+        ffi::SQLITE_ATTACH => name() != Some(b""),
+        ffi::SQLITE_PRAGMA => name().is_some_and(|pragma| {
+            pragma.eq_ignore_ascii_case(b"temp_store_directory")
+                || pragma.eq_ignore_ascii_case(b"data_store_directory")
+        }),
+        _ => false,
+    };
+    if refused { ffi::SQLITE_DENY } else { ffi::SQLITE_OK }
 }
 
 /// Opens or creates the database at `path`, or an empty one in memory for
@@ -147,7 +157,7 @@ pub unsafe extern "C" fn lucid_sql_open(path: *const Text) -> *mut Sql {
     // SAFETY: the caller guarantees a live text.
     let path = unsafe { system_text(path) };
     if path != ":memory:" && !file_allowed(path) {
-        problem("outside the `files` permission in `lucid.toml`");
+        problem(OUTSIDE_FILES);
         return failed();
     }
     // The build reads `file:` names as URIs, which could name another file,
@@ -175,6 +185,9 @@ pub unsafe extern "C" fn lucid_sql_open(path: *const Text) -> *mut Sql {
                 return code;
             }
             ffi::sqlite3_extended_result_codes(db, 1);
+            // Another connection's write holds the lock only briefly, so
+            // wait for it before `Busy`.
+            ffi::sqlite3_busy_timeout(db, 5000);
             ffi::sqlite3_set_authorizer(db, Some(authorize), null_mut())
         });
         if code != ffi::SQLITE_OK {
@@ -208,13 +221,28 @@ pub unsafe extern "C" fn lucid_sql_prepare(db: *const Sql, query: *const Text) -
     if code != ffi::SQLITE_OK {
         return failed();
     }
+    // What follows must compile to no statement, as only spaces, `;`, and
+    // comments do. SQLite's own parser decides, so a comment cannot fool it.
+    let mut next = null_mut();
     // SAFETY: SQLite sets `tail` inside `query`, or at its end.
-    let rest =
-        &query.as_bytes()[unsafe { tail.cast::<u8>().offset_from(query.as_ptr()) } as usize..];
-    if statement.is_null() || !rest.iter().all(|&b| b.is_ascii_whitespace() || b == b';') {
-        // SAFETY: a null statement is a no-op.
-        unsafe { ffi::sqlite3_finalize(statement) };
-        problem("a query holds exactly one statement");
+    let rest = length - unsafe { tail.cast::<u8>().offset_from(query.as_ptr().cast()) } as c_int;
+    let code = if statement.is_null() {
+        ffi::SQLITE_OK
+    } else {
+        // SAFETY: `tail` holds `rest` bytes of `query`.
+        unsafe {
+            locked(db, || ffi::sqlite3_prepare_v2(db, tail, rest, &mut next, std::ptr::null_mut()))
+        }
+    };
+    if statement.is_null() || code != ffi::SQLITE_OK || !next.is_null() {
+        // SAFETY: each is a statement or null, which is a no-op.
+        unsafe {
+            ffi::sqlite3_finalize(statement);
+            ffi::sqlite3_finalize(next);
+        }
+        if code == ffi::SQLITE_OK {
+            problem("a query holds exactly one statement");
+        }
         return failed();
     }
     handle(db, statement)
@@ -407,6 +435,8 @@ pub unsafe extern "C" fn lucid_sql_column_name(statement: *const Sql, at: i64) -
     }
 }
 
+// ponytail: `query` makes two calls a cell, kind then value, each checking
+// the column. Return both from one call if large results prove slow.
 /// The kind of a value in the current row: 1 for an integer, 2 for a float,
 /// 3 for text, 4 for bytes, and 5 for null, as SQLite numbers them.
 ///

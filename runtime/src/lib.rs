@@ -2510,14 +2510,16 @@ fn inside(start: &Path, roots: &[String], path: &str) -> bool {
         .all(|form| form.as_ref().is_some_and(|form| roots.iter().any(|r| form.starts_with(r))))
 }
 
+/// Why a path is refused, for `std.fs` and `std.sql`.
+const OUTSIDE_FILES: &str = "outside the `files` permission in `lucid.toml`";
+
 /// True if the `files` permission reaches `path`. If not, the next
 /// `lucid_fs_failure` says so.
 fn file_allowed(path: &str) -> bool {
     let Some(Grants { files: Some(roots), start, .. }) = GRANTS.get() else { return true };
     let allowed = inside(start, roots, path);
     if !allowed {
-        let detail = "outside the `files` permission in `lucid.toml`".to_string();
-        FILE_FAILURE.set((3, detail));
+        FILE_FAILURE.set((3, OUTSIDE_FILES.to_string()));
     }
     allowed
 }

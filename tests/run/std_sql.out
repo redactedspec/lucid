@@ -13,10 +13,16 @@ n=Int(value: 7) t=Text(value: "xy") z=Null
 
 SELECT id, name, score, avatar FROM users
 true
+true
+SELECT 1, SELECT id, name, score, avatar FROM users
 2
 Failed(detail: "no such column: nope")
 Failed(detail: "a query holds exactly one statement")
 Failed(detail: "a query holds exactly one statement")
+0
+Failed(detail: "near \"nonsense\": syntax error")
 Failed(detail: "not authorized")
 Failed(detail: "authorization denied")
+Failed(detail: "not authorized")
+Failed(detail: "not authorized")
 0

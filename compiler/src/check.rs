@@ -570,6 +570,16 @@ fn repeatable(value: &Expr) -> bool {
 
 /// True for a number with no other value in it, which takes its type from the
 /// other side of an operator. So `2 * 3 + x` works for any number type of `x`.
+/// True for a text literal with no interpolation, or `+` of such literals,
+/// which become `sql` next to a query, as in `"a" + "b" + query`.
+fn literal_text(expr: &ast::Expr) -> bool {
+    match &expr.kind {
+        Ast::Text(_) => is_literal(expr),
+        Ast::Binary(BinaryOp::Add, left, right) => literal_text(left) && literal_text(right),
+        _ => false,
+    }
+}
+
 fn literal_math(expr: &ast::Expr) -> bool {
     match &expr.kind {
         Ast::Int(_) | Ast::Float(_) => true,
@@ -4810,9 +4820,9 @@ impl<'a> Checker<'a> {
         }
         // A text literal next to a query is a query too.
         let sql = |ty: Ty| Some(ty).filter(|ty| *ty == Ty::Sql);
-        let text = |expr: &ast::Expr| matches!(expr.kind, Ast::Text(_)) && is_literal(expr);
+        let sql_side = matches!(op, BinaryOp::Add | BinaryOp::Eq | BinaryOp::Ne);
         let (left, right) = if (literal_math(left) && !literal_math(right))
-            || (op == BinaryOp::Add && text(left) && !text(right) && hint.is_none())
+            || (sql_side && literal_text(left) && !literal_text(right) && hint.is_none())
         {
             let right = self.lower(right, hint);
             let want = self.number_want(Some(right.ty)).or(sql(right.ty)).or(hint);

@@ -38,6 +38,8 @@ print try db.run("UPDATE users SET score = ? WHERE score IS NULL", [sql.Float(va
 print show(try db.query("SELECT 7 AS n, 'x' || ? AS t, NULL AS z", [sql.Text(value: "y")]))
 print all
 print all == "SELECT id, name, score, avatar FROM users"
+print "SELECT id, name, score, avatar FROM users" == all
+print "SELECT " + "1, " + all
 
 # A connection goes to another thread.
 print (spawn count(db)).wait()
@@ -45,8 +47,12 @@ print (spawn count(db)).wait()
 print db.query("SELECT nope FROM users", [])
 print db.run("SELECT 1; SELECT 2", [])
 print db.run("", [])
+print db.run("SELECT 1; -- a comment is no statement", [])
+print db.run("SELECT 1; nonsense", [])
 
 # Only the `files` permission says which files open, so no query attaches one.
 print db.run("ATTACH DATABASE 'other.db' AS other", [])
 print db.run("VACUUM INTO 'copy.db'", [])
+print db.run("ATTACH ? AS other", [sql.Text(value: "other.db")])
+print db.run("PRAGMA temp_store_directory = '.'", [])
 print try db.run("VACUUM", [])
