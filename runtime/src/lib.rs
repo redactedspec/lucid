@@ -19,11 +19,15 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod crypto;
 #[cfg(feature = "exe")]
 mod exe;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use crypto::*;
 #[cfg(not(target_arch = "wasm32"))]
 use std::process::exit;
 #[cfg(target_arch = "wasm32")]

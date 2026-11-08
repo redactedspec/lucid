@@ -14,3 +14,8 @@ exe = []
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1.0.11"
+# Argon2id passwords for `std.crypto`, by decision 193.
+argon2 = { version = "0.6.0", default-features = false, features = ["alloc", "password-hash"] }
+ring = { version = "0.17.14", default-features = false }
+# Constant-time compare for `crypto.same`. `rustls` already builds it.
+subtle = "2.6.1"

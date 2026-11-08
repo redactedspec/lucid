@@ -26,7 +26,7 @@ Every built feature works on the web, except those a page cannot have:
 
 | Feature | On the web |
 | --- | --- |
-| `spawn`, `std.net`, `std.http` | Error E0907 |
+| `spawn`, `std.net`, `std.http`, `std.crypto` | Error E0907 |
 | `extern` tasks and `.pointer()` | Error E0905 |
 | `std.fs` | Gives `Failed` |
 | `env.get`, `args.all()` | `none`, `[]` |

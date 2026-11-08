@@ -1,0 +1,31 @@
+# std.crypto: digests and HMAC against published vectors, then compare,
+# random bytes, and passwords.
+
+use std.crypto
+
+# FIPS 180-2 examples, and RFC 4231 test case 2.
+print crypto.hex(crypto.sha256("abc".bytes()))
+print crypto.hex(crypto.sha512("abc".bytes()))
+let key = "Jefe".bytes()
+let data = "what do ya want for nothing?".bytes()
+let tag = crypto.hmac_sha256(key, data)
+print crypto.hex(tag)
+print crypto.hmac_check(key, data, tag)
+print crypto.hmac_check(key, "what do ya want for nothing!".bytes(), tag)
+print crypto.hex([0, 15, 16, 255])
+
+print crypto.same("token".bytes(), "token".bytes())
+print crypto.same("token".bytes(), "tokem".bytes())
+print crypto.same("token".bytes(), "toke".bytes())
+
+let a = crypto.random_bytes(32)
+print a.len()
+print crypto.random_bytes(0).len()
+print crypto.same(a, crypto.random_bytes(32))
+
+let hash = crypto.hash_password("correct horse")
+print hash.starts_with("$argon2id$v=19$m=19456,t=2,p=1$")
+print hash == crypto.hash_password("correct horse")
+print crypto.check_password("correct horse", hash)
+print crypto.check_password("wrong horse", hash)
+print crypto.check_password("correct horse", "not a hash")

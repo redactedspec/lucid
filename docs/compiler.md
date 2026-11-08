@@ -101,7 +101,7 @@ Planned for M8, by decisions 188 to 205, in the order of `roadmap.md`.
 
 - **Reachable tasks.** Built, by decision 190, see "Pipeline" above. The web loader calls only `main` and the runtime's `lucid_dom_fire`, which calls task values that `main` reached, so the top level and tests are the only roots. A task that nothing reaches is not compiled, so it cannot fail as E0902, or as E0907 for `spawn`. `examples/website.lcd` built to 2,067,968 bytes before, and 933,888 after.
 - **Systems.** Built, by decision 191, see "`lucid build`". `TARGET` is a constant per `cfg`, not read through `target-lexicon`, since only two targets exist and that crate is not a direct dependency. Only Windows and Linux on x86-64 are supported, by decision 205.
-- **`std.crypto` and `std.sql`.** Runtime tasks `lucid_crypto_*` and `lucid_sql_*` in `lucid_rt`, on native targets only, behind Lucid modules in `std/`. `sql` is a `Ty` that a text literal takes from its context, as a number literal does. A SQLite connection is a counted handle like `socket`, released by `sqlite3_close_v2`. A failure goes to a thread local, as `NET_FAILURE` does.
+- **`std.crypto` and `std.sql`.** Runtime tasks `lucid_crypto_*`, built in `runtime/src/crypto.rs`, and `lucid_sql_*`, planned, in `lucid_rt`, on native targets only, behind Lucid modules in `std/`. `sql` is a `Ty` that a text literal takes from its context, as a number literal does. A SQLite connection is a counted handle like `socket`, released by `sqlite3_close_v2`. A failure goes to a thread local, as `NET_FAILURE` does.
 - **Registry.** `manifest.rs` reads `version` dependencies and `[registry] url`. Before `resolve.rs` loads a package, the compiler runs the fetch client, a Lucid program in the compiler like `tools/fmt.lcd`, which reads the index, picks versions by minimal version selection, checks or writes `lucid.lock`, and fills the user cache: `LUCID_CACHE` if set, or else `%LOCALAPPDATA%\lucid`, or `$XDG_CACHE_HOME/lucid` or `~/.cache/lucid`. A cached package is then a path dependency like any other.
 - **`lucid lsp`.** A loop in `main.rs`, or its own module, that reads `Content-Length` frames from stdin and writes them to stdout. It keeps the text of each open document, runs the same `load` and `check` as `lucid check` with those texts in place of the files, and turns each `Diagnostic` into the protocol's shape, with UTF-16 columns.
 
@@ -289,7 +289,9 @@ Built in M7, by decisions 169 to 177.
 | `rustls` | TLS for the `std.http` client, in `lucid_rt` on native targets only, at 0.23, with default features off and `ring`, `std`, and `tls12` on (decision 179) |
 | `webpki-roots` | The roots that TLS trusts, from Mozilla, at 1.0 (decision 179) |
 | `libsqlite3-sys` | Planned for M8: SQLite for `std.sql`, in `lucid_rt` on native targets only, with `bundled` (decision 194) |
-| `argon2` | Planned for M8: Argon2id for `std.crypto` passwords, in `lucid_rt` on native targets only (decision 193) |
+| `argon2` | Argon2id for `std.crypto` passwords, in `lucid_rt` on native targets only, at 0.6, with only `alloc` and `password-hash`, and optimized in dev builds so tests stay fast (decisions 193 and 208) |
+| `ring` | Digests, HMAC, and random bytes for `std.crypto`, named directly at 0.17 with default features off. `rustls` already builds it (decision 193) |
+| `subtle` | Constant-time compare for `crypto.same`, at 2.6. `rustls` already builds it (decision 208) |
 
 Cranelift crates are at 0.137, the latest stable release at M1. No parser generators and no CLI framework.
 

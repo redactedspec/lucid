@@ -1041,17 +1041,18 @@ fn copy_dir(from: &Path, to: &Path) {
 
 /// Builds each run and trap test with `--target web`, and runs it under
 /// `node`, against the same golden files. Only the tests in `HOST_ONLY` are
-/// left out: by decisions 159, 162, and 176, the web has no files,
-/// arguments, environment, sleep, user `extern`, `spawn`, or sockets. See
-/// "WebAssembly" in docs/compiler.md.
+/// left out: by decisions 159, 162, 176, and 193, the web has no files,
+/// arguments, environment, sleep, user `extern`, `spawn`, sockets, or
+/// `std.crypto`. See "WebAssembly" in docs/compiler.md.
 #[test]
 fn web_programs_match_run() {
-    const HOST_ONLY: [&str; 11] = [
+    const HOST_ONLY: [&str; 12] = [
         "channel_threads",
         "spawn",
         "spawn_overflow",
         "spawn_trap",
         "std_args_env",
+        "std_crypto",
         "std_fs",
         "std_http",
         "std_http_client",
@@ -1165,13 +1166,18 @@ fn web_rejects_foreign_code() {
     assert!(text(&output.stderr).contains("error E0905"), "{}", text(&output.stderr));
 }
 
-/// `spawn` and `std.net` are E0907 under `--target web`, by decision 176.
+/// `spawn`, `std.net`, `std.http`, and `std.crypto` are E0907 under
+/// `--target web`, by decisions 176 and 193.
 #[test]
 fn web_rejects_spawn() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("web_spawn");
     fs::create_dir_all(&dir).expect("cannot make directory");
-    for (name, says) in [("spawn", "`spawn`"), ("std_net", "`std.net`"), ("std_http", "`std.http`")]
-    {
+    for (name, says) in [
+        ("spawn", "`spawn`"),
+        ("std_net", "`std.net`"),
+        ("std_http", "`std.http`"),
+        ("std_crypto", "`std.crypto`"),
+    ] {
         let file = format!("{name}.lcd");
         fs::copy(repo().join("tests/run").join(&file), dir.join(&file)).expect("cannot copy");
         let output = lucid(&dir, &["build", "--target", "web", &file]);

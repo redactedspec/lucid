@@ -78,7 +78,7 @@ export const features: Feature[] = [
       'The same program compiles to WebAssembly, with its runtime, in a single `.js` file that loads both modules. A page includes it with a `<script>` tag.',
       '`std.dom` builds interactive pages in the Elm architecture: a model, a `view` task, and an `update` task that turns each event into a new model.',
     ],
-    limits: 'On the web, `spawn`, `std.net`, `std.http`, and foreign calls are compile errors, since a page has no threads, sockets, or C library.',
+    limits: 'On the web, `spawn`, `std.net`, `std.http`, `std.crypto`, and foreign calls are compile errors, since a page has no threads, sockets, or C library.',
     code: { file: 'counter.lcd', source: counter },
     docs: { href: '/docs/webassembly/', label: 'WebAssembly' },
   },

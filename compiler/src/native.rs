@@ -288,6 +288,15 @@ fn jit(
     builder.symbol("lucid_fs_rename", lucid_rt::lucid_fs_rename as *const u8);
     builder.symbol("lucid_fs_failure", lucid_rt::lucid_fs_failure as *const u8);
     builder.symbol("lucid_fs_detail", lucid_rt::lucid_fs_detail as *const u8);
+    builder.symbol("lucid_crypto_sha256", lucid_rt::lucid_crypto_sha256 as *const u8);
+    builder.symbol("lucid_crypto_sha512", lucid_rt::lucid_crypto_sha512 as *const u8);
+    builder.symbol("lucid_crypto_hmac_sha256", lucid_rt::lucid_crypto_hmac_sha256 as *const u8);
+    builder.symbol("lucid_crypto_hmac_check", lucid_rt::lucid_crypto_hmac_check as *const u8);
+    builder.symbol("lucid_crypto_same", lucid_rt::lucid_crypto_same as *const u8);
+    builder.symbol("lucid_crypto_random", lucid_rt::lucid_crypto_random as *const u8);
+    builder.symbol("lucid_crypto_hash_password", lucid_rt::lucid_crypto_hash_password as *const u8);
+    builder.symbol("lucid_crypto_check_password", lucid_rt::lucid_crypto_check_password as *const u8);
+    builder.symbol("lucid_crypto_hex", lucid_rt::lucid_crypto_hex as *const u8);
     builder.symbol("lucid_net_listen", lucid_rt::lucid_net_listen as *const u8);
     builder.symbol("lucid_net_port", lucid_rt::lucid_net_port as *const u8);
     builder.symbol("lucid_net_accept", lucid_rt::lucid_net_accept as *const u8);

@@ -4,3 +4,10 @@ resolver = "3"
 
 [profile.dev]
 debug = "line-tables-only"
+
+# Unoptimized, `tests/run/std_crypto.lcd` takes 2.2s instead of 0.7s.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3

@@ -4,7 +4,7 @@
 
 The standard library covers what most programs need, so that small projects need no dependencies. It is written in Lucid. Only low-level parts use `unsafe` and the runtime.
 
-Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/`, and the compiler holds a copy of them, so a program needs no files beside it. `std` alone can call the runtime, through `extern` tasks that start with `lucid_`. All of the M5 modules are built, and `std.dom`.
+Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/`, and the compiler holds a copy of them, so a program needs no files beside it. `std` alone can call the runtime, through `extern` tasks that start with `lucid_`. All of the M5 modules are built, and `std.dom`, `std.net`, `std.http`, `std.html`, and `std.crypto`.
 
 | Module | Contents | Milestone |
 | --- | --- | --- |
@@ -18,7 +18,7 @@ Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/
 | `std.http` | HTTP/1.1 server, and client with TLS | M7, built |
 | `std.html` | Escaped HTML building | M7, built |
 | `std.sql` | SQLite, with values only through `?` marks and queries of type `sql`, by decisions 194 and 195 | M8, planned |
-| `std.crypto` | SHA-256, SHA-512, HMAC, constant-time compare, random bytes, Argon2id passwords, hex, by decision 193 | M8, planned |
+| `std.crypto` | SHA-256, SHA-512, HMAC, constant-time compare, random bytes, Argon2id passwords, hex, by decisions 193 and 208 | M8, built |
 
 Never hand-roll cryptography primitives. Wrap a vetted implementation.
 
@@ -57,6 +57,18 @@ A `Duration` has `+`, `-`, and an order. A `Time` holds nanoseconds from 1970, i
 
 Text from the system that is not valid Unicode has its bad parts replaced, except that `fs.read_text` gives `NotText`.
 
+| `crypto.sha256(data)`, `crypto.sha512(data)` | `list[byte]`: the digest, 32 or 64 bytes |
+| --- | --- |
+| `crypto.hmac_sha256(key, data)` | `list[byte]`: the 32-byte tag |
+| `crypto.hmac_check(key, data, tag)` | `bool`, in constant time |
+| `crypto.same(a, b)` | `bool`: the same bytes, in a time that depends only on the lengths |
+| `crypto.random_bytes(count)` | `list[byte]` from the system's cryptographic source. A negative `count` traps |
+| `crypto.hash_password(password)` | `text`: an Argon2id PHC string, with a new random salt |
+| `crypto.check_password(password, hash)` | `bool`. A `hash` that is not an Argon2 PHC string gives false |
+| `crypto.hex(data)` | `text`: lowercase hex |
+
+`std.crypto` wraps `ring`, `subtle`, and `argon2` in the runtime, by decisions 193 and 208. Passwords use m=19456, t=2, p=1, OWASP's first setting. The check reads the setting from the hash, so a later rise still checks old hashes. Text goes in through `.bytes()`. It needs no permission, and under `--target web` it is E0907.
+
 ## Websites
 
 Lucid covers both sides of a website.
@@ -70,7 +82,7 @@ Lucid covers both sides of a website.
 
 - `std.http` client: `http.get(url)` and `http.post(url, kind, body)`, where `kind` is the media type and `body` is bytes, give a `Response or NetError`, with header names in lowercase, and `response.header(name)` and `response.body_text()`. An `https` URL uses TLS, and the certificate must be for the host and come from a root that Mozilla trusts, with no way to turn the check off. Each request uses its own connection. A redirect is not followed. Limits are in [security.md](security.md).
 
-Under `--target web`, `std.net` and `std.http` are error E0907.
+Under `--target web`, `std.net`, `std.http`, and `std.crypto` are error E0907.
 
 **Browser side** compiles to WebAssembly with `lucid build --target web`. The output is one JavaScript file, `NAME.js`, which holds a small loader and both WebAssembly modules, so a page needs only `<script src="NAME.js">`. Every built feature works, except a user `extern` and `.pointer()`, which are E0905. On the web, `std.fs` gives `Failed`, `env.get` gives none, `args.all()` gives `[]`, and `time.sleep` traps. Browser access goes through `std.dom`, because WebAssembly cannot touch the DOM directly. `std.dom` works only with `--target web`, and elsewhere it is E0906.
 

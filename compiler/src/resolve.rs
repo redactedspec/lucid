@@ -61,8 +61,9 @@ pub fn std_module(name: &str) -> Option<&'static str> {
     STD_MODULES.iter().find(|(module, _)| *module == name).map(|(_, text)| *text)
 }
 
-const STD_MODULES: [(&str, &str); 9] = [
+const STD_MODULES: [(&str, &str); 10] = [
     ("args", include_str!("../../std/args.lcd")),
+    ("crypto", include_str!("../../std/crypto.lcd")),
     ("dom", include_str!("../../std/dom.lcd")),
     ("env", include_str!("../../std/env.lcd")),
     ("fs", include_str!("../../std/fs.lcd")),
@@ -642,6 +643,7 @@ impl Loader {
             self.source.web_only.get_or_insert(span);
         }
         if let Some(name) = match module.text.as_str() {
+            "crypto" => Some("std.crypto"),
             "net" => Some("std.net"),
             "http" => Some("std.http"),
             _ => None,

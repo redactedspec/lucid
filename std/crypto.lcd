@@ -1,0 +1,71 @@
+# Hashes, HMAC, random bytes, and passwords, by decision 193. Each task wraps
+# a vetted implementation: `ring`, `subtle`, and `argon2` in the runtime.
+
+unsafe extern task lucid_crypto_sha256(data: list[byte]) -> list[byte]
+unsafe extern task lucid_crypto_sha512(data: list[byte]) -> list[byte]
+unsafe extern task lucid_crypto_hmac_sha256(key: list[byte], data: list[byte]) -> list[byte]
+unsafe extern task lucid_crypto_hmac_check(key: list[byte], data: list[byte], tag: list[byte]) -> bool
+unsafe extern task lucid_crypto_same(a: list[byte], b: list[byte]) -> bool
+unsafe extern task lucid_crypto_random(count: int) -> list[byte]
+unsafe extern task lucid_crypto_hash_password(password: text) -> text
+unsafe extern task lucid_crypto_check_password(password: text, hash: text) -> bool
+unsafe extern task lucid_crypto_hex(data: list[byte]) -> text
+
+## The SHA-256 digest of `data`, 32 bytes.
+public task sha256(data: list[byte]) -> list[byte]
+    # The runtime only reads `data`, and gives a new list.
+    unsafe
+        return lucid_crypto_sha256(data)
+
+## The SHA-512 digest of `data`, 64 bytes.
+public task sha512(data: list[byte]) -> list[byte]
+    # The runtime only reads `data`, and gives a new list.
+    unsafe
+        return lucid_crypto_sha512(data)
+
+## The HMAC-SHA256 tag of `data` under `key`, 32 bytes.
+public task hmac_sha256(key: list[byte], data: list[byte]) -> list[byte]
+    # The runtime only reads both lists, and gives a new list.
+    unsafe
+        return lucid_crypto_hmac_sha256(key, data)
+
+## True if `tag` is the HMAC-SHA256 tag of `data` under `key`. The check
+## takes the same time wherever the tags differ.
+public task hmac_check(key: list[byte], data: list[byte], tag: list[byte]) -> bool
+    # The runtime only reads the three lists.
+    unsafe
+        return lucid_crypto_hmac_check(key, data, tag)
+
+## True if `a` and `b` hold the same bytes. The time depends only on the
+## lengths, so use it to compare secrets, such as tokens.
+public task same(a: list[byte], b: list[byte]) -> bool
+    # The runtime only reads both lists.
+    unsafe
+        return lucid_crypto_same(a, b)
+
+## `count` bytes from the system's cryptographic source.
+public task random_bytes(count: int) -> list[byte]
+    expect count >= 0
+    # The runtime gives a new list of `count` bytes.
+    unsafe
+        return lucid_crypto_random(count)
+
+## A hash of `password` to store: Argon2id at m=19456, t=2, p=1, with a new
+## random salt, as a PHC string such as `$argon2id$v=19$m=19456,t=2,p=1$...`.
+public task hash_password(password: text) -> text
+    # The runtime only reads `password`, and gives a new text.
+    unsafe
+        return lucid_crypto_hash_password(password)
+
+## True if `hash`, from `hash_password`, is a hash of `password`. The setting
+## comes from `hash`, so old hashes still check. A bad `hash` gives false.
+public task check_password(password: text, hash: text) -> bool
+    # The runtime only reads both texts.
+    unsafe
+        return lucid_crypto_check_password(password, hash)
+
+## `data` as lowercase hex, two characters a byte.
+public task hex(data: list[byte]) -> text
+    # The runtime only reads `data`, and gives a new text.
+    unsafe
+        return lucid_crypto_hex(data)

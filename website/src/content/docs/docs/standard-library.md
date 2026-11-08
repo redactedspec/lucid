@@ -16,7 +16,7 @@ The standard library is written in Lucid and ships inside the compiler, so a pro
 | `std.net` | TCP sockets | Built |
 | `std.http` | HTTP/1.1 server, and a client with TLS | Built |
 | `std.html` | HTML building that escapes on render | Built |
-| `std.crypto` | SHA-256, SHA-512, HMAC, constant-time compare, random bytes, Argon2id | Planned for M8 |
+| `std.crypto` | SHA-256, SHA-512, HMAC, constant-time compare, random bytes, Argon2id | Built |
 | `std.sql` | SQLite, with values only through `?` marks | Planned for M8 |
 
 ## Arguments and environment
@@ -105,6 +105,22 @@ print got.status
 ## HTML
 
 `std.html` escapes every text and attribute value when it renders, and traps on a `script` element, an `on...` attribute, or a `javascript:` link. So text from a user cannot become markup or code.
+
+## Crypto
+
+`std.crypto` wraps vetted code: `ring`, `subtle`, and `argon2`. Each task takes bytes, so pass text through `.bytes()`:
+
+```lucid
+use std.crypto
+
+print crypto.hex(crypto.sha256("abc".bytes()))
+let hash = crypto.hash_password("correct horse")
+print crypto.check_password("correct horse", hash)
+let token = crypto.random_bytes(32)
+print crypto.same(token, token)
+```
+
+Passwords use Argon2id at OWASP's setting, in a PHC string. Compare secrets with `crypto.same` or `crypto.hmac_check`, which take the same time wherever the bytes differ. `crypto.random_bytes` is the only source of random values. On the web, `std.crypto` is error E0907.
 
 ## Not built yet
 
