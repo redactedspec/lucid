@@ -52,6 +52,9 @@ pub enum Ty {
     /// trait fits but `Show`. See "Threads" in docs/compiler.md.
     Channel(&'static Ty),
     Lock(&'static Ty),
+    /// A socket of `std.net`, which only `std` can name, and which closes at
+    /// its last count. See "Threads" in docs/compiler.md.
+    Socket,
     /// A type parameter, by its name and its position in the list of the task
     /// or type that declares it. `mono.rs` replaces every one.
     Param(&'static str, usize),
@@ -91,6 +94,7 @@ impl Ty {
             Ty::Spawned(item) => format!("spawned[{}]", item.name()),
             Ty::Channel(item) => format!("channel[{}]", item.name()),
             Ty::Lock(item) => format!("lock[{}]", item.name()),
+            Ty::Socket => "socket".into(),
             Ty::Data(name, _, []) => name.into(),
             Ty::Data(name, _, args) => {
                 let args: Vec<String> = args.iter().map(|ty| ty.name()).collect();
@@ -136,10 +140,10 @@ impl Ty {
             || self.is_handle()
     }
 
-    /// A thread, a channel, or a lock: a counted handle that only the runtime
-    /// reads, and that shows as its type.
+    /// A thread, a channel, a lock, or a socket: a counted handle that only
+    /// the runtime reads, and that shows as its type.
     pub fn is_handle(self) -> bool {
-        matches!(self, Ty::Spawned(_) | Ty::Channel(_) | Ty::Lock(_))
+        matches!(self, Ty::Spawned(_) | Ty::Channel(_) | Ty::Lock(_) | Ty::Socket)
     }
 
     /// True if `part` appears anywhere in this type.

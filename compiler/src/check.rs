@@ -921,6 +921,11 @@ impl<'a> Checker<'a> {
         let plain = match name {
             "bool" => Some(Ty::Bool),
             "text" => Some(Ty::Text),
+            "socket"
+                if self.files[file_index(self.files, span.start)].path.starts_with("@std/") =>
+            {
+                Some(Ty::Socket)
+            }
             _ => number_type(name),
         };
         if let Some(plain) = plain {
@@ -1240,8 +1245,8 @@ impl<'a> Checker<'a> {
             "Show" | "Equal" => true,
             "Json" => match ty {
                 Ty::Map(key, _) => *key == Ty::Text,
-                Ty::Any(_) | Ty::Task(..) | Ty::Spawned(_) | Ty::Channel(_) | Ty::Lock(_) => false,
-                _ => true,
+                Ty::Any(_) | Ty::Task(..) => false,
+                ty => !ty.is_handle(),
             },
             "Hash" => ty.is_key() || (ty.is_compound() && !matches!(ty, Ty::Any(_))),
             "Order" => ty.is_number() || matches!(ty, Ty::Text | Ty::List(_) | Ty::Data(..)),

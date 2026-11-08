@@ -1,0 +1,46 @@
+# `std.net` sockets, by decision 177. A client on a spawned thread talks to
+# a server on this one, over a free port.
+
+use std.net
+use std.net.Connection
+use std.net.NetError
+use std.time
+
+task client(port: int) -> text or NetError
+    let connection = try net.connect("127.0.0.1", port)
+    try connection.write("ping".bytes())
+    let reply = try connection.read(100)
+    return "client got {reply.len()} bytes"
+
+task serve(connection: Connection) -> text or NetError
+    let asked = try connection.read(4)
+    try connection.write("pong!".bytes())
+    # The client closes after one read, so the next one finds the end.
+    let rest = try connection.read(100)
+    return "server got {asked.len()} bytes, then {rest.len()}"
+
+let listener = try net.listen(0)
+print listener.port > 0
+let talk = spawn client(listener.port)
+print serve(try listener.accept())
+print talk.wait()
+
+# A second listener on the same port finds it in use.
+print net.listen(listener.port)
+
+# A read with no data fails after the timeout.
+let quiet = spawn net.connect("127.0.0.1", listener.port)
+let silent = try listener.accept()
+try silent.set_timeout(time.millis(50))
+print silent.read(10)
+print silent.set_timeout(time.millis(0))
+print silent.read(0)
+print quiet.wait() is Connection
+
+# No one listens on a port whose listener is gone.
+task free_port() -> int or NetError
+    return (try net.listen(0)).port
+
+print net.connect("127.0.0.1", try free_port())
+print net.connect("127.0.0.1", 70000)
+print silent

@@ -200,6 +200,15 @@ Level: **Read** (own measurement), 2026-11-07, for decision 175. Same method as 
 
 `fib` is not an M4 benchmark. It is almost only calls, and each call now passes one more register, where `lucid run` had the limit as a constant in the code. Its best time moved 10% while its median moved 1%, so the cost is real but small next to the noise. Limits: one machine, and best times that move up to 8% between runs. If call-heavy code matters later, decision 175 names Cranelift's pinned register as the next thing to try.
 
+### Sockets (M7)
+
+Level: **Read**, 2026-11-08, for decision 185.
+
+- Rust `std::net::TcpStream::set_read_timeout` ([docs](https://doc.rust-lang.org/std/net/struct.TcpStream.html#method.set_read_timeout)): "An `Err` is returned if the zero `Duration` is passed to this method." Under platform-specific behavior: "Unix typically returns an error of the kind `WouldBlock`, but Windows may return `TimedOut`."
+- Flask quickstart, "Externally Visible Server" ([docs](https://flask.palletsprojects.com/en/stable/quickstart/)): by default "the server is only accessible from your own computer", and `--host=0.0.0.0` makes it listen "on all public IPs". The stated reason is the debugger, which Lucid does not have, so this is a precedent, not evidence about harm.
+
+`tests/run/std_net.lcd` checks each failure on Windows. A connection to a closed port there takes about 2 seconds to be refused, since Windows retries the connection. Not checked: Linux and macOS, which wait for M8.
+
 ### First Lucid benchmarks (M2)
 
 Level: **Read** (own measurement). `sh benchmarks/run.sh`, 2026-11-05, on the development machine: 15 paired rounds, so drift hits every build alike. Lucid includes JIT compile time. Rust is `rustc -O`, and "Rust checked" adds `-C overflow-checks=on`.

@@ -656,7 +656,7 @@ print models.greet(User(name: "Ada"))
 
 ## Standard library
 
-`use std.x` needs no dependency entry. In a package, `std.fs` and `std.env` need a permission, see "Packages". A module not built yet reports E0901.
+`use std.x` needs no dependency entry. In a package, `std.fs`, `std.env`, and `std.net` need a permission, see "Packages". A module not built yet reports E0901.
 
 ```lucid
 use std.args
@@ -696,6 +696,7 @@ print json.parse[Book]("[]")                   # a JsonError
 - Pass arguments after the path: `lucid run file.lcd add "buy milk"`.
 - `std.fs` reads and writes whole files: `read_text`, `write_text`, `append_text`, `read_bytes`, `write_bytes`, `list_dir`, `make_dir`, `remove`, `rename`. Each gives its result or a `fs.FileError`. `exists` gives a `bool`.
 - `FileError` has `NotFound(path)`, `Denied(path)`, `NotText(path)`, and `Failed(path, detail)`.
+- `std.net` is TCP. `net.listen(port)` gives a `Listener` on `127.0.0.1`, or on every address with `host: "0.0.0.0"`. Port 0 takes a free one, read back as `listener.port`. `listener.accept()` and `net.connect(host, port)` give a `Connection`, with `read(max)`, `write(bytes)`, and `set_timeout(time.millis(n))`. `read` gives an empty list once the other end closes. Failures are a `net.NetError`: `Refused`, `TimedOut`, `InUse`, `Closed`, or `Failed(detail)`. A socket closes when nothing holds it. Under `--target web`, `use std.net` is E0907.
 - `json.parse[T](raw)` gives `T or json.JsonError`, and `json.write(value)` gives `text`. Both need `Json`, which is derived. A `type` is an object, and a left-out field takes its default, or reads `null`. A `choice` is `"Red"` or `{"Circle": {"radius": 1.0}}`. A map key must be `text`.
 - A union has `Json` only if each member reads from its own kind of JSON value: `int or text` works, `int or float` does not.
 - `std.dom` makes a browser page, and needs `--target web`, or else E0906. `dom.app(init, view, update)` shows `view(init)`, and on each event gives `update` a message: `task view(model: Model) -> dom.Node[Message]` and `task update(model: Model, message: Message) -> Model`. Build nodes with constructors, whose types come from context: `dom.Element(tag: "button", attrs: [dom.Attribute(name: "id", value: "add"), dom.On(event: "click", message: _ => Add)], children: [dom.Text(content: "+")])`. An `On` message gets the event's key, or the element's value: `dom.On(event: "input", message: v => Typed(value: v))`.

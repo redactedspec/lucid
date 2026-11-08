@@ -109,6 +109,14 @@ fn cli(args: &[String]) -> ExitCode {
         if run && !web && diags.is_empty() {
             diags = web_only(&source);
         }
+        if web
+            && diags.is_empty()
+            && let Some(span) = source.host_only
+        {
+            let note = "a page cannot open sockets, so build this program without `--target web`";
+            let error = Diagnostic::new("E0907", "`std.net` cannot run on the web", span);
+            diags.push(error.note(note));
+        }
         if web && diags.is_empty() {
             match wasm::script(&program, &source) {
                 Ok(script) => return write_script(&script, &out_name(path, "js")),

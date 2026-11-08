@@ -14,7 +14,8 @@ Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/
 | `std.env`, `std.args` | Environment and command-line input | M5 |
 | `std.time` | Clocks, durations, dates | M5 |
 | `std.dom` | Browser pages in the Elm architecture | M6 |
-| `std.net`, `std.http` | Sockets, HTTP/1.1 server and client, TLS for the client | M7 |
+| `std.net` | TCP sockets | M7, built |
+| `std.http` | HTTP/1.1 server and client, TLS for the client | M7 |
 | `std.html` | Escaped HTML building | M7 |
 | `std.sql` | SQLite first, parameterized queries only | M8 |
 | `std.crypto` | Hashes, random, and vetted primitives | M8 |
@@ -60,9 +61,12 @@ Text from the system that is not valid Unicode has its bad parts replaced, excep
 
 Lucid covers both sides of a website.
 
-**Server side** compiles to a native binary. See [examples/website.lcd](../examples/website.lcd), which is the target of M7 and does not run yet. Planned, by decisions 177 to 180:
+**Server side** compiles to a native binary. See [examples/website.lcd](../examples/website.lcd), which is the target of M7 and does not run yet. `std.net` is built, by decisions 177 and 185:
 
-- `std.net`: `net.listen(port)` gives a `Listener`, whose `accept()` gives a `Connection`, as `net.connect(host, port)` does. A connection has `read(max)`, `write(bytes)`, and `set_timeout(length)`. Each fails with a `NetError`. A socket closes when no value holds it.
+- `std.net`: `net.listen(port)` gives a `Listener`, whose `accept()` gives a `Connection`, as `net.connect(host, port)` does. Port 0 takes a free port, and `listener.port` tells which. It listens on `127.0.0.1` unless given `host: "0.0.0.0"`. A connection has `read(max)`, `write(bytes)`, and `set_timeout(length)`, which takes a `time.Duration`. `read` gives an empty list once the other end closes. Each fails with a `NetError`: `Refused`, `TimedOut`, `InUse`, `Closed`, or `Failed(detail)`. A socket closes when no value holds it.
+
+Planned, by decisions 178 to 180:
+
 - `std.http`: `http.App()`, with `app.get(path, handler)` and `app.post(path, handler)`, routes by method and exact path, and `app.serve(port:)` serves HTTP/1.1, one thread per connection. A handler is a `task(http.Request) -> http.Response`. `http.page(node)`, `http.json(value)`, and `http.text(content)` build a response. `http.get(url)` and `http.post(url, body)` are the client, with TLS for `https`. Limits are in [security.md](security.md).
 - `std.html`: `html.Element`, `html.Text`, `html.Attribute`, a task for each common tag such as `html.h1(text)`, and `html.render(node)`, which escapes every text and attribute value.
 

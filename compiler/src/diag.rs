@@ -82,6 +82,8 @@ pub struct Source {
     pub grants: Option<Vec<crate::manifest::Grant>>,
     /// The first `use std.dom`, which only `lucid build --target web` can build.
     pub web_only: Option<Span>,
+    /// The first `use std.net`, which `lucid build --target web` cannot build.
+    pub host_only: Option<Span>,
 }
 
 impl Source {

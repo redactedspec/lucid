@@ -86,7 +86,7 @@ A task value is a counted record of what it captured, and holds no reference to 
 
 ## Destruction
 
-Values are destroyed deterministically when their last owner ends. Destroying never recurses, so a recursive value of any depth is safe to drop (decision 54). A name owns its value until the end of its block, newest name first, or until the value moves on, or until the name is assigned. `break`, `continue`, and `return` end the blocks they leave. A hidden value ends with its statement. Planned, with the first value that holds a system resource: a type that has `task close(change self: T)` from the `Close` trait has it called automatically at that moment, so sockets close without `defer` or `with`.
+Values are destroyed deterministically when their last owner ends. Destroying never recurses, so a recursive value of any depth is safe to drop (decision 54). A name owns its value until the end of its block, newest name first, or until the value moves on, or until the name is assigned. `break`, `continue`, and `return` end the blocks they leave. A hidden value ends with its statement. A socket of `std.net` closes at that moment, since the runtime closes it when it frees it, by decision 177, so it needs no `defer` or `with`. Planned: a user type that has `task close(change self: T)` from a `Close` trait has it called then too.
 
 ## Reference count performance
 

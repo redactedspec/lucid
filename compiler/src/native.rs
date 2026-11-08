@@ -121,7 +121,8 @@ fn clif(ty: Ty) -> Type {
         | Ty::Task(..)
         | Ty::Spawned(_)
         | Ty::Channel(_)
-        | Ty::Lock(_) => types::I64,
+        | Ty::Lock(_)
+        | Ty::Socket => types::I64,
         Ty::Float => types::F64,
         Ty::F32 => types::F32,
         Ty::Bool | Ty::None => types::I8,
@@ -280,6 +281,15 @@ fn jit(
     builder.symbol("lucid_fs_rename", lucid_rt::lucid_fs_rename as *const u8);
     builder.symbol("lucid_fs_failure", lucid_rt::lucid_fs_failure as *const u8);
     builder.symbol("lucid_fs_detail", lucid_rt::lucid_fs_detail as *const u8);
+    builder.symbol("lucid_net_listen", lucid_rt::lucid_net_listen as *const u8);
+    builder.symbol("lucid_net_port", lucid_rt::lucid_net_port as *const u8);
+    builder.symbol("lucid_net_accept", lucid_rt::lucid_net_accept as *const u8);
+    builder.symbol("lucid_net_connect", lucid_rt::lucid_net_connect as *const u8);
+    builder.symbol("lucid_net_read", lucid_rt::lucid_net_read as *const u8);
+    builder.symbol("lucid_net_write", lucid_rt::lucid_net_write as *const u8);
+    builder.symbol("lucid_net_set_timeout", lucid_rt::lucid_net_set_timeout as *const u8);
+    builder.symbol("lucid_net_failure", lucid_rt::lucid_net_failure as *const u8);
+    builder.symbol("lucid_net_detail", lucid_rt::lucid_net_detail as *const u8);
     builder.symbol("lucid_bytes_valid", lucid_rt::lucid_bytes_valid as *const u8);
     builder.symbol("lucid_bytes_text", lucid_rt::lucid_bytes_text as *const u8);
     builder.symbol("lucid_spawn_scope", lucid_rt::lucid_spawn_scope as *const u8);

@@ -1,0 +1,100 @@
+# TCP sockets. A socket closes when no value holds it.
+
+use std.time.Duration
+
+## Why a socket task failed.
+public choice NetError
+    Refused
+    TimedOut
+    InUse
+    Closed
+    Failed(detail: text)
+
+## The failure in words.
+public task error_message(self: NetError) -> text
+    return match self
+        Refused -> "connection refused"
+        TimedOut -> "timed out"
+        InUse -> "address in use"
+        Closed -> "connection closed by the other end"
+        Failed(detail) -> detail
+
+## A socket that waits for clients. `port` is the one it listens on.
+public type Listener
+    socket: socket
+    port: int
+
+## A socket connected to the other end.
+public type Connection
+    socket: socket
+
+unsafe extern task lucid_net_listen(host: text, port: int) -> socket
+unsafe extern task lucid_net_port(listener: socket) -> int
+unsafe extern task lucid_net_accept(listener: socket) -> socket
+unsafe extern task lucid_net_connect(host: text, port: int) -> socket
+unsafe extern task lucid_net_read(connection: socket, max: int) -> list[byte]
+unsafe extern task lucid_net_write(connection: socket, data: list[byte])
+unsafe extern task lucid_net_set_timeout(connection: socket, nanos: int)
+unsafe extern task lucid_net_failure() -> int
+unsafe extern task lucid_net_detail() -> text
+
+# How the last runtime call failed, if it did.
+task failure() -> NetError?
+    # Each task only reads what the last call left.
+    unsafe
+        return match lucid_net_failure()
+            0 -> none
+            1 -> Refused
+            2 -> TimedOut
+            3 -> InUse
+            4 -> Closed
+            _ -> Failed(detail: lucid_net_detail())
+
+## Listens on `port`, or on a free port for 0. Only this machine can connect,
+## unless `host` is "0.0.0.0".
+public task listen(port: int, host: text = "127.0.0.1") -> Listener or NetError
+    # The runtime only reads `host`, and gives a new socket, which it reads.
+    unsafe
+        let socket = lucid_net_listen(host, port)
+        try failure()
+        return Listener(socket: socket, port: lucid_net_port(socket))
+
+## Waits for a client, and gives its connection.
+public task accept(self: Listener) -> Connection or NetError
+    # The runtime only reads the socket, and gives a new one.
+    unsafe
+        let socket = lucid_net_accept(self.socket)
+        try failure()
+        return Connection(socket: socket)
+
+## Connects to `port` on `host`, which is a name or an address.
+public task connect(host: text, port: int) -> Connection or NetError
+    # The runtime only reads `host`, and gives a new socket.
+    unsafe
+        let socket = lucid_net_connect(host, port)
+        try failure()
+        return Connection(socket: socket)
+
+## Waits for at least one byte, and gives at most `max`. An empty list means
+## that the other end closed the connection.
+public task read(self: Connection, max: int) -> list[byte] or NetError
+    # The runtime only reads the socket, and builds a new list.
+    unsafe
+        let data = lucid_net_read(self.socket, max)
+        try failure()
+        return data
+
+## Sends all of `data`.
+public task write(self: Connection, data: list[byte]) -> none or NetError
+    # The runtime only reads the socket and `data`.
+    unsafe
+        lucid_net_write(self.socket, data)
+    try failure()
+
+## Makes each later `read` or `write` fail with `TimedOut` after `length`
+## with no bytes, so a silent client cannot hold a thread forever.
+public task set_timeout(self: Connection, length: Duration) -> none or NetError
+    # The runtime only reads the socket.
+    unsafe
+        lucid_net_set_timeout(self.socket, length.nanos)
+    try failure()

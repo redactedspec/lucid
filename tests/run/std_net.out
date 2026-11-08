@@ -1,0 +1,11 @@
+true
+server got 4 bytes, then 0
+client got 5 bytes
+InUse
+TimedOut
+Failed(detail: "a timeout must be longer than 0")
+Failed(detail: "a read needs a `max` of at least 1")
+true
+Refused
+Failed(detail: "a port is from 0 to 65535")
+Connection(socket: socket)

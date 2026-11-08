@@ -10,12 +10,14 @@ use std::collections::VecDeque;
 use std::hash::BuildHasher;
 #[cfg(not(target_arch = "wasm32"))]
 use std::hash::RandomState as Keys;
-use std::io::{ErrorKind, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::mem::offset_of;
+use std::net::{TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering, fence};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 #[cfg(feature = "exe")]
 mod exe;
@@ -79,6 +81,7 @@ enum Kind {
     Scope,
     Channel,
     Lock,
+    Socket,
 }
 
 /// Whether a text holds only ASCII, which makes a character position a byte
@@ -784,7 +787,7 @@ pub unsafe extern "C" fn lucid_mark(value: *mut Head) {
                 }
                 Kind::Scope => unreachable!("a scope is a hidden local, which nothing holds"),
                 // What a channel or a lock holds is marked when it goes in.
-                Kind::Channel | Kind::Lock => {}
+                Kind::Channel | Kind::Lock | Kind::Socket => {}
             }
         }
     }
@@ -870,6 +873,11 @@ pub unsafe extern "C" fn lucid_release(value: *mut Head) {
                     let slot = shared.state.into_inner().unwrap_or_else(|e| e.into_inner());
                     drop_count(slot.value as *mut Head, &mut pending);
                     free(value, size_of::<Lock>());
+                }
+                Kind::Socket => {
+                    // Dropping the endpoint closes it.
+                    drop(Box::from_raw((*value.cast::<Socket>()).endpoint));
+                    free(value, size_of::<Socket>());
                 }
             }
         }
@@ -2656,6 +2664,210 @@ pub unsafe extern "C" fn lucid_bytes_valid(data: *const List) -> bool {
 pub unsafe extern "C" fn lucid_bytes_text(data: *const List) -> *mut Text {
     // SAFETY: the caller guarantees a live list.
     text_from(String::from_utf8_lossy(unsafe { list_bytes(data) }).as_bytes())
+}
+
+/// A `Listener` or `Connection` of `std.net`, by decision 177. Copies share
+/// `endpoint`, which comes from `Box::into_raw`, and the last count closes it.
+#[repr(C)]
+pub struct Socket {
+    head: Head,
+    endpoint: *mut Endpoint,
+}
+
+enum Endpoint {
+    Listener(TcpListener),
+    Stream(TcpStream),
+}
+
+/// The most that one `read` takes, so `read(max)` with a huge `max` does not
+/// allocate it. A read may always give fewer bytes than asked.
+const READ_LIMIT: usize = 64 * 1024;
+
+std::thread_local! {
+    /// How the last socket task failed: 0 if it did not, 1 for a refused
+    /// connection, 2 for a timeout, 3 for an address in use, 4 for a
+    /// connection the other end closed, or 5 for anything else, with words.
+    static NET_FAILURE: RefCell<(i64, String)> = const { RefCell::new((0, String::new())) };
+}
+
+/// Keeps what `std.net` asks for next.
+fn net_result<T>(result: std::io::Result<T>) -> Option<T> {
+    let failure = match &result {
+        Ok(_) => (0, String::new()),
+        Err(e) => match e.kind() {
+            ErrorKind::ConnectionRefused => (1, String::new()),
+            // Windows reports a read timeout as `TimedOut`, and Unix as `WouldBlock`.
+            ErrorKind::TimedOut | ErrorKind::WouldBlock => (2, String::new()),
+            ErrorKind::AddrInUse => (3, String::new()),
+            ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted | ErrorKind::BrokenPipe => {
+                (4, String::new())
+            }
+            _ => (5, e.to_string()),
+        },
+    };
+    NET_FAILURE.set(failure);
+    result.ok()
+}
+
+fn net_problem(detail: &str) {
+    NET_FAILURE.set((5, detail.to_string()));
+}
+
+/// A new socket, or `failed()` if there is none, which `std.net` never reads.
+fn socket(endpoint: Option<Endpoint>) -> *mut Socket {
+    let Some(endpoint) = endpoint else { return failed() };
+    let head = Head { count: AtomicI64::new(1), kind: Kind::Socket };
+    object(size_of::<Socket>(), Socket { head, endpoint: Box::into_raw(Box::new(endpoint)) })
+}
+
+/// The endpoint of a live socket.
+///
+/// # Safety
+///
+/// `socket` must point to a live socket.
+unsafe fn endpoint<'a>(socket: *const Socket) -> &'a Endpoint {
+    // SAFETY: the caller guarantees a live socket, which keeps its endpoint.
+    unsafe {
+        check_live(socket.cast());
+        &*(*socket).endpoint
+    }
+}
+
+/// The stream of a connection. Only a `Connection` built by hand from a
+/// listener's socket reaches the trap.
+///
+/// # Safety
+///
+/// `socket` must point to a live socket.
+unsafe fn stream<'a>(socket: *const Socket) -> &'a TcpStream {
+    // SAFETY: the caller guarantees a live socket.
+    match unsafe { endpoint(socket) } {
+        Endpoint::Stream(stream) => stream,
+        Endpoint::Listener(_) => trap(b"trap: a listener used as a connection"),
+    }
+}
+
+fn port(port: i64) -> Option<u16> {
+    let port = u16::try_from(port).ok();
+    if port.is_none() {
+        net_problem("a port is from 0 to 65535");
+    }
+    port
+}
+
+/// Listens on `host` and `port`. Port 0 asks the system for a free one.
+///
+/// # Safety
+///
+/// `host` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_net_listen(host: *const Text, port_number: i64) -> *mut Socket {
+    // SAFETY: the caller guarantees a live text.
+    let host = unsafe { system_text(host) };
+    let listener = port(port_number).and_then(|port| net_result(TcpListener::bind((host, port))));
+    socket(listener.map(Endpoint::Listener))
+}
+
+/// The port that a listener has, which tells the one that port 0 found.
+///
+/// # Safety
+///
+/// `listener` must point to a live socket of a listener.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_net_port(listener: *const Socket) -> i64 {
+    // SAFETY: the caller guarantees a live socket.
+    let address = match unsafe { endpoint(listener) } {
+        Endpoint::Listener(listener) => listener.local_addr(),
+        Endpoint::Stream(stream) => stream.local_addr(),
+    };
+    address.map_or(0, |address| i64::from(address.port()))
+}
+
+/// Blocks until a client connects, and gives its connection.
+///
+/// # Safety
+///
+/// `listener` must point to a live socket of a listener.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_net_accept(listener: *const Socket) -> *mut Socket {
+    // SAFETY: the caller guarantees a live socket.
+    let Endpoint::Listener(listener) = (unsafe { endpoint(listener) }) else {
+        trap(b"trap: a connection used as a listener")
+    };
+    socket(net_result(listener.accept()).map(|(stream, _)| Endpoint::Stream(stream)))
+}
+
+/// Connects to `host` and `port`, and finds the host's address first.
+///
+/// # Safety
+///
+/// `host` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_net_connect(host: *const Text, port_number: i64) -> *mut Socket {
+    // SAFETY: the caller guarantees a live text.
+    let host = unsafe { system_text(host) };
+    let stream = port(port_number).and_then(|port| net_result(TcpStream::connect((host, port))));
+    socket(stream.map(Endpoint::Stream))
+}
+
+/// Reads at most `max` bytes, and blocks until at least one comes. An empty
+/// list means that the other end closed the connection.
+///
+/// # Safety
+///
+/// `connection` must point to a live socket of a connection.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_net_read(connection: *const Socket, max: i64) -> *mut List {
+    // SAFETY: the caller guarantees a live socket.
+    let mut stream = unsafe { stream(connection) };
+    let Ok(max @ 1..) = usize::try_from(max) else {
+        net_problem("a read needs a `max` of at least 1");
+        return byte_list(&[]);
+    };
+    let mut buffer = vec![0; max.min(READ_LIMIT)];
+    let read = net_result(stream.read(&mut buffer)).unwrap_or(0);
+    byte_list(&buffer[..read])
+}
+
+/// Writes all of `data`, and blocks until the system has it.
+///
+/// # Safety
+///
+/// `connection` must point to a live socket of a connection, and `data` to a
+/// live `list[byte]`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_net_write(connection: *const Socket, data: *const List) {
+    // SAFETY: the caller guarantees both.
+    let (mut stream, data) = unsafe { (stream(connection), list_bytes(data)) };
+    net_result(stream.write_all(data));
+}
+
+/// Makes each later read and write fail after `nanos` with no progress.
+///
+/// # Safety
+///
+/// `connection` must point to a live socket of a connection.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_net_set_timeout(connection: *const Socket, nanos: i64) {
+    // SAFETY: the caller guarantees a live socket.
+    let stream = unsafe { stream(connection) };
+    let Ok(nanos @ 1..) = u64::try_from(nanos) else {
+        return net_problem("a timeout must be longer than 0");
+    };
+    let length = Some(Duration::from_nanos(nanos));
+    net_result(stream.set_read_timeout(length).and_then(|()| stream.set_write_timeout(length)));
+}
+
+/// The kind of the last failure on this thread. See `NET_FAILURE`.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_net_failure() -> i64 {
+    NET_FAILURE.with_borrow(|failure| failure.0)
+}
+
+/// The system's words for the last failure on this thread.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_net_detail() -> *mut Text {
+    NET_FAILURE.with_borrow(|failure| text_from(failure.1.as_bytes()))
 }
 
 /// Nanoseconds from 1970 on the wall clock, which fit until the year 2262.
