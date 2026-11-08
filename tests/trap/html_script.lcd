@@ -1,0 +1,4 @@
+# `std.html` refuses what `std.dom` refuses, by decision 180.
+use std.html as h
+
+print h.render(h.a(" Java\tScript:alert(1)", "x"))

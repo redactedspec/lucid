@@ -110,7 +110,7 @@ Designed by decisions 169 to 180, see "Threads" in `compiler.md`. OS threads, by
 - [x] `spawn`, `spawned`, and waiting at the end of a task, by decisions 171, 172, and 182, and E0907, by decision 176
 - [x] `channel`, `lock`, and the deadlock trap, by decisions 173, 174, and 184. A write through `update` to a value with one count is in place
 - [x] `std.net`, by decisions 177 and 185
-- [ ] `std.html` and the `std.http` server, by decisions 178 and 180, and `examples/website.lcd`
+- [x] `std.html` and the `std.http` server, by decisions 178, 180, and 186, and `examples/website.lcd`
 - [ ] Load test: a Rust test that sends requests from 64 threads at once, and holds one slow connection open, to the built example
 - [ ] `std.http` client with TLS, by decision 179
 

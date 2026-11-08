@@ -1,0 +1,168 @@
+# HTML built as a tree, then rendered as text with every text and attribute
+# value escaped, by decision 180. The tree has the shape of `std.dom`'s.
+
+## What a page holds: an element, or text.
+public choice Node
+    Element(tag: text, attrs: list[Attribute] = [], children: list[Node] = [])
+    Text(content: text)
+
+## An attribute of an element, and its value.
+public type Attribute
+    name: text
+    value: text
+
+## The HTML text of `node`. Text and attribute values are escaped. It traps on
+## what `std.dom` traps on: a `script` element, an attribute whose name starts
+## with `on`, `formaction`, `srcdoc`, and a `javascript:` or `data:text/html`
+## value. It also traps on a tag or attribute name that is not plain letters,
+## digits, and `-`, and on children of an element that has none, such as `br`.
+public task render(node: Node) -> text
+    var out = ""
+    write(node, change out)
+    return out
+
+task write(node: Node, change out: text)
+    match node
+        Text(content) ->
+            out = "{out}{escape(content)}"
+        Element(tag, attrs, children) ->
+            let why = unsafe_tag(tag)
+            # A reason in the trap tells what was refused.
+            expect why == ""
+            out = "{out}<{tag}"
+            for attr in attrs
+                let refused = unsafe_attr(attr.name, attr.value)
+                expect refused == ""
+                out = "{out} {attr.name}=\"{escape(attr.value)}\""
+            out = "{out}>"
+            if is_void(tag)
+                expect children.len() == 0
+                return
+            for child in children
+                write(child, change out)
+            out = "{out}</{tag}>"
+
+## `content` with `&`, `<`, `>`, `"`, and `'` as character references, so it
+## reads as text in an element and in a quoted attribute value.
+public task escape(content: text) -> text
+    var out = ""
+    for c in content
+        if c == "&"
+            out = "{out}&amp;"
+        else if c == "<"
+            out = "{out}&lt;"
+        else if c == ">"
+            out = "{out}&gt;"
+        else if c == "\""
+            out = "{out}&quot;"
+        else if c == "'"
+            out = "{out}&#39;"
+        else
+            out = "{out}{c}"
+    return out
+
+# Why `tag` is refused, or "".
+task unsafe_tag(tag: text) -> text
+    if not is_name(tag, false)
+        return "std.html cannot make an element with this tag"
+    if tag.lower() == "script"
+        return "std.html cannot make a `script` element"
+    return ""
+
+# Why the attribute is refused, or "". A URL parser drops spaces and control
+# characters, so they hide nothing, as in the runtime's guard for `std.dom`.
+task unsafe_attr(name: text, value: text) -> text
+    if not is_name(name, true)
+        return "std.html cannot set an attribute with this name"
+    let lowered = name.lower()
+    if starts(lowered, "on") or lowered == "formaction" or lowered == "srcdoc"
+        return "std.html cannot set an attribute that runs code"
+    var url = ""
+    for c in value.lower()
+        if c > " "
+            url = "{url}{c}"
+    if starts(url, "javascript:") or starts(url, "data:text/html")
+        return "std.html cannot set a `javascript:` or `data:text/html` value"
+    return ""
+
+# True if `name` is ASCII letters, digits, and `-`, and for an attribute also
+# `_` and `:`, so it cannot end the tag or add an attribute.
+task is_name(name: text, attribute: bool) -> bool
+    if name.is_empty()
+        return false
+    for c in name
+        let plain = (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9") or c == "-"
+        if not plain and not (attribute and (c == "_" or c == ":"))
+            return false
+    return true
+
+task starts(value: text, prefix: text) -> bool
+    return value.len() >= prefix.len() and value[0..prefix.len()] == prefix
+
+# An element that has no end tag and no children.
+task is_void(tag: text) -> bool
+    return tag.lower() in ["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]
+
+# An element with text in it.
+task tag(name: text, content: text) -> Node
+    return Element(tag: name, children: [Text(content: content)])
+
+# An element with children.
+task holder(name: text, children: list[Node]) -> Node
+    return Element(tag: name, children: children)
+
+## The whole page: `<html>` with a `<head>` that has the title and UTF-8, and
+## a `<body>` with `children`.
+public task document(title: text, children: list[Node]) -> Node
+    let meta = Element(tag: "meta", attrs: [Attribute(name: "charset", value: "utf-8")])
+    let head = holder("head", [meta, tag("title", title)])
+    return holder("html", [head, holder("body", children)])
+
+public task h1(content: text) -> Node
+    return tag("h1", content)
+
+public task h2(content: text) -> Node
+    return tag("h2", content)
+
+public task h3(content: text) -> Node
+    return tag("h3", content)
+
+public task p(content: text) -> Node
+    return tag("p", content)
+
+public task li(content: text) -> Node
+    return tag("li", content)
+
+public task span(content: text) -> Node
+    return tag("span", content)
+
+public task strong(content: text) -> Node
+    return tag("strong", content)
+
+public task em(content: text) -> Node
+    return tag("em", content)
+
+public task code(content: text) -> Node
+    return tag("code", content)
+
+public task pre(content: text) -> Node
+    return tag("pre", content)
+
+## A link to `href` with text in it.
+public task a(href: text, content: text) -> Node
+    return Element(tag: "a", attrs: [Attribute(name: "href", value: href)], children: [Text(content: content)])
+
+public task div(children: list[Node]) -> Node
+    return holder("div", children)
+
+public task ul(children: list[Node]) -> Node
+    return holder("ul", children)
+
+public task ol(children: list[Node]) -> Node
+    return holder("ol", children)
+
+public task main(children: list[Node]) -> Node
+    return holder("main", children)
+
+public task section(children: list[Node]) -> Node
+    return holder("section", children)

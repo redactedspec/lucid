@@ -61,11 +61,13 @@ pub fn std_module(name: &str) -> Option<&'static str> {
     STD_MODULES.iter().find(|(module, _)| *module == name).map(|(_, text)| *text)
 }
 
-const STD_MODULES: [(&str, &str); 7] = [
+const STD_MODULES: [(&str, &str); 9] = [
     ("args", include_str!("../../std/args.lcd")),
     ("dom", include_str!("../../std/dom.lcd")),
     ("env", include_str!("../../std/env.lcd")),
     ("fs", include_str!("../../std/fs.lcd")),
+    ("html", include_str!("../../std/html.lcd")),
+    ("http", include_str!("../../std/http.lcd")),
     ("json", include_str!("../../std/json.lcd")),
     ("net", include_str!("../../std/net.lcd")),
     ("time", include_str!("../../std/time.lcd")),
@@ -639,8 +641,12 @@ impl Loader {
         if module.text == "dom" {
             self.source.web_only.get_or_insert(span);
         }
-        if module.text == "net" {
-            self.source.host_only.get_or_insert(span);
+        if let Some(name) = match module.text.as_str() {
+            "net" => Some("std.net"),
+            "http" => Some("std.http"),
+            _ => None,
+        } {
+            self.source.host_only.get_or_insert((span, name));
         }
         let file = format!("@std/{}.lcd", module.text);
         let key = vec!["@std".to_string(), module.text.clone()];

@@ -15,8 +15,8 @@ Modules arrive in stages. See [roadmap.md](roadmap.md). The sources are in `std/
 | `std.time` | Clocks, durations, dates | M5 |
 | `std.dom` | Browser pages in the Elm architecture | M6 |
 | `std.net` | TCP sockets | M7, built |
-| `std.http` | HTTP/1.1 server and client, TLS for the client | M7 |
-| `std.html` | Escaped HTML building | M7 |
+| `std.http` | HTTP/1.1 server, built, and client with TLS | M7 |
+| `std.html` | Escaped HTML building | M7, built |
 | `std.sql` | SQLite first, parameterized queries only | M8 |
 | `std.crypto` | Hashes, random, and vetted primitives | M8 |
 
@@ -61,14 +61,14 @@ Text from the system that is not valid Unicode has its bad parts replaced, excep
 
 Lucid covers both sides of a website.
 
-**Server side** compiles to a native binary. See [examples/website.lcd](../examples/website.lcd), which is the target of M7 and does not run yet. `std.net` is built, by decisions 177 and 185:
+**Server side** compiles to a native binary. See [examples/website.lcd](../examples/website.lcd). `std.net`, `std.html`, and the `std.http` server are built, by decisions 177, 178, 180, 185, and 186:
 
 - `std.net`: `net.listen(port)` gives a `Listener`, whose `accept()` gives a `Connection`, as `net.connect(host, port)` does. Port 0 takes a free port, and `listener.port` tells which. It listens on `127.0.0.1` unless given `host: "0.0.0.0"`. A connection has `read(max)`, `write(bytes)`, and `set_timeout(length)`, which takes a `time.Duration`. `read` gives an empty list once the other end closes. Each fails with a `NetError`: `Refused`, `TimedOut`, `InUse`, `Closed`, or `Failed(detail)`. A socket closes when no value holds it.
 
-Planned, by decisions 178 to 180:
+- `std.http`: `http.App()`, with `app.get(path, handler)` and `app.post(path, handler)`, routes by method and exact path. `app.serve(port)` serves HTTP/1.1 with keep-alive, one thread per connection and at most 256 at once, on `127.0.0.1` unless given `host: "0.0.0.0"`, and gives a `NetError` only if it cannot listen. `app.answer(connection)` serves one connection that a program accepted itself. A handler is a `task(http.Request) -> http.Response`. A `Request` has `method`, `path`, `query` (what follows the `?`), `headers` with names in lowercase, and `body` bytes, with `request.header(name)` and `request.body_text()`. A `Response` has `status`, `headers`, and `body`, and `http.page(node)`, `http.json(value)`, and `http.text(content)` build one with status 200. `HEAD` runs the `GET` handler. An unknown path gives 404, and a known path with another method gives 405. Limits and what is refused are in [security.md](security.md). A handler that traps ends the server, by decision 172.
+- `std.html`: `html.Element(tag, attrs, children)`, `html.Text(content)`, `html.Attribute(name, value)`, `html.document(title, children)`, `html.render(node)`, which escapes every text and attribute value, and `html.escape(content)`. Tags that hold text take it: `h1`, `h2`, `h3`, `p`, `li`, `span`, `strong`, `em`, `code`, `pre`, and `a(href, content)`. Tags that hold elements take a list: `div`, `ul`, `ol`, `main`, `section`. A void element such as `br` renders with no end tag. `std.html` works on the web too.
 
-- `std.http`: `http.App()`, with `app.get(path, handler)` and `app.post(path, handler)`, routes by method and exact path, and `app.serve(port:)` serves HTTP/1.1, one thread per connection. A handler is a `task(http.Request) -> http.Response`. `http.page(node)`, `http.json(value)`, and `http.text(content)` build a response. `http.get(url)` and `http.post(url, body)` are the client, with TLS for `https`. Limits are in [security.md](security.md).
-- `std.html`: `html.Element`, `html.Text`, `html.Attribute`, a task for each common tag such as `html.h1(text)`, and `html.render(node)`, which escapes every text and attribute value.
+Planned, by decision 179: `http.get(url)` and `http.post(url, body)` as the client, with TLS for `https`.
 
 Under `--target web`, `std.net` and `std.http` are error E0907.
 

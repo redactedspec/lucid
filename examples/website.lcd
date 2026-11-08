@@ -1,13 +1,14 @@
-# A small website with a page and a JSON endpoint.
-use std.http
+# A small website with a page and a JSON endpoint. Run it, then open
+# http://127.0.0.1:8080 in a browser.
 use std.html as h
+use std.http
 
 type Status
     ok: bool
     version: text
 
 task home(request: http.Request) -> http.Response
-    return http.page(h.h1("Hello from Lucid"))
+    return http.page(h.document("Lucid", [h.h1("Hello from Lucid"), h.a("/status", "Status")]))
 
 task status(request: http.Request) -> http.Response
     return http.json(Status(ok: true, version: "0.1.0"))
@@ -15,4 +16,4 @@ task status(request: http.Request) -> http.Response
 var app = http.App()
 app.get("/", home)
 app.get("/status", status)
-app.serve(port: 8080)
+try app.serve(8080)

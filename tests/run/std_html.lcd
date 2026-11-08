@@ -1,0 +1,10 @@
+# `std.html`, by decision 180: every text and attribute value is escaped.
+
+use std.html as h
+
+let link = h.a("/find?q=1&n=\"2\"", "it's <here>")
+print h.render(link)
+print h.render(h.document("A & B", [h.h1("Hi"), h.Element(tag: "br"), h.ul([h.li("one"), h.li("two")])]))
+print h.render(h.Element(tag: "input", attrs: [h.Attribute(name: "data-x_y", value: "' onload='")]))
+print h.render(h.Text(content: "<script>"))
+print h.escape("&<>\"'")

@@ -661,8 +661,8 @@ print "page"
 
 Fix: build it with `lucid build --target web`, and open the page that loads the `.js` file.
 
-## E0907: `spawn` or `std.net` cannot run on the web
+## E0907: `spawn`, `std.net`, or `std.http` cannot run on the web
 
-A program built with `lucid build --target web` uses `spawn` or `use std.net`. Threads in WebAssembly need shared memory, which browsers allow only on pages with cross-origin isolation headers, and a page cannot open a socket, by decision 176. Only a build for the web finds this, so `lucid check` and `lucid run` do not report it. The test is `web_rejects_spawn`.
+A program built with `lucid build --target web` uses `spawn`, `use std.net`, or `use std.http`. Threads in WebAssembly need shared memory, which browsers allow only on pages with cross-origin isolation headers, and a page cannot open a socket, by decision 176. Only a build for the web finds this, so `lucid check` and `lucid run` do not report it. The test is `web_rejects_spawn`.
 
 Fix: build the program without `--target web`, or do the work in one thread. A page talks to a server with the browser's own requests.

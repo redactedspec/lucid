@@ -209,6 +209,22 @@ Level: **Read**, 2026-11-08, for decision 185.
 
 `tests/run/std_net.lcd` checks each failure on Windows. A connection to a closed port there takes about 2 seconds to be refused, since Windows retries the connection. Not checked: Linux and macOS, which wait for M8.
 
+### HTTP server (M7)
+
+Level: **Read**, 2026-11-08, for decisions 178 and 186.
+
+- RFC 9112 §3.2 ([text](https://www.rfc-editor.org/rfc/rfc9112.html)): "A server MUST respond with a 400 (Bad Request) status code to any HTTP/1.1 request message that lacks a Host header field" or that contains more than one.
+- RFC 9112 §5.1: "No whitespace is allowed between the field name and colon", and a server MUST reject such a request with 400.
+- RFC 9112 §5.2: a server MUST either reject a request with obs-fold with 400, or replace each fold with spaces.
+- RFC 9112 §6.1: "A server that receives a request message with a transfer coding it does not understand SHOULD respond with 501 (Not Implemented)." "A server MAY reject a request that contains both Content-Length and Transfer-Encoding", and the server MUST close the connection after responding to one.
+- RFC 9112 §7.1.1: "A recipient MUST ignore unrecognized chunk extensions." §7.1.2: a recipient that removes the chunked coding "MAY selectively retain or discard the received trailer fields".
+- RFC 9112 §9.3: "HTTP/1.1 defaults to the use of persistent connections". §9.6 defines the `close` option.
+- RFC 9110 §9.1 ([text](https://www.rfc-editor.org/rfc/rfc9110.html)): "All general-purpose servers MUST support the methods GET and HEAD." §10.2.1: "An origin server MUST generate an Allow header field in a 405 (Method Not Allowed) response."
+- RFC 9110 §8.6: a server MUST NOT send `Content-Length` in a 1xx or 204 response, and in a 304 only with the length a 200 would have. Lucid sends none on 304, which is allowed.
+- RFC 6585 §5 ([text](https://www.rfc-editor.org/rfc/rfc6585.html)): 431 means "the server is unwilling to process the request because its header fields are too large."
+
+`tests/run/std_http.lcd` checks each refusal and each kind of body on Windows, over a real socket. A refusal can close the connection with bytes still unread, which on some systems resets the connection before the client reads the answer. Eight runs in a row passed on Windows. Not checked: Linux and macOS, which wait for M8, and the load test, which is the next step.
+
 ### First Lucid benchmarks (M2)
 
 Level: **Read** (own measurement). `sh benchmarks/run.sh`, 2026-11-05, on the development machine: 15 paired rounds, so drift hits every build alike. Lucid includes JIT compile time. Rust is `rustc -O`, and "Rust checked" adds `-C overflow-checks=on`.

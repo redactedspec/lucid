@@ -936,13 +936,14 @@ fn copy_dir(from: &Path, to: &Path) {
 /// "WebAssembly" in docs/compiler.md.
 #[test]
 fn web_programs_match_run() {
-    const HOST_ONLY: [&str; 9] = [
+    const HOST_ONLY: [&str; 10] = [
         "channel_threads",
         "spawn",
         "spawn_overflow",
         "spawn_trap",
         "std_args_env",
         "std_fs",
+        "std_http",
         "std_net",
         "std_time",
         "unsafe",
@@ -1058,7 +1059,7 @@ fn web_rejects_foreign_code() {
 fn web_rejects_spawn() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("web_spawn");
     fs::create_dir_all(&dir).expect("cannot make directory");
-    for (name, says) in [("spawn", "`spawn`"), ("std_net", "`std.net`")] {
+    for (name, says) in [("spawn", "`spawn`"), ("std_net", "`std.net`"), ("std_http", "`std.http`")] {
         let file = format!("{name}.lcd");
         fs::copy(repo().join("tests/run").join(&file), dir.join(&file)).expect("cannot copy");
         let output = lucid(&dir, &["build", "--target", "web", &file]);

@@ -1,0 +1,96 @@
+# The `std.http` server, by decision 178. A client on a spawned thread sends
+# raw bytes, and `answer` serves that one connection on this thread.
+
+use std.html as h
+use std.http
+use std.http.Request
+use std.http.Response
+use std.net
+use std.net.Connection
+use std.net.Listener
+
+type Status
+    ok: bool
+    query: text
+
+task home(request: Request) -> Response
+    return http.page(h.document("Home", [h.h1("Tom & Jerry <3")]))
+
+task status(request: Request) -> Response
+    return http.json(Status(ok: true, query: request.query))
+
+task echo(request: Request) -> Response
+    let body = request.body_text() else "not text"
+    let kind = request.header("Content-Type") else "none"
+    return http.text("{kind}: {body}")
+
+# Sends `raw`, and gives all that comes back before the server closes.
+task client(port: int, raw: text) -> list[byte] or net.NetError
+    let connection = try net.connect("127.0.0.1", port)
+    try connection.write(raw.bytes())
+    var got: list[byte] = []
+    while true
+        let data = try connection.read(65536)
+        if data.is_empty()
+            return got
+        for b in data
+            got.push(b)
+    return got
+
+# The connection closes when this task ends and drops it.
+task serve_one(app: http.App, listener: Listener)
+    let connection = listener.accept()
+    if connection is Connection
+        app.answer(connection)
+
+# Serves one connection that sends `raw`, and tells if the reply is `want`.
+task check(app: http.App, listener: Listener, raw: text, want: text) -> bool
+    let talk = spawn client(listener.port, raw)
+    serve_one(app, listener)
+    let got = talk.wait()
+    if got is net.NetError
+        return false
+    return got == want.bytes()
+
+var app = http.App()
+app.get("/", home)
+app.get("/status", status)
+app.post("/echo", echo)
+let listener = try net.listen(0)
+
+let page = "<!doctype html><html><head><meta charset=\"utf-8\"><title>Home</title></head><body><h1>Tom &amp; Jerry &lt;3</h1></body></html>"
+print check(app, listener, "GET / HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n", "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {page.bytes().len()}\r\nConnection: close\r\n\r\n{page}")
+
+# Two requests on one connection, the second a HEAD, which has no body.
+let json = "{{\"ok\":true,\"query\":\"a=1\"}}"
+let first = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {json.len()}\r\n\r\n{json}"
+print check(app, listener, "GET /status?a=1 HTTP/1.1\r\nHost: a\r\n\r\nHEAD /status?a=1 HTTP/1.1\r\nhost: a\r\nConnection: close\r\n\r\n", "{first}HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {json.len()}\r\nConnection: close\r\n\r\n")
+
+# A body by length, and by chunks with an extension and a trailer.
+let echoed = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 9\r\nConnection: close\r\n\r\nx: héllo"
+print check(app, listener, "POST /echo HTTP/1.1\r\nHost: a\r\nContent-Type: x\r\nContent-Length: 6\r\nConnection: close\r\n\r\nhéllo", echoed)
+print check(app, listener, "POST /echo HTTP/1.1\r\nHost: a\r\nContent-Type:  x \r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3;a=b\r\nhé\r\n3\r\nllo\r\n0\r\nT: 1\r\n\r\n", echoed)
+
+# No route, and the wrong method.
+print check(app, listener, "GET /nope HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n", "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nNot Found")
+print check(app, listener, "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", "HTTP/1.1 405 Method Not Allowed\r\nAllow: GET, HEAD\r\nContent-Length: 18\r\nConnection: close\r\n\r\nMethod Not Allowed")
+
+# Requests that break the rules are refused, and the connection closes, even
+# with keep-alive.
+let bad = "HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\nConnection: close\r\n\r\nBad Request"
+print check(app, listener, "POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: 3\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n", bad)
+print check(app, listener, "POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: 1\r\nContent-Length: 1\r\n\r\nxx", bad)
+print check(app, listener, "GET / HTTP/1.1\r\nHost: a\r\nX: 1\r\n  folded\r\n\r\n", bad)
+print check(app, listener, "GET / HTTP/1.1\r\nHost : a\r\n\r\n", bad)
+print check(app, listener, "GET / HTTP/1.1\r\n\r\n", bad)
+print check(app, listener, "GET / HTTP/1.1\r\nHost: a\r\nHost: b\r\n\r\n", bad)
+print check(app, listener, "GET http://a/ HTTP/1.1\r\nHost: a\r\n\r\n", bad)
+print check(app, listener, "GET / HTTP/2\r\nHost: a\r\n\r\n", bad)
+print check(app, listener, "POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: -1\r\n\r\n", bad)
+print check(app, listener, "POST /echo HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n", bad)
+print check(app, listener, "POST /echo HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip\r\n\r\n", "HTTP/1.1 501 Not Implemented\r\nContent-Length: 15\r\nConnection: close\r\n\r\nNot Implemented")
+print check(app, listener, "POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: 1048577\r\n\r\n", "HTTP/1.1 413 Content Too Large\r\nContent-Length: 17\r\nConnection: close\r\n\r\nContent Too Large")
+var long = "x"
+while long.len() < 17000
+    long = "{long}{long}"
+print check(app, listener, "GET / HTTP/1.1\r\nHost: a\r\nX: {long}\r\n\r\n", "HTTP/1.1 431 Request Header Fields Too Large\r\nContent-Length: 31\r\nConnection: close\r\n\r\nRequest Header Fields Too Large")

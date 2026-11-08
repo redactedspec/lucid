@@ -1,0 +1,424 @@
+# An HTTP/1.1 server, written in Lucid on `std.net`, by decision 178. It
+# reads requests strictly, as RFC 9112 allows, so that a proxy in front of it
+# cannot read one request where it reads two.
+
+use std.html as markup
+use std.json as encoding
+use std.net
+use std.net.Connection
+use std.net.NetError
+use std.time
+
+## A header: its name, and its value. A request's names are in lowercase.
+public type Header
+    name: text
+    value: text
+
+## What a client asked for. `path` is the target up to any `?`, and `query`
+## the rest, with no `?`.
+public type Request
+    method: text
+    path: text
+    query: text = ""
+    headers: list[Header] = []
+    body: list[byte] = []
+
+## What the server answers.
+public type Response
+    status: int
+    headers: list[Header] = []
+    body: list[byte] = []
+
+type Route
+    method: text
+    path: text
+    handler: task(Request) -> Response
+
+## The routes of a server, by method and exact path.
+public type App
+    routes: list[Route] = []
+
+# What reading a request gave.
+choice Read
+    Got(request: Request, close: bool)
+    # Answer with this status, then close.
+    Bad(status: int)
+    # The client closed, went silent, or failed: close with no answer.
+    Gone
+
+unsafe extern task lucid_bytes_valid(data: list[byte]) -> bool
+unsafe extern task lucid_bytes_text(data: list[byte]) -> text
+
+# The most that a request head and a request body can hold.
+let HEAD_LIMIT = 16384
+let BODY_LIMIT = 1048576
+
+## Runs `handler` for a `GET` of `path`, and for a `HEAD`, with no body.
+public task get(change self: App, path: text, handler: task(Request) -> Response)
+    self.routes.push(Route(method: "GET", path: path, handler: handler))
+
+## Runs `handler` for a `POST` of `path`.
+public task post(change self: App, path: text, handler: task(Request) -> Response)
+    self.routes.push(Route(method: "POST", path: path, handler: handler))
+
+## A page of HTML, with status 200.
+public task page(node: markup.Node) -> Response
+    return with_type("text/html; charset=utf-8", "<!doctype html>{markup.render(node)}")
+
+## A value as JSON, with status 200.
+public task json[T: Json](value: T) -> Response
+    return with_type("application/json", encoding.write(value))
+
+## Plain text, with status 200.
+public task text(content: text) -> Response
+    return with_type("text/plain; charset=utf-8", content)
+
+task with_type(kind: text, content: text) -> Response
+    return Response(status: 200, headers: [Header(name: "Content-Type", value: kind)], body: content.bytes())
+
+## The value of the first header named `name`, in any case.
+public task header(self: Request, name: text) -> text?
+    let wanted = name.lower()
+    for h in self.headers
+        if h.name == wanted
+            return h.value
+    return none
+
+## The body as text, or `none` if it is not UTF-8.
+public task body_text(self: Request) -> text?
+    return to_text(self.body)
+
+## Serves HTTP/1.1 on `port`, with each connection on a thread of its own, and
+## at most 256 at once. Only this machine can connect, unless `host` is
+## "0.0.0.0". It gives a value only if it cannot listen.
+public task serve(self: App, port: int, host: text = "127.0.0.1") -> none or NetError
+    let listener = try net.listen(port, host: host)
+    # Each connection holds a slot while it runs, so the 257th waits here.
+    let slots = channel[bool](256)
+    while true
+        slots.send(true)
+        let connection = listener.accept()
+        if connection is Connection
+            spawn run(self, connection, slots)
+        else
+            let freed = slots.receive()
+
+task run(app: App, connection: Connection, slots: channel[bool])
+    app.answer(connection)
+    let freed = slots.receive()
+
+## Answers the requests on `connection` until it closes, goes silent for 30
+## seconds, or sends a request that breaks the rules, as `serve` does for
+## each connection.
+public task answer(self: App, connection: Connection)
+    if connection.set_timeout(time.seconds(30)) is NetError
+        return
+    var buffer: list[byte] = []
+    while true
+        let got = read_request(connection, change buffer)
+        match got
+            Gone -> return
+            Bad(status) ->
+                let refused = Response(status: status, body: reason(status).bytes())
+                send(connection, refused, false, true) else none
+                return
+            Got(request, close) ->
+                let response = route(self, request)
+                if send(connection, response, request.method == "HEAD", close) is NetError
+                    return
+                if close
+                    return
+
+# The response of the handler for the request's method and path.
+task route(app: App, request: Request) -> Response
+    var method = request.method
+    if method == "HEAD"
+        method = "GET"
+    var allowed = ""
+    for r in app.routes
+        if r.path == request.path
+            if r.method == method
+                let handler = r.handler
+                return handler(request)
+            allowed = if allowed.is_empty() then r.method else "{allowed}, {r.method}"
+            if r.method == "GET"
+                allowed = "{allowed}, HEAD"
+    if allowed.is_empty()
+        return Response(status: 404, body: reason(404).bytes())
+    return Response(status: 405, headers: [Header(name: "Allow", value: allowed)], body: reason(405).bytes())
+
+# Writes `response`, with a `Content-Length`. A handler cannot set the length
+# or the framing itself, nor put a line break in a header, which would let it
+# write a second response.
+task send(connection: Connection, response: Response, head_only: bool, close: bool) -> none or NetError
+    let status = response.status
+    expect status >= 200 and status <= 599
+    var head = "HTTP/1.1 {status} {reason(status)}\r\n"
+    for h in response.headers
+        let refused = bad_header(h)
+        expect refused == ""
+        head = "{head}{h.name}: {h.value}\r\n"
+    # RFC 9110 forbids a length on these two, which have no body.
+    if status == 204 or status == 304
+        expect response.body.is_empty()
+    else
+        head = "{head}Content-Length: {response.body.len()}\r\n"
+    if close
+        head = "{head}Connection: close\r\n"
+    var data = "{head}\r\n".bytes()
+    if not head_only
+        for b in response.body
+            data.push(b)
+    try connection.write(data)
+
+# Why a handler's header is refused, or "".
+task bad_header(h: Header) -> text
+    if not is_token(h.name)
+        return "std.http cannot send a header with this name"
+    let name = h.name.lower()
+    if name == "content-length" or name == "transfer-encoding" or name == "connection"
+        return "std.http sets this header itself"
+    for c in h.value
+        if c == "\r" or c == "\n"
+            return "std.http cannot send a line break in a header"
+    return ""
+
+# The words for a status, which also serve as the body of a refusal.
+task reason(status: int) -> text
+    return match status
+        200 -> "OK"
+        201 -> "Created"
+        204 -> "No Content"
+        301 -> "Moved Permanently"
+        302 -> "Found"
+        303 -> "See Other"
+        304 -> "Not Modified"
+        400 -> "Bad Request"
+        401 -> "Unauthorized"
+        403 -> "Forbidden"
+        404 -> "Not Found"
+        405 -> "Method Not Allowed"
+        413 -> "Content Too Large"
+        431 -> "Request Header Fields Too Large"
+        500 -> "Internal Server Error"
+        501 -> "Not Implemented"
+        503 -> "Service Unavailable"
+        _ -> "Status"
+
+# Reads the next request from `buffer`, and from `connection` when it needs
+# more. What follows the request stays in `buffer`, for the next one.
+task read_request(connection: Connection, change buffer: list[byte]) -> Read
+    var end = -1
+    var from = 0
+    while end < 0
+        end = find_blank_line(buffer, from)
+        if end < 0
+            if buffer.len() > HEAD_LIMIT
+                return Bad(status: 431)
+            from = max(0, buffer.len() - 3)
+            if not more(connection, change buffer)
+                return Gone
+    if end > HEAD_LIMIT
+        return Bad(status: 431)
+    let raw = to_text(buffer[0..end])
+    buffer = buffer[end + 4..buffer.len()]
+    if raw is none
+        return Bad(status: 400)
+    let lines = raw.split("\r\n")
+    let start = lines[0].split(" ")
+    if start.len() != 3 or not is_token(start[0]) or not starts(start[1], "/")
+        return Bad(status: 400)
+    let version = start[2]
+    if version != "HTTP/1.1" and version != "HTTP/1.0"
+        return Bad(status: 400)
+    var headers: list[Header] = []
+    for line in lines[1..lines.len()]
+        let h = parse_header(line)
+        if h is none
+            return Bad(status: 400)
+        headers.push(h)
+    var request = Request(method: start[0], path: start[1], headers: headers)
+    let mark = index_of(request.path, "?")
+    if mark >= 0
+        request.query = request.path[mark + 1..request.path.len()]
+        request.path = request.path[0..mark]
+    var hosts = 0
+    var lengths = 0
+    var length = 0
+    var chunked = false
+    var close = version == "HTTP/1.0"
+    for h in headers
+        if h.name == "host"
+            hosts += 1
+        else if h.name == "content-length"
+            lengths += 1
+            let n = h.value.to_int()
+            if n is none or n < 0
+                return Bad(status: 400)
+            length = n
+        else if h.name == "transfer-encoding"
+            if chunked or h.value.lower() != "chunked"
+                return Bad(status: 501)
+            chunked = true
+        else if h.name == "connection"
+            for option in h.value.split(",")
+                if trim(option).lower() == "close"
+                    close = true
+    # RFC 9112 asks for exactly one `Host` in HTTP/1.1. Two lengths, or a
+    # length with chunks, are how requests are smuggled past a proxy.
+    if (version == "HTTP/1.1" and hosts != 1) or hosts > 1 or lengths > 1 or (chunked and lengths > 0)
+        return Bad(status: 400)
+    if length > BODY_LIMIT
+        return Bad(status: 413)
+    if chunked
+        let body = read_chunks(connection, change buffer)
+        match body
+            Got(chunks, _) ->
+                request.body = chunks.body
+                return Got(request: request, close: close)
+            _ -> return body
+    while buffer.len() < length
+        if not more(connection, change buffer)
+            return Gone
+    request.body = buffer[0..length]
+    buffer = buffer[length..buffer.len()]
+    return Got(request: request, close: close)
+
+# The body of a chunked request, in the `body` of a `Got`. Chunk extensions
+# and trailer fields are read and dropped, as RFC 9112 allows.
+task read_chunks(connection: Connection, change buffer: list[byte]) -> Read
+    var body: list[byte] = []
+    while true
+        let line = read_line(connection, change buffer)
+        if line is none
+            return Gone
+        var size_part = line
+        let semi = index_of(line, ";")
+        if semi >= 0
+            size_part = line[0..semi]
+        let size = hex(trim(size_part))
+        if size is none
+            return Bad(status: 400)
+        if size == 0
+            while true
+                let trailer = read_line(connection, change buffer)
+                if trailer is none
+                    return Gone
+                if trailer.is_empty()
+                    break
+            return Got(request: Request(method: "", path: "", body: body), close: false)
+        if body.len() + size > BODY_LIMIT
+            return Bad(status: 413)
+        while buffer.len() < size + 2
+            if not more(connection, change buffer)
+                return Gone
+        if buffer[size] != 13 or buffer[size + 1] != 10
+            return Bad(status: 400)
+        for i in 0..size
+            body.push(buffer[i])
+        buffer = buffer[size + 2..buffer.len()]
+    return Gone
+
+# The next line in `buffer`, with no CRLF, or `none` if the client went, or
+# sent a line longer than a request head may be.
+task read_line(connection: Connection, change buffer: list[byte]) -> text?
+    var from = 0
+    while true
+        for i in from..buffer.len() - 1
+            if buffer[i] == 13 and buffer[i + 1] == 10
+                let line = to_text(buffer[0..i])
+                buffer = buffer[i + 2..buffer.len()]
+                return line
+        if buffer.len() > HEAD_LIMIT
+            return none
+        from = max(0, buffer.len() - 1)
+        if not more(connection, change buffer)
+            return none
+    return none
+
+# Reads more bytes into `buffer`. False if the client closed, went silent,
+# or failed.
+task more(connection: Connection, change buffer: list[byte]) -> bool
+    let data = connection.read(65536)
+    if data is NetError or data.is_empty()
+        return false
+    for b in data
+        buffer.push(b)
+    return true
+
+# Where the first CRLF CRLF at or after `from` starts, or -1.
+task find_blank_line(data: list[byte], from: int) -> int
+    for i in from..data.len() - 3
+        if data[i] == 13 and data[i + 1] == 10 and data[i + 2] == 13 and data[i + 3] == 10
+            return i
+    return -1
+
+# A header line, with its name in lowercase and its value with no spaces
+# around it. A folded line, a space before the colon, a stray CR or LF, and
+# a name that is not a token give `none`.
+task parse_header(line: text) -> Header?
+    let colon = index_of(line, ":")
+    if colon < 1 or index_of(line, "\r") >= 0 or index_of(line, "\n") >= 0
+        return none
+    let name = line[0..colon]
+    if not is_token(name)
+        return none
+    return Header(name: name.lower(), value: trim(line[colon + 1..line.len()]))
+
+# True if `name` is a token of RFC 9110: no space, and no separator.
+task is_token(name: text) -> bool
+    if name.is_empty()
+        return false
+    for c in name
+        let plain = (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9")
+        if not plain and index_of("!#$%&'*+-.^_`|~", c) < 0
+            return false
+    return true
+
+# The place of the first `part`, a single character, in `content`, or -1.
+task index_of(content: text, part: text) -> int
+    var i = 0
+    for c in content
+        if c == part
+            return i
+        i += 1
+    return -1
+
+task starts(value: text, prefix: text) -> bool
+    return value.len() >= prefix.len() and value[0..prefix.len()] == prefix
+
+# `content` with no spaces or tabs at either end.
+task trim(content: text) -> text
+    var start = 0
+    var end = content.len()
+    while start < end and is_blank(content[start..start + 1])
+        start += 1
+    while end > start and is_blank(content[end - 1..end])
+        end -= 1
+    return content[start..end]
+
+task is_blank(c: text) -> bool
+    return c == " " or c == "\t"
+
+# The number that hex digits spell, or `none`. At most 15 digits, so that it
+# fits.
+task hex(digits: text) -> int?
+    if digits.is_empty() or digits.len() > 15
+        return none
+    var n = 0
+    for c in digits.lower()
+        let digit = index_of("0123456789abcdef", c)
+        if digit < 0
+            return none
+        n = n * 16 + digit
+    return n
+
+task max(a: int, b: int) -> int
+    return if a > b then a else b
+
+task to_text(data: list[byte]) -> text?
+    # Both tasks only read `data`, and the second builds a new text.
+    unsafe
+        if not lucid_bytes_valid(data)
+            return none
+        return lucid_bytes_text(data)
