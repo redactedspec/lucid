@@ -85,7 +85,7 @@ Hooks load when a session starts, so a change to them applies from the next sess
 
 ## Not useful for Lucid now
 
-Skipped on purpose: agent teams (about 7x the tokens in plan mode), cloud sessions and GitHub features (the repository is private, and pushed only when the owner asks), MCP servers, and scheduled tasks. Reconsider if a real need appears.
+Skipped on purpose: agent teams (about 7x the tokens in plan mode), cloud sessions and GitHub features (the repository is a private GitHub repository, used only for push), MCP servers, and scheduled tasks. Reconsider if a real need appears.
 
 ## Sources
 
