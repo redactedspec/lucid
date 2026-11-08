@@ -58,7 +58,7 @@ export const features: Feature[] = [
     short: '`lucid run` compiles with a JIT and runs at once. `lucid build` writes a standalone executable.',
     body: [
       'There is no interpreter. `lucid run` compiles the program to machine code in memory with Cranelift and runs it. `lucid build` writes the same code to a standalone program, with the runtime linked in.',
-      'Today `lucid build` makes a Windows x86-64 `.exe`. Linux x86-64 is the next step of M8.',
+      '`lucid build` makes a program for the machine it runs on: a Windows x86-64 `.exe`, or a Linux x86-64 executable.',
     ],
     limits: 'Cranelift compiles fast but optimizes less than LLVM, so some tight numeric loops run slower than in Rust or C++.',
     terminal: [

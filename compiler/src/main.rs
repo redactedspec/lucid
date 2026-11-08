@@ -125,7 +125,7 @@ fn cli(args: &[String]) -> ExitCode {
             }
         } else if build && diags.is_empty() {
             match native::object(&program, &source) {
-                Ok(object) => return link(&object, &out_name(path, "exe")),
+                Ok(object) => return link(&object, &out_name(path, EXE)),
                 Err(errors) => diags = errors,
             }
         } else if run && diags.is_empty() {
@@ -148,8 +148,11 @@ fn web_only(source: &Source) -> Vec<Diagnostic> {
     source.web_only.map(error).into_iter().collect()
 }
 
+/// The extension of a built program: `exe` on Windows, none on Linux.
+const EXE: &str = std::env::consts::EXE_EXTENSION;
+
 /// What `lucid build` writes to the current directory: named after the file,
-/// or after the directory of the package, with this extension.
+/// or after the directory of the package, with this extension, if any.
 fn out_name(path: &str, extension: &str) -> String {
     let path = std::path::Path::new(path);
     let stem = if path.is_dir() {
@@ -158,7 +161,9 @@ fn out_name(path: &str, extension: &str) -> String {
     } else {
         path.file_stem().map(|name| name.to_os_string())
     };
-    format!("{}.{extension}", stem.unwrap_or("main".into()).display())
+    let stem = stem.unwrap_or("main".into());
+    let dot = if extension.is_empty() { "" } else { "." };
+    format!("{}{dot}{extension}", stem.display())
 }
 
 /// Writes the output of `lucid build --target web`. As in `link`, a failure
@@ -175,29 +180,36 @@ fn write_script(script: &str, name: &str) -> ExitCode {
 
 /// Links an object file from `native::object` with the embedded runtime, into
 /// `exe`. A failure here is in the system, not the program, so it has no code.
-#[cfg(windows)]
 fn link(object: &[u8], exe: &str) -> ExitCode {
     const RUNTIME: &[u8] = include_bytes!(env!("LUCID_RT_LIB"));
     let fail = |problem: String| {
         emit(std::io::stderr(), &format!("lucid: {problem}\n"));
         ExitCode::FAILURE
     };
-    let Some(linker) = find_msvc_tools::find_tool("x86_64-pc-windows-msvc", "link.exe") else {
-        return fail(
-            "cannot find the MSVC linker: install Visual Studio Build Tools, with the C++ tools"
-                .into(),
-        );
+    let mut command = match linker() {
+        Ok(command) => command,
+        Err(problem) => return fail(problem.into()),
     };
-    let dir = std::env::temp_dir().join(format!("lucid-build-{}", std::process::id()));
-    let linked = std::fs::create_dir_all(&dir)
-        .and_then(|()| std::fs::write(dir.join("main.obj"), object))
-        .and_then(|()| std::fs::write(dir.join("lucid_rt.lib"), RUNTIME))
+    let dir = match stage() {
+        Ok(dir) => dir,
+        Err(e) => return fail(format!("cannot make a staging directory: {e}")),
+    };
+    let (object_file, runtime_file) = if cfg!(windows) {
+        (dir.join("main.obj"), dir.join("lucid_rt.lib"))
+    } else {
+        (dir.join("main.o"), dir.join("liblucid_rt.a"))
+    };
+    let linked = std::fs::write(&object_file, object)
+        .and_then(|()| std::fs::write(&runtime_file, RUNTIME))
         .and_then(|()| {
-            let mut command = linker.to_command();
-            command.args(["/NOLOGO", "/SUBSYSTEM:CONSOLE"]);
-            command.arg(format!("/STACK:{}", lucid_rt::EXE_STACK_BYTES));
-            command.arg(format!("/OUT:{exe}"));
-            command.arg(dir.join("main.obj")).arg(dir.join("lucid_rt.lib"));
+            if cfg!(windows) {
+                command.args(["/NOLOGO", "/SUBSYSTEM:CONSOLE"]);
+                command.arg(format!("/STACK:{}", lucid_rt::EXE_STACK_BYTES));
+                command.arg(format!("/OUT:{exe}"));
+            } else {
+                command.arg("-o").arg(exe);
+            }
+            command.arg(&object_file).arg(&runtime_file);
             command.args(env!("LUCID_RT_LIBS").split_whitespace()).output()
         });
     let _ = std::fs::remove_dir_all(&dir);
@@ -212,10 +224,41 @@ fn link(object: &[u8], exe: &str) -> ExitCode {
     }
 }
 
+#[cfg(windows)]
+fn linker() -> Result<std::process::Command, &'static str> {
+    find_msvc_tools::find_tool("x86_64-pc-windows-msvc", "link.exe")
+        .map(|tool| tool.to_command())
+        .ok_or("cannot find the MSVC linker: install Visual Studio Build Tools, with the C++ tools")
+}
+
+/// The system `cc` finds the C start files and libc, by decision 191.
 #[cfg(not(windows))]
-fn link(_object: &[u8], _exe: &str) -> ExitCode {
-    emit(std::io::stderr(), "lucid: `lucid build` works only on Windows until M8\n");
-    ExitCode::FAILURE
+fn linker() -> Result<std::process::Command, &'static str> {
+    Ok(std::process::Command::new("cc"))
+}
+
+/// Makes a new directory with a random name for `link`, that only this user
+/// can open, by decision 191. It must not exist yet, so no one else can have
+/// planted files in it.
+fn stage() -> std::io::Result<std::path::PathBuf> {
+    use std::hash::{BuildHasher, RandomState};
+    let builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    let builder = {
+        let mut builder = builder;
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        builder
+    };
+    let mut tries = 0;
+    loop {
+        // Each `RandomState` has new keys, seeded from the system.
+        let name = format!("lucid-build-{:016x}", RandomState::new().hash_one(std::process::id()));
+        let dir = std::env::temp_dir().join(name);
+        match builder.create(&dir) {
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && tries < 8 => tries += 1,
+            made => return made.map(|()| dir),
+        }
+    }
 }
 
 /// Reports compile errors, as data on stdout with `json`.
@@ -763,5 +806,20 @@ mod tests {
         assert!(!kept(b"let a = [1, 2] # nte\n"), "a comment changed");
         assert!(!kept(b"let a = [12] # note\n"), "two tokens joined");
         assert!(!kept(b"let a = [1, 2] # not\xC3\n"), "bytes not UTF-8");
+    }
+
+    /// By decision 191, each build stages in a new directory of its own.
+    #[test]
+    fn staging_is_new_and_private() {
+        let (one, two) = (stage().unwrap(), stage().unwrap());
+        assert_ne!(one, two);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&one).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o700);
+        }
+        std::fs::remove_dir(one).unwrap();
+        std::fs::remove_dir(two).unwrap();
     }
 }

@@ -38,12 +38,12 @@ test "a test can return"
     return
     expect false
 
-unsafe extern task ExitProcess(code: u32)
+unsafe extern task exit(code: i32)
 
 test "exit code 0 is not a pass"
     # Leaving the process early must not count as passing.
     unsafe
-        ExitProcess(0.to_u32())
+        exit(0.to_i32())
     expect false
 
 test "last one still runs"

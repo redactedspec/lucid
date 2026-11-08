@@ -635,7 +635,7 @@ Fix: call the task with the same type it was given, or remove the type growth.
 
 ## E0904: No library has this foreign task
 
-An `extern` task must be in the C runtime or `kernel32`.
+An `extern` task must be in the C library: the C runtime or `kernel32` on Windows, or libc or libm on Linux.
 
 ```lucid
 unsafe extern task no_such_symbol_anywhere(x: int) -> int

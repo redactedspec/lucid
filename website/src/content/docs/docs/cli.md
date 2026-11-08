@@ -25,7 +25,7 @@ lucid fmt [--check] [PATH]
 | `lucid check --costs` | Lists each place a value is copied or counted, from the ownership pass |
 | `lucid check --unsafe` | Lists every `unsafe` block and `extern` task, in the program and all it imports |
 | `lucid test` | Runs the `test` blocks of a file, or of every file in a package's `src` |
-| `lucid build` | Writes a standalone program, `NAME.exe`, to the current directory. Windows x86-64 today |
+| `lucid build` | Writes a standalone program to the current directory: `NAME.exe` on Windows, `NAME` on Linux. Windows and Linux x86-64 |
 | `lucid build --target web` | Writes `NAME.js`, which holds the program as WebAssembly and loads it in a browser or Node |
 | `lucid fmt` | Puts files in the one canonical layout. `--check` changes nothing, and lists files that would change |
 | `lucid fix` | Applies the fixes that diagnostics show as `fix:` |

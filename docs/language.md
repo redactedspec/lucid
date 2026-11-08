@@ -724,7 +724,7 @@ unsafe
     print strlen(raw.pointer())
 ```
 
-An `extern` task is a C function, found by its name in the C runtime or `kernel32`, or else error E0904. It takes and gives numbers, `bool`, and `pointer[byte]`, and may give nothing. It sits at top level, and it has no `change`, `take`, `self`, defaults, or type parameters. A C type must match the declared width: a C `int` is `i32`. A name that starts with `lucid_` is kept for the runtime, which only `std` can call.
+An `extern` task is a C function, found by its name in the C library, which is the C runtime or `kernel32` on Windows, or libc or libm on Linux, or else error E0904. It takes and gives numbers, `bool`, and `pointer[byte]`, and may give nothing. It sits at top level, and it has no `change`, `take`, `self`, defaults, or type parameters. A C type must match the declared width: a C `int` is `i32`. A name that starts with `lucid_` is kept for the runtime, which only `std` can call.
 
 Only an `unsafe` block can call an `extern` task or `.pointer()`, or else error E0330. An `extern` task is not a value, since a task type says nothing of `unsafe`. A lambda or nested task inside the block is outside it. The block is a block like the body of an `if`, with its own scope. It needs a `#` comment on the line above, or at the end of its line, or else error E0332, and the comment says why it is sound.
 

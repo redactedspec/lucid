@@ -627,7 +627,7 @@ unsafe
     print strlen(raw.pointer())
 ```
 
-- An `extern` task is a C function in the C runtime or `kernel32`. It takes and gives numbers, `bool`, and `pointer[byte]`. A C `int` is `i32`.
+- An `extern` task is a C function in the C runtime or `kernel32` on Windows, or in libc or libm on Linux. It takes and gives numbers, `bool`, and `pointer[byte]`. A C `int` is `i32`.
 - Only an `unsafe` block can call one, or `.pointer()`. It is not a value. The block needs a `#` comment above it that says why it is sound.
 - `.pointer()` works on a `list[byte]` in a name, and is valid until the list changes. A C string is `.bytes()` with a zero byte pushed.
 - `lucid check --unsafe file.lcd` lists every site.
@@ -731,7 +731,7 @@ markdown = { path = "../markdown", allow = [] }
 - Outside `files`, `std.fs` gives `Failed`, and `env.get` of a name not in `env` traps. A file with no `lucid.toml` has every permission.
 
 - `lucid run`, `lucid build`, `lucid check`, and `lucid test` take a file or a package directory. With no path they use the package around the current directory.
-- `lucid build` writes a standalone program, `NAME.exe`, to the current directory. `lucid build --target web` writes `NAME.js` instead, for a page or `node`. A page loads it with `<script src="NAME.js">`. There a user `extern` is E0905.
+- `lucid build` writes a standalone program, `NAME.exe` on Windows or `NAME` on Linux, to the current directory. `lucid build --target web` writes `NAME.js` instead, for a page or `node`. A page loads it with `<script src="NAME.js">`. There a user `extern` is E0905.
 - `lucid fix` makes the fixes that errors show as `fix:`, such as a misspelled name. Run it again after a fix of a lexer error.
 - `lucid fmt` puts a file or package in the one layout. `lucid fmt --check` only lists what would change.
 - `lucid context std.fs` prints the public tasks and types of a module, a file, or a package, with their `##` doc comments.

@@ -11,6 +11,7 @@
 //! `tests/package/x/` must print `expected.out` and exit 0, or `expected.err`
 //! and exit 1, under `lucid run x`. A directory with neither is a dependency.
 
+use std::env::consts::EXE_SUFFIX;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -517,7 +518,7 @@ fn todo_example_works() {
 fn todo_works(dir: &Path, built: bool) {
     let run = |args: &[&str]| {
         let output = if built {
-            Command::new(dir.join("todo.exe")).args(args).current_dir(dir).output()
+            Command::new(dir.join(format!("todo{EXE_SUFFIX}"))).args(args).current_dir(dir).output()
         } else {
             let args: Vec<&str> = ["run", "todo.lcd"].iter().chain(args).copied().collect();
             Ok(lucid(dir, &args))
@@ -577,7 +578,7 @@ fn website_serves_under_load() {
     assert!(output.status.success(), "{}", text(&output.stderr));
     // A free port, given back so that the server can take it.
     let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-    let mut server = Command::new(dir.join("website.exe"));
+    let mut server = Command::new(dir.join(format!("website{EXE_SUFFIX}")));
     server.arg(port.to_string()).stdout(Stdio::null()).stderr(Stdio::piped());
     let mut server = Kill(server.spawn().expect("cannot start the website"));
     let address = format!("127.0.0.1:{port}");
@@ -627,7 +628,9 @@ fn website_serves_under_load() {
 }
 
 /// A built program gives what `lucid run` gives: traces, the stack limit,
-/// foreign calls, and threads each depend on how the program starts.
+/// foreign calls, threads, and signals each depend on how the program starts.
+/// `std_http_client` writes to sockets that the other end closed, which on
+/// Linux ends a program that does not ignore SIGPIPE.
 #[test]
 fn built_programs_match_run() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("built");
@@ -639,13 +642,15 @@ fn built_programs_match_run() {
         ("trap", "spawn_overflow", "err"),
         ("run", "unsafe", "out"),
         ("run", "spawn", "out"),
+        ("run", "std_http_client", "out"),
     ];
     for (kind, name, extension) in cases {
         let source = repo().join("tests").join(kind).join(format!("{name}.lcd"));
         fs::copy(source, dir.join(format!("{name}.lcd"))).expect("cannot copy");
         let output = lucid(&dir, &["build", &format!("{name}.lcd")]);
         assert!(output.status.success(), "{name}: {}", text(&output.stderr));
-        let program = Command::new(dir.join(format!("{name}.exe"))).current_dir(&dir).output();
+        let program =
+            Command::new(dir.join(format!("{name}{EXE_SUFFIX}"))).current_dir(&dir).output();
         let output = program.expect("cannot start the program");
         let path = repo().join("tests").join(kind).join(format!("{name}.{extension}"));
         let expected = text(&fs::read(path).expect("no expected output"));
@@ -685,7 +690,7 @@ fn permissions_hold_at_run_time() {
         format!("inside\nlucid.toml: {outside}\ndata/../lucid.toml: {outside}\ntrue\nfalse\nyes\n");
     for built in [false, true] {
         let mut command = if built {
-            Command::new(dir.join("permissions.exe"))
+            Command::new(dir.join(format!("permissions{EXE_SUFFIX}")))
         } else {
             let mut command = Command::new(LUCID);
             command.arg("run");

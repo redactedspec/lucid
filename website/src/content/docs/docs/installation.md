@@ -12,7 +12,7 @@ There are no Lucid binaries to download, and the source repository is private. N
 | Platform | State |
 | --- | --- |
 | Windows x86-64 | Works in development: `run`, `test`, `check`, `build`, and `build --target web` |
-| Linux x86-64 | In progress, as part of M8 |
+| Linux x86-64 | Works in development: `run`, `test`, `check`, `build`, and `build --target web` |
 | Browser and Node | An output target: `lucid build --target web` |
 | macOS | Deferred, with no milestone |
 
@@ -43,6 +43,7 @@ This writes `target/release/lucid`. The build needs:
 
 - A current stable Rust (the 2024 edition; development uses 1.97), with the `wasm32-unknown-unknown` target, which the WebAssembly runtime needs.
 - On Windows, Visual Studio Build Tools and the Windows SDK, since `lucid build` links with the MSVC linker. LLVM, clang, and gcc are not needed.
+- On Linux, a C compiler as `cc`, such as gcc, since `lucid build` links through it.
 - Node, only to run the compiler's own test suite with `cargo test`.
 
 ## Editor support

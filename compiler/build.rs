@@ -1,6 +1,6 @@
 //! Builds `lucid_rt` twice, in release. As a static library with its C `main`,
 //! which `lucid build` embeds and links into each program, with the system
-//! libraries it needs, on Windows only. And as a WebAssembly module for
+//! libraries it needs. And as a WebAssembly module for
 //! `--target web`, on every host. See "`lucid build`" and "WebAssembly" in
 //! docs/compiler.md.
 
@@ -17,17 +17,15 @@ fn main() {
     build(&out, &wasm, &["-C", "link-arg=--export-table", "-C", "link-arg=--growable-table"]);
     let wasm = out.join("runtime/wasm32-unknown-unknown/release/lucid_rt.wasm");
     println!("cargo::rustc-env=LUCID_RT_WASM={}", wasm.display());
-    // Only the Windows `link` in main.rs uses the library.
-    if env::var_os("CARGO_CFG_WINDOWS").is_none() {
-        return;
-    }
     let library = ["--features", "exe", "--crate-type", "staticlib"];
     let stderr = build(&out, &library, &["--print", "native-static-libs"]);
     // Cargo replays this note when the library is already built.
     let libs = stderr.lines().find_map(|line| line.split("native-static-libs: ").nth(1));
     let libs = libs.unwrap_or_else(|| panic!("no native-static-libs in:\n{stderr}"));
     println!("cargo::rustc-env=LUCID_RT_LIBS={}", libs.trim());
-    let lib = out.join("runtime/release/lucid_rt.lib");
+    let name =
+        if env::var_os("CARGO_CFG_WINDOWS").is_some() { "lucid_rt.lib" } else { "liblucid_rt.a" };
+    let lib = out.join("runtime/release").join(name);
     println!("cargo::rustc-env=LUCID_RT_LIB={}", lib.display());
 }
 

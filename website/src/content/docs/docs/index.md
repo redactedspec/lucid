@@ -81,11 +81,11 @@ A failed `expect` on a comparison shows both sides, such as `expect failed: 4 ==
 ## Build it
 
 ```sh
-lucid build hello.lcd               # writes hello.exe, a standalone program
+lucid build hello.lcd               # writes hello.exe (hello on Linux), a standalone program
 lucid build --target web hello.lcd  # writes hello.js, for a browser or Node
 ```
 
-Native builds work on Windows x86-64 today. Linux is in progress.
+Native builds work on Windows and Linux x86-64.
 
 ## Format it
 

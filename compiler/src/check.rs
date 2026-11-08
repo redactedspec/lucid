@@ -1900,7 +1900,7 @@ impl<'a> Checker<'a> {
             self.symbols.insert(name, (params, signature.returns));
             if !std && find_symbol(name).is_none() {
                 let message = format!("cannot find the foreign task `{name}`");
-                let note = "it must be in the C runtime or `kernel32`";
+                let note = "it must be in the C library, or in `kernel32` on Windows";
                 self.report(Diagnostic::new("E0904", message, span).note(note));
             }
             None

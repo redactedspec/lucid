@@ -20,9 +20,34 @@ unsafe extern "C" {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn main() -> i32 {
+    // On Windows the linker gives the main thread `EXE_STACK_BYTES`. Linux
+    // takes the main thread's stack from `ulimit`, so the program runs on a
+    // thread of its own there, by decision 191.
+    #[cfg(windows)]
+    start();
+    #[cfg(not(windows))]
+    {
+        unsafe extern "C" {
+            fn signal(signal: i32, handler: usize) -> usize;
+        }
+        // The values on Linux. Rust's own `main` ignores SIGPIPE, so that a
+        // write to a closed socket fails with an error, and does not end the
+        // process. This `main` takes its place, so it does the same.
+        const SIGPIPE: i32 = 13;
+        const SIG_IGN: usize = 1;
+        // SAFETY: ignoring a signal runs no handler code.
+        unsafe { signal(SIGPIPE, SIG_IGN) };
+        let thread = std::thread::Builder::new().stack_size(EXE_STACK_BYTES).spawn(start);
+        // `start` ends the process, so a join returns only on failure.
+        let _ = thread.expect("cannot start the main thread").join();
+    }
+    std::process::exit(101)
+}
+
+/// Runs the program on a thread of `EXE_STACK_BYTES`, then ends the process.
+fn start() {
     let here = 0u8;
-    // The linker gives the main thread `EXE_STACK_BYTES`, and little of it is
-    // in use yet, as in `native::run`.
+    // Little of this thread's stack is in use yet, as in `native::run`.
     let limit = (&raw const here) as usize - (EXE_STACK_BYTES - STACK_MARGIN);
     set_stack_limit(limit);
     // SAFETY: `native.rs` writes the table in the documented shape, and both

@@ -82,7 +82,7 @@ export const milestones: Milestone[] = [
     steps: [
       { text: 'Prelude text tasks: `starts_with`, `ends_with`, `contains`, `find`, `trim`', done: true },
       { text: 'Compile only reachable tasks', done: true },
-      { text: 'Linux x86-64: `run`, `test`, and `build`', done: false },
+      { text: 'Linux x86-64: `run`, `test`, and `build`', done: true },
       { text: '`std.crypto`', done: false },
       { text: '`std.sql` and the `sql` type', done: false },
       { text: 'Orphan rule for tasks with `self`', done: false },

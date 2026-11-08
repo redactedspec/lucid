@@ -36,8 +36,11 @@ const INLINE_COUNTS: bool = !cfg!(debug_assertions);
 /// Marks the end of paths that cannot continue, such as after `lucid_trap`.
 const UNREACHABLE: TrapCode = TrapCode::unwrap_user(1);
 
-/// The only target of `lucid build` until M8.
+/// The target of `lucid build`: the machine it runs on, by decision 191.
+#[cfg(windows)]
 const TARGET: &str = "x86_64-pc-windows-msvc";
+#[cfg(not(windows))]
+const TARGET: &str = "x86_64-unknown-linux-gnu";
 
 const FLAGS: [(&str, &str); 4] = [
     ("opt_level", "speed"),
@@ -333,6 +336,8 @@ pub fn object(program: &Program, source: &Source) -> Result<Vec<u8>, Vec<Diagnos
     for (name, value) in FLAGS {
         flags.set(name, value).expect(CODEGEN);
     }
+    // `cc` makes a position-independent executable by default on Linux.
+    flags.set("is_pic", if cfg!(windows) { "false" } else { "true" }).expect(CODEGEN);
     let isa = isa::lookup_by_name(TARGET).expect(CODEGEN);
     let isa = isa.finish(settings::Flags::new(flags)).expect(CODEGEN);
     let builder = ObjectBuilder::new(isa, "lucid", default_libcall_names()).expect(CODEGEN);
@@ -534,7 +539,7 @@ fn compile(
 }
 
 /// Finds a foreign task in the libraries that every Lucid program has loaded.
-/// `lucid build` and other systems need their own answer, at M5 and M8.
+/// `lucid build` links the same libraries, so what this finds also links.
 #[cfg(windows)]
 pub fn find_symbol(name: &str) -> Option<*const u8> {
     use std::ffi::{CString, c_char, c_void};
@@ -558,8 +563,30 @@ pub fn find_symbol(name: &str) -> Option<*const u8> {
 }
 
 #[cfg(not(windows))]
-pub fn find_symbol(_name: &str) -> Option<*const u8> {
-    None
+pub fn find_symbol(name: &str) -> Option<*const u8> {
+    use std::ffi::{CString, c_char, c_int, c_void};
+    use std::sync::OnceLock;
+    unsafe extern "C" {
+        fn dlopen(file: *const c_char, mode: c_int) -> *mut c_void;
+        fn dlsym(handle: *mut c_void, name: *const c_char) -> *const u8;
+    }
+    // `RTLD_DEFAULT` and `RTLD_NOW` on glibc. macOS differs, but is not a
+    // target, by decision 205.
+    const RTLD_DEFAULT: *mut c_void = std::ptr::null_mut();
+    const RTLD_NOW: c_int = 2;
+    // `lucid build` links libm, but `lucid` itself may not have loaded it,
+    // since Rust calls few of its tasks.
+    static LIBM: OnceLock<usize> = OnceLock::new();
+    // SAFETY: the name is a NUL-terminated string, and a null handle is checked.
+    let libm = *LIBM.get_or_init(|| unsafe { dlopen(c"libm.so.6".as_ptr(), RTLD_NOW) } as usize);
+    let name = CString::new(name).ok()?;
+    let handles = [RTLD_DEFAULT, libm as *mut c_void];
+    handles.iter().take(if libm == 0 { 1 } else { 2 }).find_map(|&handle| {
+        // SAFETY: the handle is `RTLD_DEFAULT` or from `dlopen`, and the name
+        // is a NUL-terminated string.
+        let found = unsafe { dlsym(handle, name.as_ptr()) };
+        (!found.is_null()).then_some(found)
+    })
 }
 
 struct Lower<'a, 'b> {
