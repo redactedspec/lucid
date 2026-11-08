@@ -1,0 +1,6 @@
+# A trap in any thread ends the program, by decision 172.
+task check(n: int) -> int
+    return 10 // n
+
+let job = spawn check(0)
+print job.wait()

@@ -118,7 +118,8 @@ fn clif(ty: Ty) -> Type {
         | Ty::Data(..)
         | Ty::Union(_)
         | Ty::Any(_)
-        | Ty::Task(..) => types::I64,
+        | Ty::Task(..)
+        | Ty::Spawned(_) => types::I64,
         Ty::Float => types::F64,
         Ty::F32 => types::F32,
         Ty::Bool | Ty::None => types::I8,
@@ -279,6 +280,9 @@ fn jit(
     builder.symbol("lucid_fs_detail", lucid_rt::lucid_fs_detail as *const u8);
     builder.symbol("lucid_bytes_valid", lucid_rt::lucid_bytes_valid as *const u8);
     builder.symbol("lucid_bytes_text", lucid_rt::lucid_bytes_text as *const u8);
+    builder.symbol("lucid_spawn_scope", lucid_rt::lucid_spawn_scope as *const u8);
+    builder.symbol("lucid_spawn", lucid_rt::lucid_spawn as *const u8);
+    builder.symbol("lucid_wait", lucid_rt::lucid_wait as *const u8);
     let mut module = JITModule::new(builder);
     let Compiled { main, ids, sites } = compile(&mut module, program, source, max_main_frame)?;
     module.finalize_definitions().expect(CODEGEN);

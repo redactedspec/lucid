@@ -479,15 +479,20 @@ fn todo_works(dir: &Path, built: bool) {
     assert_eq!(run(&["nope"]), "Unknown command: nope\n");
 }
 
-/// A built program gives what `lucid run` gives: traces, the stack limit, and
-/// foreign calls each depend on how the program starts.
+/// A built program gives what `lucid run` gives: traces, the stack limit,
+/// foreign calls, and threads each depend on how the program starts.
 #[test]
 fn built_programs_match_run() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("built");
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("cannot make directory");
-    let cases =
-        [("trap", "trace", "err"), ("trap", "stack_overflow", "err"), ("run", "unsafe", "out")];
+    let cases = [
+        ("trap", "trace", "err"),
+        ("trap", "stack_overflow", "err"),
+        ("trap", "spawn_overflow", "err"),
+        ("run", "unsafe", "out"),
+        ("run", "spawn", "out"),
+    ];
     for (kind, name, extension) in cases {
         let source = repo().join("tests").join(kind).join(format!("{name}.lcd"));
         fs::copy(source, dir.join(format!("{name}.lcd"))).expect("cannot copy");
@@ -609,8 +614,9 @@ fn failed_stdout_write_traps_without_a_position() {
 #[test]
 fn every_error_code_is_tested_and_documented() {
     // missing_file_is_reported, huge_frame_is_rejected,
-    // test_names_are_plain_and_new, and web_rejects_foreign_code
-    let mut tested = String::from("E0001 E0902 E0329 E0905");
+    // test_names_are_plain_and_new, web_rejects_foreign_code, and
+    // web_rejects_spawn
+    let mut tested = String::from("E0001 E0902 E0329 E0905 E0907");
     for err in files(&repo().join("tests").join("fail"), "err") {
         tested += &text(&fs::read(err).expect("cannot read .err file"));
     }
@@ -883,12 +889,13 @@ fn copy_dir(from: &Path, to: &Path) {
 
 /// Builds each run and trap test with `--target web`, and runs it under
 /// `node`, against the same golden files. Only the tests in `HOST_ONLY` are
-/// left out: by decisions 159 and 162, the web has no files, arguments,
-/// environment, sleep, or user `extern`. See "WebAssembly" in
-/// docs/compiler.md.
+/// left out: by decisions 159, 162, and 176, the web has no files,
+/// arguments, environment, sleep, user `extern`, or `spawn`. See
+/// "WebAssembly" in docs/compiler.md.
 #[test]
 fn web_programs_match_run() {
-    const HOST_ONLY: [&str; 4] = ["std_args_env", "std_fs", "std_time", "unsafe"];
+    const HOST_ONLY: [&str; 7] =
+        ["spawn", "spawn_overflow", "spawn_trap", "std_args_env", "std_fs", "std_time", "unsafe"];
     let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("web");
     let _ = fs::remove_dir_all(&root);
     let mut failures = Vec::new();
@@ -993,4 +1000,15 @@ fn web_rejects_foreign_code() {
     let output = lucid(&dir, &["build", "--target", "web", "unsafe.lcd"]);
     assert_eq!(output.status.code(), Some(1));
     assert!(text(&output.stderr).contains("error E0905"), "{}", text(&output.stderr));
+}
+
+/// `spawn` is E0907 under `--target web`, by decision 176.
+#[test]
+fn web_rejects_spawn() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("web_spawn");
+    fs::create_dir_all(&dir).expect("cannot make directory");
+    fs::copy(repo().join("tests/run/spawn.lcd"), dir.join("spawn.lcd")).expect("cannot copy");
+    let output = lucid(&dir, &["build", "--target", "web", "spawn.lcd"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(text(&output.stderr).contains("error E0907"), "{}", text(&output.stderr));
 }

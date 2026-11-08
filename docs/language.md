@@ -645,9 +645,9 @@ Each package is one copy in a program, however many packages depend on it. Two p
 
 ## Concurrency
 
-Planned for M7, by decisions 169 to 176. Today `spawn` reports E0901.
+Planned for M7, by decisions 169 to 176. `spawn`, `spawned`, and waiting at the end of a task are built. `channel` and `lock` are planned, and report E0301 today.
 
-`spawn f(x)` runs the call `f(x)` on a new thread, and gives a `spawned[T]`, where `T` is what `f` returns. Its arguments run first, in the current thread. `.wait()` blocks until the thread ends, and gives its result. Every spawn ends before the task, lambda, or top level that ran it returns: that one waits for each spawn it did not wait for. Nothing outlives its parent, so no thread leaks. Spawns in a loop run at once.
+`spawn f(x)` runs the call `f(x)` on a new thread, and gives a `spawned[T]`, where `T` is what `f` returns. Its arguments run first, in the current thread. `.wait()` blocks until the thread ends, and gives its result. Every spawn ends before the task, lambda, or top level that ran it returns: that one waits for each spawn it did not wait for. Nothing outlives its parent, so no thread leaks. Spawns in a loop run at once. `spawn` takes a call of a task, with no `change` argument, or else gives E0341. A `spawned[T]` shows as its type, such as `spawned[int]`, and cannot be compared.
 
 ```lucid
 var jobs: list[spawned[text]] = []

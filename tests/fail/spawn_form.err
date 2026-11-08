@@ -1,0 +1,4 @@
+spawn_form.lcd:4:9: error E0341: `spawn` takes a call of a task, as in `spawn f(x)`
+spawn_form.lcd:6:9: error E0341: a `change` argument cannot go to another thread
+  note: pass the value, and give the new one back as the result
+spawn_form.lcd:7:9: error E0341: `spawn` takes a call of a task, as in `spawn f(x)`

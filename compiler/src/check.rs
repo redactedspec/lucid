@@ -21,7 +21,7 @@ pub const PRELUDE_TRAITS: [&str; 1] = ["Error"];
 const LATER_TYPES: [&str; 1] = ["pointer"];
 
 /// Type names that a program cannot define for itself, beyond `number_type`.
-const BUILT_IN_TYPES: [&str; 5] = ["bool", "text", "list", "map", "set"];
+const BUILT_IN_TYPES: [&str; 6] = ["bool", "text", "list", "map", "set", "spawned"];
 
 /// The same limit as nesting in the parser, for a chain of aliases.
 const MAX_ALIASES: usize = 128;
@@ -150,6 +150,9 @@ struct Frame<'a> {
     /// local of the container, the slot, and the local that holds the field.
     /// A second path through the same field goes on from that local.
     opened: Vec<(Local, i64, Local)>,
+    /// The hidden local that holds the threads this task spawned, and the
+    /// first `spawn`. See `open_spawns`.
+    spawns: Option<(Local, Span)>,
 }
 
 /// A path that a `for` visits. A plain `for` lets the body read it. `for change`
@@ -374,6 +377,7 @@ fn builtin_method(ty: Ty, name: &str) -> bool {
         Ty::List(_) => matches!(name, "len" | "is_empty" | "get" | "push" | "pop" | "swap"),
         Ty::Map(..) => matches!(name, "len" | "is_empty" | "get" | "remove"),
         Ty::Set(_) => matches!(name, "len" | "is_empty" | "add" | "remove"),
+        Ty::Spawned(_) => name == "wait",
         _ => false,
     }
 }
@@ -902,7 +906,7 @@ impl<'a> Checker<'a> {
         if let Some(&(_, param)) = self.type_params.iter().find(|(known, _)| *known == name) {
             return if self.arity(name, 0, args.len(), span) { param } else { Ty::Error };
         }
-        if matches!(name, "list" | "map" | "set") {
+        if matches!(name, "list" | "map" | "set" | "spawned") {
             return self.collection_type(name, &args, span);
         }
         let plain = match name {
@@ -994,6 +998,7 @@ impl<'a> Checker<'a> {
     fn collection_type(&mut self, name: &str, args: &[Ty], span: Span) -> Ty {
         match (name, args) {
             ("list", &[item]) => Ty::List(inner(item)),
+            ("spawned", &[item]) => Ty::Spawned(inner(item)),
             ("set", &[item]) => {
                 self.check_key(item, span);
                 Ty::Set(inner(item))
@@ -1206,7 +1211,7 @@ impl<'a> Checker<'a> {
             Ty::Data(..) => self.variants_of(ty).into_iter().flatten().collect(),
             _ => Vec::new(),
         };
-        if name == "Equal" && matches!(ty, Ty::Task(..)) {
+        if name == "Equal" && matches!(ty, Ty::Task(..) | Ty::Spawned(_)) {
             return false;
         }
         let parts = if name == "Hash" {
@@ -1224,7 +1229,7 @@ impl<'a> Checker<'a> {
             "Show" | "Equal" => true,
             "Json" => match ty {
                 Ty::Map(key, _) => *key == Ty::Text,
-                Ty::Any(_) | Ty::Task(..) => false,
+                Ty::Any(_) | Ty::Task(..) | Ty::Spawned(_) => false,
                 _ => true,
             },
             "Hash" => ty.is_key() || (ty.is_compound() && !matches!(ty, Ty::Any(_))),
@@ -1783,6 +1788,7 @@ impl<'a> Checker<'a> {
         let mut body = lowered;
         self.frame.scopes.pop();
         self.check_returns(&def.sig.name, returns, &mut body);
+        self.open_spawns(&mut body);
         self.frame.mutable.clear();
         let type_params = self.type_params.len();
         self.type_params.clear();
@@ -1961,9 +1967,10 @@ impl<'a> Checker<'a> {
         self.frame.returns = Some(Ty::None);
         self.frame.in_test = true;
         self.frame.scopes.push(HashMap::new());
-        let body = self.stmts(body);
+        let mut body = self.stmts(body);
         self.frame.scopes.pop();
         self.check_errors_read();
+        self.open_spawns(&mut body);
         self.frame.in_test = false;
         self.frame.mutable.clear();
         let name: &'static str = format!("test \"{name}\"").leak();
@@ -1988,8 +1995,9 @@ impl<'a> Checker<'a> {
     fn main(&mut self, file: &'a ast::File) -> Task {
         self.frame.returns = None;
         self.frame.scopes.push(HashMap::new());
-        let body = self.stmts(&file.stmts);
+        let mut body = self.stmts(&file.stmts);
         self.check_errors_read();
+        self.open_spawns(&mut body);
         let span = Span { start: 0, end: 0 };
         let locals = std::mem::take(&mut self.frame.locals);
         let (captures, change, take) = (Vec::new(), Vec::new(), Vec::new());
@@ -2323,7 +2331,8 @@ impl<'a> Checker<'a> {
 
     /// Ends what `start_closure` began. Gives the new value, which the task
     /// around it builds from what the body captured.
-    fn end_closure(&mut self, params: &[Ty], returns: Ty, body: Vec<Stmt>, span: Span) -> Expr {
+    fn end_closure(&mut self, params: &[Ty], returns: Ty, mut body: Vec<Stmt>, span: Span) -> Expr {
+        self.open_spawns(&mut body);
         let outer = self.frames.pop().expect("`start_closure` pushed a frame");
         let frame = std::mem::replace(&mut self.frame, outer);
         let ty = Ty::Task(params.to_vec().leak(), inner(returns));
@@ -4641,7 +4650,7 @@ impl<'a> Checker<'a> {
                 Expr { kind: ExprKind::Not(value.into()), ty: Ty::Bool, span }
             }
             UnaryOp::Try => self.try_value(value, span),
-            UnaryOp::Spawn => self.unsupported("`spawn`", span),
+            UnaryOp::Spawn => self.spawn(value, span),
             UnaryOp::Shared | UnaryOp::Weak => self.unsupported("`shared` and `weak`", span),
         }
     }
@@ -4796,7 +4805,8 @@ impl<'a> Checker<'a> {
             ty if ty.is_float() => !int_only,
             Ty::Bool => equality,
             Ty::Text => equality || order,
-            ty if (ty.is_compound() || matches!(ty, Ty::Param(..) | Ty::Task(..)))
+            ty if (ty.is_compound()
+                || matches!(ty, Ty::Param(..) | Ty::Task(..) | Ty::Spawned(_)))
                 && (equality || order) =>
             {
                 let trait_name = if equality { "Equal" } else { "Order" };
@@ -5326,6 +5336,7 @@ impl<'a> Checker<'a> {
                 Expr { kind: ExprKind::Foreign("lucid_text_lower", vec![value]), ty, span }
             }
             (Ty::Text, "to_int") => self.text_to_int(value, span),
+            (Ty::Spawned(item), "wait") => self.wait(value, *item, span),
             (_, "len") => int(ExprKind::Len(boxed)),
             (_, "pointer") => {
                 self.need_unsafe("`.pointer()`", span);
@@ -5341,6 +5352,101 @@ impl<'a> Checker<'a> {
             }
             _ => self.is_empty(value, span),
         }
+    }
+
+    /// `spawn f(x)`: a task value with no parameters, which `lucid_spawn` runs
+    /// on a new thread. The arguments run here, as its captures, and its code
+    /// calls `f` with them. It gives a list that holds the result, so the
+    /// runtime calls one shape of code, whatever the result type.
+    fn spawn(&mut self, call: &'a ast::Expr, span: Span) -> Expr {
+        let wrong = "`spawn` takes a call of a task, as in `spawn f(x)`";
+        if !matches!(call.kind, Ast::Call { .. }) {
+            self.expected(call, None);
+            return self.fail("E0341", wrong.into(), span);
+        }
+        let call = self.expected(call, None);
+        if call.ty == Ty::Error {
+            return poisoned(span);
+        }
+        let returns = call.ty;
+        // A task's id and type arguments, or else a task value, first.
+        let (values, callee) = match call.kind {
+            ExprKind::Call(id, types, args) => {
+                if args.iter().any(|arg| matches!(arg.kind, ExprKind::Change(_))) {
+                    let message = "a `change` argument cannot go to another thread";
+                    let note = "pass the value, and give the new one back as the result";
+                    return self.report(Diagnostic::new("E0341", message, span).note(note));
+                }
+                (args, Some((id, types)))
+            }
+            ExprKind::CallValue(callee, args) => {
+                (std::iter::once(*callee).chain(args).collect(), None)
+            }
+            _ => return self.fail("E0341", wrong.into(), span),
+        };
+        let captures: Vec<Ty> = values.iter().map(|value| value.ty).collect();
+        let read = |(index, &ty): (usize, &Ty)| Expr { kind: ExprKind::Capture(index), ty, span };
+        let mut reads: Vec<Expr> = captures.iter().enumerate().map(read).collect();
+        let kind = match callee {
+            Some((id, types)) => ExprKind::Call(id, types, reads),
+            None => {
+                let callee = reads.remove(0);
+                ExprKind::CallValue(callee.into(), reads)
+            }
+        };
+        let call = Expr { kind, ty: returns, span };
+        let list = Ty::List(inner(returns));
+        let result = Expr { kind: ExprKind::ListOf(vec![call]), ty: list, span };
+        let ty = Ty::Task(&[], inner(list));
+        let (type_params, args) = self.own_type_args();
+        let (change, take, borrowed) = (Vec::new(), Vec::new(), Vec::new());
+        self.lifted.push(Task {
+            name: "",
+            params: 1,
+            type_params,
+            returns: list,
+            locals: vec![ty],
+            body: vec![Stmt::Return(result)],
+            span,
+            captures,
+            change,
+            take,
+            borrowed,
+        });
+        let task = self.first_lifted + self.lifted.len() - 1;
+        let fields = values.into_iter().enumerate().collect();
+        let closure = Expr { kind: ExprKind::Closure { task, args, counted: 0, fields }, ty, span };
+        let scope = match self.frame.spawns {
+            Some((local, _)) => local,
+            None => {
+                let local = self.new_local(Ty::Spawned(&Ty::None), false);
+                self.frame.spawns = Some((local, span));
+                local
+            }
+        };
+        let scope = Expr { kind: ExprKind::Local(scope), ty: Ty::Spawned(&Ty::None), span };
+        let kind = ExprKind::Foreign("lucid_spawn", vec![scope, closure]);
+        Expr { kind, ty: Ty::Spawned(inner(returns)), span }
+    }
+
+    /// Starts the hidden scope of a task that spawns. Its last count joins
+    /// every thread it holds, which the exit block gives up when the task
+    /// ends, so nothing outlives the task that ran it, by decision 171.
+    fn open_spawns(&mut self, body: &mut Vec<Stmt>) {
+        if let Some((local, span)) = self.frame.spawns.take() {
+            let ty = self.frame.locals[local];
+            let start = Expr { kind: ExprKind::Foreign("lucid_spawn_scope", Vec::new()), ty, span };
+            body.insert(0, Stmt::Set(local, start));
+        }
+    }
+
+    /// `x.wait()` on a `spawned[T]`: the one item of the list that its thread
+    /// gave.
+    fn wait(&mut self, value: Expr, item: Ty, span: Span) -> Expr {
+        let list = Ty::List(inner(item));
+        let results = Expr { kind: ExprKind::Foreign("lucid_wait", vec![value]), ty: list, span };
+        let first = Expr { kind: ExprKind::Int(0), ty: Ty::Int, span };
+        Expr { kind: ExprKind::ListGet(results.into(), first.into()), ty: item, span }
     }
 
     /// Lowers arguments of a call that already failed, to report their errors.

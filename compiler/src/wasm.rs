@@ -212,6 +212,7 @@ fn module(program: &Program, source: &Source) -> Result<(Vec<u8>, Loaded), Vec<D
         placed: HashMap::new(),
         lines: &lines,
         missing: None,
+        threads: None,
     };
     let mut imports = ImportSection::new();
     let memory = MemoryType {
@@ -253,6 +254,11 @@ fn module(program: &Program, source: &Source) -> Result<(Vec<u8>, Loaded), Vec<D
             IMPORTS.len() + places.len(),
             format!("{file}:{line}:{column}")
         ));
+    }
+    if let Some(span) = shared.threads {
+        let message = "`spawn` cannot run on the web";
+        let note = "threads in a page need cross-origin isolation, so build this program without `--target web`";
+        return Err(vec![Diagnostic::new("E0907", message, span).note(note)]);
     }
     if let Some(span) = shared.missing {
         let message = "a user `extern` or `.pointer()` cannot run on the web";
@@ -337,6 +343,8 @@ struct Shared<'a> {
     lines: &'a Lines<'a>,
     /// The first thing that this backend cannot lower yet.
     missing: Option<Span>,
+    /// The first `spawn`, which is E0907 here, by decision 176.
+    threads: Option<Span>,
 }
 
 impl Shared<'_> {
@@ -1194,6 +1202,11 @@ impl<'a, 'b> Lower<'a, 'b> {
     /// A foreign call is a runtime task here: `std` and the prelude name only
     /// those. A user `extern` cannot run on the web.
     fn foreign(&mut self, name: &str, args: &[Expr], span: Span) {
+        if matches!(name, "lucid_spawn_scope" | "lucid_spawn" | "lucid_wait") {
+            self.shared.threads.get_or_insert(span);
+            self.ins().unreachable();
+            return;
+        }
         let Some((_, params, result)) = IMPORTS.iter().find(|(known, ..)| *known == name) else {
             return self.missing(span);
         };

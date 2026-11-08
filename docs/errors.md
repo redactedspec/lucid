@@ -589,6 +589,16 @@ For example, `use std.fs` in a package whose `lucid.toml` has no `files` permiss
 
 Fix: add the permission to `[permissions]` in the package's `lucid.toml`, as `files = ["./notes"]`, or to the `allow` entry of the dependency that needs it.
 
+## E0341: `spawn` is not given a call of a task, or is given a `change` argument
+
+`spawn` runs one call of a task on a new thread, by decision 171. A built-in task, such as `.len()`, is not a task call, and a `change` argument would let two threads hold one variable.
+
+```lucid
+let job = spawn 1 + 2
+```
+
+Fix: spawn a call of a task, as `spawn add(1, 2)`. For a `change` argument, pass the value, and return the new one, which `.wait()` gives.
+
 ## E0901: Parses, but cannot run at this milestone
 
 The feature is in the language, but not built yet, or not built yet for `lucid build --target web`. `lucid check` does not report this code.
@@ -646,3 +656,9 @@ print "page"
 ```
 
 Fix: build it with `lucid build --target web`, and open the page that loads the `.js` file.
+
+## E0907: `spawn` cannot run on the web
+
+A program built with `lucid build --target web` uses `spawn`. Threads in WebAssembly need shared memory, which browsers allow only on pages with cross-origin isolation headers, by decision 176. Only code generation for the web finds this, so `lucid check` and `lucid run` do not report it. The test is `web_rejects_spawn`.
+
+Fix: build the program without `--target web`, or do the work in one thread.

@@ -12,8 +12,9 @@ use std::hash::RandomState as Keys;
 use std::io::{ErrorKind, Write};
 use std::mem::offset_of;
 use std::path::{Component, Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering, fence};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::thread::JoinHandle;
 
 #[cfg(feature = "exe")]
 mod exe;
@@ -73,6 +74,8 @@ enum Kind {
     List { counted: bool, small: bool },
     Map { key_counted: bool, value_counted: bool },
     Record,
+    Spawned,
+    Scope,
 }
 
 /// Whether a text holds only ASCII, which makes a character position a byte
@@ -174,6 +177,49 @@ pub struct Record {
     len: u32,
     counted: u32,
 }
+
+/// A `spawned[T]`: a handle to a thread that `lucid_spawn` started. `job`
+/// comes from `Arc::into_raw`, and the thread and the scope hold the rest.
+#[repr(C)]
+pub struct Spawned {
+    head: Head,
+    job: *const Job,
+}
+
+/// What a spawned thread gives back: the list of one item that its task
+/// returns, as an address, once it ends. See `lucid_spawn`.
+#[derive(Default)]
+struct Job {
+    result: Mutex<Option<usize>>,
+    ended: Condvar,
+}
+
+impl Drop for Job {
+    fn drop(&mut self) {
+        let result = self.result.get_mut().unwrap_or_else(|e| e.into_inner());
+        if let Some(result) = result.take() {
+            // SAFETY: the job held a count of its result, and its thread has
+            // ended, so no other thread holds an unmarked value it reaches.
+            unsafe { lucid_release(result as *mut Head) };
+        }
+    }
+}
+
+/// The threads that one run of a task spawned, which it waits for when it
+/// ends: a hidden local holds this, and the last count joins them. Only that
+/// thread touches it. See "Threads" in docs/compiler.md.
+#[repr(C)]
+pub struct Scope {
+    head: Head,
+    threads: *mut Vec<(Arc<Job>, JoinHandle<()>)>,
+    /// At this many threads, `lucid_spawn` first drops those that have ended
+    /// and that no handle reaches, so a loop that never ends stays small.
+    prune_at: usize,
+}
+
+/// The stack of a spawned thread, by decision 175. Most of it is only
+/// reserved, as with `EXE_STACK_BYTES`.
+pub const SPAWN_STACK_BYTES: usize = 64 * 1024 * 1024;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -568,6 +614,14 @@ pub unsafe extern "C" fn lucid_mark(value: *mut Head) {
                         record_slots(record)[..(*record).counted as usize].iter().map(held),
                     );
                 }
+                // A result that comes later is marked by `lucid_wait`.
+                Kind::Spawned => {
+                    let job = &*(*value.cast::<Spawned>()).job;
+                    if let Some(result) = *lock(&job.result) {
+                        todo.push(result as *mut Head);
+                    }
+                }
+                Kind::Scope => unreachable!("a scope is a hidden local, which nothing holds"),
             }
         }
     }
@@ -623,8 +677,127 @@ pub unsafe extern "C" fn lucid_release(value: *mut Head) {
                     }
                     free(value, record_size((*record).len as usize));
                 }
+                Kind::Spawned => {
+                    drop(Arc::from_raw((*value.cast::<Spawned>()).job));
+                    free(value, size_of::<Spawned>());
+                }
+                Kind::Scope => {
+                    let threads = Box::from_raw((*value.cast::<Scope>()).threads);
+                    for (job, thread) in *threads {
+                        join(thread);
+                        drop(job);
+                    }
+                    free(value, size_of::<Scope>());
+                }
             }
         }
+    }
+}
+
+/// A trap in any thread ends the process, by decision 172, so compiled code
+/// never leaves a lock poisoned, and a runtime panic aborts, since every
+/// task here is `extern "C"`.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn join(thread: JoinHandle<()>) {
+    if thread.join().is_err() {
+        trap(b"trap: runtime bug: a thread failed");
+    }
+}
+
+/// A new scope for the spawns of one run of a task. See `Scope`.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_spawn_scope() -> *mut Scope {
+    let head = Head { count: AtomicI64::new(1), kind: Kind::Scope };
+    let threads = Box::into_raw(Box::default());
+    object(size_of::<Scope>(), Scope { head, threads, prune_at: 16 })
+}
+
+/// The code of a task value with no parameters, which `check.rs` makes for
+/// `spawn`. It gives a list that holds the call's result.
+type SpawnTask = extern "C" fn(usize, *mut Record) -> *mut Head;
+
+/// Runs `task` on a new thread of `scope`, and gives its handle. The task's
+/// record and all it reaches are marked first, since both threads may hold
+/// them, by decision 170.
+///
+/// # Safety
+///
+/// `scope` must be a live scope of this thread, and `task` a live task value
+/// whose code has the shape of `SpawnTask`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_spawn(scope: *mut Scope, task: *mut Record) -> *mut Spawned {
+    // SAFETY: the caller guarantees both values, and only this thread holds
+    // an unmarked value that the task reaches.
+    unsafe {
+        lucid_retain(task.cast());
+        lucid_mark(task.cast());
+    }
+    let job = Arc::new(Job::default());
+    let held = Arc::clone(&job);
+    let address = task as usize;
+    let run = move || {
+        let here = 0u8;
+        let limit = (&raw const here) as usize - (SPAWN_STACK_BYTES - STACK_MARGIN);
+        set_stack_limit(limit);
+        let task = address as *mut Record;
+        // SAFETY: the caller guarantees the shape of the code, and this thread
+        // has the count that `lucid_retain` added.
+        let result = unsafe {
+            let code: SpawnTask = std::mem::transmute((*task).tag as usize);
+            let result = code(limit, task);
+            lucid_release(task.cast());
+            result
+        };
+        *lock(&held.result) = Some(result as usize);
+        held.ended.notify_all();
+    };
+    let builder = std::thread::Builder::new().stack_size(SPAWN_STACK_BYTES);
+    let Ok(thread) = builder.spawn(run) else { trap(b"trap: cannot start a thread") };
+    // SAFETY: the caller guarantees a live scope, which only this thread uses.
+    let (threads, prune_at) = unsafe { (&mut *(*scope).threads, &mut (*scope).prune_at) };
+    if threads.len() >= *prune_at {
+        let mut kept = Vec::with_capacity(threads.len());
+        for (job, thread) in threads.drain(..) {
+            if thread.is_finished() && Arc::strong_count(&job) == 1 {
+                join(thread);
+            } else {
+                kept.push((job, thread));
+            }
+        }
+        *threads = kept;
+        *prune_at = (threads.len() * 2).max(16);
+    }
+    threads.push((Arc::clone(&job), thread));
+    let head = Head { count: AtomicI64::new(1), kind: Kind::Spawned };
+    object(size_of::<Spawned>(), Spawned { head, job: Arc::into_raw(job) })
+}
+
+/// Blocks until the thread of `spawned` ends, and gives a count of the list
+/// that holds its result. The result is not marked, by decision 170, unless
+/// other threads may hold the handle.
+///
+/// # Safety
+///
+/// `spawned` must be a live handle that this caller has a count of.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_wait(spawned: *mut Spawned) -> *mut Head {
+    // SAFETY: the caller guarantees a live handle, which keeps its job alive.
+    unsafe {
+        check_live(spawned.cast());
+        let job = &*(*spawned).job;
+        let mut result = lock(&job.result);
+        while result.is_none() {
+            result = job.ended.wait(result).unwrap_or_else(|e| e.into_inner());
+        }
+        let value = result.expect("the thread has ended") as *mut Head;
+        if (*spawned).head.count.load(Ordering::Acquire) < 0 {
+            lucid_mark(value);
+        }
+        lucid_retain(value);
+        value
     }
 }
 

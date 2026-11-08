@@ -575,6 +575,21 @@ test "adds numbers"
 
 `expect` also works outside tests. A failed comparison shows both values, as `expect failed: 4 == 5`, and what passes narrows: after `expect x is int`, `x` is an `int`.
 
+## Threads
+
+```lucid
+task square(n: int) -> int
+    return n * n
+
+var jobs: list[spawned[int]] = []
+for n in [1, 2, 3]
+    jobs.push(spawn square(n))
+for job in jobs
+    print job.wait()
+```
+
+`spawn` takes one call of a task, runs it on a new thread, and gives a `spawned[T]`. The arguments run first, in this thread, and the thread gets copies: a later change here does not reach it. `.wait()` blocks and gives the result. A task waits for every thread it spawned before it returns. A trap in any thread ends the program. `spawn` with a `change` argument, or with anything but a task call, is E0341. Under `--target web`, `spawn` is E0907.
+
 ## Foreign code
 
 ```lucid
@@ -699,7 +714,7 @@ markdown = { path = "../markdown", allow = [] }
 
 ## What is not available
 
-Some keywords parse but do not run yet, and report E0901: `spawn`, `shared`, `weak`.
+Some keywords parse but do not run yet, and report E0901: `shared`, `weak`. There is no `channel` or `lock` yet.
 
 There is no console input, and no tuples: use a `type`. These do not exist, so write your own: `sort`, `split`, `join`, `trim`, `contains`, `replace`, `abs`, `min`, `max`, `sum`, `range`, `enumerate`, `zip`, `.map`, `.filter`, `.keys`, `.values`, `.insert`, `.clear`, text to number, and number to text other than interpolation. There is no way to turn a number into a character. To map characters to numbers, search a text such as `"abcdefghijklmnopqrstuvwxyz"`.
 

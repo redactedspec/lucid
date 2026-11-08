@@ -1,0 +1,7 @@
+task bump(change n: int)
+    n += 1
+
+let a = spawn 1 + 2
+var n = 0
+let b = spawn bump(change n)
+let c = spawn "x".len()

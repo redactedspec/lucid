@@ -45,6 +45,9 @@ pub enum Ty {
     /// and whose slots hold its captures. Its code takes the record first.
     /// See "Task values" in docs/compiler.md.
     Task(&'static [Ty], &'static Ty),
+    /// `spawned[T]`: a counted handle to a thread, which no trait fits. See
+    /// "Threads" in docs/compiler.md.
+    Spawned(&'static Ty),
     /// A type parameter, by its name and its position in the list of the task
     /// or type that declares it. `mono.rs` replaces every one.
     Param(&'static str, usize),
@@ -81,6 +84,7 @@ impl Ty {
             Ty::List(item) => format!("list[{}]", item.name()),
             Ty::Map(key, value) => format!("map[{}, {}]", key.name(), value.name()),
             Ty::Set(item) => format!("set[{}]", item.name()),
+            Ty::Spawned(item) => format!("spawned[{}]", item.name()),
             Ty::Data(name, _, []) => name.into(),
             Ty::Data(name, _, args) => {
                 let args: Vec<String> = args.iter().map(|ty| ty.name()).collect();
@@ -120,14 +124,16 @@ impl Ty {
     /// A parameter may turn out to be counted, so the checker keeps a place
     /// for it. `mono.rs` drops what the real type does not need.
     pub fn is_counted(self) -> bool {
-        self == Ty::Text || self.is_compound() || matches!(self, Ty::Param(..) | Ty::Task(..))
+        self == Ty::Text
+            || self.is_compound()
+            || matches!(self, Ty::Param(..) | Ty::Task(..) | Ty::Spawned(_))
     }
 
     /// True if `part` appears anywhere in this type.
     pub fn mentions(self, part: Ty) -> bool {
         self == part
             || match self {
-                Ty::List(item) | Ty::Set(item) => item.mentions(part),
+                Ty::List(item) | Ty::Set(item) | Ty::Spawned(item) => item.mentions(part),
                 Ty::Map(key, value) => key.mentions(part) || value.mentions(part),
                 Ty::Data(_, _, args) | Ty::Union(args) => args.iter().any(|a| a.mentions(part)),
                 Ty::Task(params, returns) => {
@@ -141,7 +147,7 @@ impl Ty {
     pub fn has_param(self) -> bool {
         match self {
             Ty::Param(..) => true,
-            Ty::List(item) | Ty::Set(item) => item.has_param(),
+            Ty::List(item) | Ty::Set(item) | Ty::Spawned(item) => item.has_param(),
             Ty::Map(key, value) => key.has_param() || value.has_param(),
             Ty::Data(_, _, args) | Ty::Union(args) => args.iter().any(|ty| ty.has_param()),
             Ty::Task(params, returns) => {
@@ -161,7 +167,7 @@ impl Ty {
             }
             *left -= 1;
             match ty {
-                Ty::List(item) | Ty::Set(item) => spend(*item, left),
+                Ty::List(item) | Ty::Set(item) | Ty::Spawned(item) => spend(*item, left),
                 Ty::Map(key, value) => spend(*key, left) && spend(*value, left),
                 Ty::Data(_, _, args) | Ty::Union(args) => args.iter().all(|&a| spend(a, left)),
                 Ty::Task(params, returns) => {
@@ -185,7 +191,9 @@ impl Ty {
                 members.iter().any(|m| matches!(m, Ty::Param(..)) && !single.has_param())
                     || (single.has_param() && members.iter().any(|m| m.may_overlap(single)))
             }
-            (Ty::List(a), Ty::List(b)) | (Ty::Set(a), Ty::Set(b)) => a.may_overlap(*b),
+            (Ty::List(a), Ty::List(b))
+            | (Ty::Set(a), Ty::Set(b))
+            | (Ty::Spawned(a), Ty::Spawned(b)) => a.may_overlap(*b),
             (Ty::Map(a, b), Ty::Map(c, d)) => a.may_overlap(*c) && b.may_overlap(*d),
             (Ty::Data(_, a, own), Ty::Data(_, b, args)) => {
                 a == b && own.iter().zip(args).all(|(x, &y)| x.may_overlap(y))
@@ -318,6 +326,7 @@ impl Types {
             Ty::Param(_, index) => args[index],
             Ty::List(item) => Ty::List(inner(self.subst(*item, args))),
             Ty::Set(item) => Ty::Set(inner(self.subst(*item, args))),
+            Ty::Spawned(item) => Ty::Spawned(inner(self.subst(*item, args))),
             Ty::Map(key, value) => {
                 Ty::Map(inner(self.subst(*key, args)), inner(self.subst(*value, args)))
             }
@@ -371,7 +380,9 @@ impl Types {
             (Ty::Param(_, index), _) => {
                 known[index].get_or_insert(ty);
             }
-            (Ty::List(a), Ty::List(b)) | (Ty::Set(a), Ty::Set(b)) => self.unify(*a, *b, known),
+            (Ty::List(a), Ty::List(b))
+            | (Ty::Set(a), Ty::Set(b))
+            | (Ty::Spawned(a), Ty::Spawned(b)) => self.unify(*a, *b, known),
             (Ty::Map(a, b), Ty::Map(c, d)) => {
                 self.unify(*a, *c, known);
                 self.unify(*b, *d, known);
@@ -701,8 +712,8 @@ pub enum ExprKind {
     TextQuote(Box<Expr>),
     /// The number of Unicode characters.
     TextLen(Box<Expr>),
-    /// A call to foreign code, by its symbol. Only the task that `check.rs`
-    /// writes for an `extern` holds one.
+    /// A call to foreign code or to the runtime, by its symbol: the body that
+    /// `check.rs` writes for an `extern`, a prelude task, or a thread task.
     Foreign(&'static str, Vec<Expr>),
     /// The address of the first element of a `list[byte]`.
     ListPointer(Box<Expr>),

@@ -1,0 +1,18 @@
+spawn_overflow.lcd:2:1: trap: stack overflow
+    at spawn_overflow.lcd:3:16 in deep
+    at spawn_overflow.lcd:3:16 in deep
+    at spawn_overflow.lcd:3:16 in deep
+    at spawn_overflow.lcd:3:16 in deep
+    at spawn_overflow.lcd:3:16 in deep
+    at spawn_overflow.lcd:3:16 in deep
+    at spawn_overflow.lcd:3:16 in deep
+    at spawn_overflow.lcd:3:16 in deep
+    at spawn_overflow.lcd:3:16 in deep
+    at spawn_overflow.lcd:3:16 in deep
+    at spawn_overflow.lcd:3:16 in deep
+    at spawn_overflow.lcd:3:16 in deep
+    at spawn_overflow.lcd:3:16 in deep
+    at spawn_overflow.lcd:3:16 in deep
+    at spawn_overflow.lcd:3:16 in deep
+    at spawn_overflow.lcd:3:16 in deep
+    ...

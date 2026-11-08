@@ -1,0 +1,88 @@
+# `spawn` runs a call on a new thread, by decisions 169 to 172.
+
+task square(n: int) -> int
+    return n * n
+
+task lines(name: text, count: int) -> list[text]
+    var out: list[text] = []
+    for i in 0..count
+        out.push("{name} {i}")
+    return out
+
+task total(values: list[int]) -> int
+    var sum = 0
+    for value in values
+        sum += value
+    return sum
+
+task first[T](values: list[T]) -> T
+    return values[0]
+
+type Point
+    x: int
+    y: int
+
+task length(self: Point) -> int
+    return self.x * self.x + self.y * self.y
+
+task worker(name: text)
+    print "worker {name}"
+
+# A task waits for each thread it spawned before it returns.
+task run_workers()
+    spawn worker("a")
+
+task deep(n: int) -> int
+    if n == 0
+        return 0
+    return 1 + deep(n - 1)
+
+let job = spawn square(7)
+print job.wait()
+print job.wait()
+
+var jobs: list[spawned[list[text]]] = []
+for name in ["ann", "bo"]
+    jobs.push(spawn lines(name, 2))
+for each in jobs
+    print each.wait()
+
+# The thread gets a value: a later change here does not reach it.
+var values = [1, 2, 3]
+let sum = spawn total(values)
+values.push(100)
+print sum.wait()
+print total(values)
+
+print (spawn first(["x", "y"])).wait()
+print (spawn first([1.5])).wait()
+print (spawn Point(x: 3, y: 4).length()).wait()
+
+let add: task(int) -> int = n => n + 1
+print (spawn add(41)).wait()
+
+run_workers()
+print "after workers"
+
+# Each thread has a deep stack of its own.
+print (spawn deep(100000)).wait()
+
+# Handles that nothing waits for end with the top level.
+for i in 0..40
+    spawn square(i)
+print "done"
+
+let shown = spawn square(2)
+print shown
+print "{shown}"
+
+# A lambda and a nested task wait for their own threads.
+task outer() -> int
+    task inner(n: int) -> int
+        let job = spawn square(n)
+        return job.wait() + 1
+    return inner(4)
+
+let waits: task(int) -> int = n => (spawn square(n)).wait()
+print waits(5)
+print outer()

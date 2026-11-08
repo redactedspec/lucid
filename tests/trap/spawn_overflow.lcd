@@ -1,0 +1,5 @@
+# A spawned thread checks its own stack limit, by decision 175.
+task deep(n: int) -> int
+    return 1 + deep(n + 1)
+
+print (spawn deep(0)).wait()

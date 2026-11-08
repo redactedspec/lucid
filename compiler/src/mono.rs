@@ -327,7 +327,8 @@ impl Visit for Mono<'_> {
             self.stmt_parts(stmt);
             match stmt {
                 Stmt::Print(value)
-                    if value.ty.is_compound() || matches!(value.ty, Ty::Task(..)) =>
+                    if value.ty.is_compound()
+                        || matches!(value.ty, Ty::Task(..) | Ty::Spawned(_)) =>
                 {
                     let span = value.span;
                     let empty = Expr { kind: ExprKind::None, ty: Ty::None, span };
