@@ -1,0 +1,27 @@
+# A task value owns what it is passed, by decision 183. So a nested task
+# writes its argument in place when the caller is done with it, and a copy
+# shows where the caller still reads it. A top-level task borrows, so its
+# write copies, even through a value.
+task grow(items: list[int]) -> list[int]
+    var out = items
+    out.push(1)
+    return out
+
+let step: task(list[int]) -> list[int] = grow
+var numbers = [0]
+numbers = step(numbers)
+print numbers
+
+task main_loop()
+    task add(items: list[int]) -> list[int]
+        var out = items
+        out.push(2)
+        return out
+    var kept = [5]
+    kept = add(kept)
+    print kept
+    let again = add(kept)
+    print again
+    print kept
+
+main_loop()

@@ -2329,6 +2329,24 @@ impl<'a> Checker<'a> {
         self.frame.scopes.push(HashMap::new());
     }
 
+    /// Moves each counted parameter of a task value to a local of its own,
+    /// and so does a `take` one, whose local can change. A task value owns
+    /// what it is passed, by decision 183, so `end_closure` lists each in
+    /// `Task::take`. Gives the moves, which start the body.
+    fn own_closure_params(&mut self, names: &[(&'a ast::Name, bool)]) -> Vec<Stmt> {
+        let mut moves = Vec::new();
+        for (index, &(name, take)) in names.iter().enumerate() {
+            let param = index + 1;
+            if take || self.frame.locals[param].is_counted() {
+                let own = self.new_local(self.frame.locals[param], take);
+                let scope = self.frame.scopes.last_mut().expect("a scope is open");
+                scope.insert(&name.text, own);
+                moves.push(Stmt::Set(own, self.read(param, name.span)));
+            }
+        }
+        moves
+    }
+
     /// Ends what `start_closure` began. Gives the new value, which the task
     /// around it builds from what the body captured.
     fn end_closure(&mut self, params: &[Ty], returns: Ty, mut body: Vec<Stmt>, span: Span) -> Expr {
@@ -2342,7 +2360,8 @@ impl<'a> Checker<'a> {
         let captures = values.iter().map(|value| value.ty).collect();
         let (type_params, args) = self.own_type_args();
         let params = params.len() + 1;
-        let (change, take, borrowed) = (Vec::new(), Vec::new(), Vec::new());
+        let take = (1..params).filter(|&param| locals[param].is_counted()).collect();
+        let (change, borrowed) = (Vec::new(), Vec::new());
         let task = Task {
             name: "lambda",
             params,
@@ -2399,14 +2418,9 @@ impl<'a> Checker<'a> {
             self.bind(&param.name, ty, false);
         }
         self.frame.params = self.frame.locals.len();
-        for (param, written) in sig.params.iter().enumerate() {
-            if written.mode == ast::ParamMode::Take {
-                let (own, set) = self.own_param(param + 1, written.name.span);
-                let scope = self.frame.scopes.last_mut().expect("a scope is open");
-                scope.insert(&written.name.text, own);
-                lowered.push(set);
-            }
-        }
+        let names: Vec<(&'a ast::Name, bool)> =
+            sig.params.iter().map(|p| (&p.name, p.mode == ast::ParamMode::Take)).collect();
+        lowered.extend(self.own_closure_params(&names));
         lowered.extend(self.stmts(body));
         let mut body = lowered;
         self.check_returns(&sig.name, returns, &mut body);
@@ -2446,7 +2460,7 @@ impl<'a> Checker<'a> {
     fn lambda_with(
         &mut self,
         params: &'a [ast::Name],
-        body: &'a ast::Expr,
+        body_expr: &'a ast::Expr,
         types: &[Ty],
         returns: Option<Ty>,
         span: Span,
@@ -2456,10 +2470,13 @@ impl<'a> Checker<'a> {
         for (param, &ty) in params.iter().zip(types) {
             self.bind(param, ty, false);
         }
-        let value = self.expected(body, returns);
+        let names: Vec<(&'a ast::Name, bool)> = params.iter().map(|name| (name, false)).collect();
+        let mut body = self.own_closure_params(&names);
+        let value = self.expected(body_expr, returns);
         let result = returns.unwrap_or(value.ty);
         self.expect(&value, result, "this lambda");
-        self.end_closure(types, result, vec![Stmt::Return(value)], span)
+        body.push(Stmt::Return(value));
+        self.end_closure(types, result, body, span)
     }
 
     /// True if a name of a local means something in the task being checked, or
@@ -2544,21 +2561,27 @@ impl<'a> Checker<'a> {
             Some(&task) => task,
             None => {
                 let own: Vec<Ty> = signature.type_params.iter().map(|&(_, ty)| ty).collect();
-                let read = |(local, &ty): (usize, &Ty)| Expr {
-                    kind: ExprKind::Local(local + 1),
-                    ty,
-                    span,
-                };
-                let values = types.iter().enumerate().map(read).collect();
-                let kind = ExprKind::Call(id, own.clone().leak(), values);
-                let call = Expr { kind, ty: returns, span };
+                // Each counted parameter moves to a local, which the call
+                // borrows or takes, by decision 183.
                 let mut locals = vec![ty];
                 locals.extend(&types);
                 let params = locals.len();
+                let (mut body, mut values, mut take) = (Vec::new(), Vec::new(), Vec::new());
+                for (index, &ty) in types.iter().enumerate() {
+                    let mut value = Expr { kind: ExprKind::Local(index + 1), ty, span };
+                    if ty.is_counted() {
+                        take.push(index + 1);
+                        locals.push(ty);
+                        body.push(Stmt::Set(locals.len() - 1, value));
+                        value = Expr { kind: ExprKind::Local(locals.len() - 1), ty, span };
+                    }
+                    values.push(value);
+                }
+                let kind = ExprKind::Call(id, own.clone().leak(), values);
+                let call = Expr { kind, ty: returns, span };
                 let type_params = own.len();
-                let (captures, change, take) = (Vec::new(), Vec::new(), Vec::new());
-                let borrowed = Vec::new();
-                let body = vec![Stmt::Return(call)];
+                let (captures, change, borrowed) = (Vec::new(), Vec::new(), Vec::new());
+                body.push(Stmt::Return(call));
                 let code = Task {
                     name: "",
                     params,

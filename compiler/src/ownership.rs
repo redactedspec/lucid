@@ -19,7 +19,11 @@ pub fn run(program: &mut Program, moves: bool) {
         .tasks
         .iter_mut()
         .map(|task| {
-            if !moves {
+            // A task value's code owns its arguments in both stages, since a
+            // call through a value cannot know what it calls, by decision 183.
+            // Only that code is named `lambda` or has no name and takes any.
+            let value_code = task.name == "lambda" || task.name.is_empty();
+            if !moves && !value_code {
                 task.take.clear();
             }
             task.take.clone()
@@ -177,6 +181,12 @@ impl Visit for Sites<'_> {
                 }
             }
         }
+        // A task value takes every argument, by decision 183.
+        if let ExprKind::CallValue(_, args) = &value.kind {
+            for arg in args.iter().filter(|arg| matches!(arg.kind, ExprKind::Retain(_))) {
+                self.add("copy", arg);
+            }
+        }
         self.expr_parts(value);
     }
 
@@ -265,6 +275,9 @@ impl Visit for Settle<'_> {
         let parts: Vec<&mut Expr> = match &mut value.kind {
             ExprKind::Call(task, _, args) if !self.takes[*task].is_empty() => {
                 args.iter_mut().filter(|arg| !matches!(arg.kind, ExprKind::Change(_))).collect()
+            }
+            ExprKind::CallValue(callee, args) => {
+                std::iter::once(&mut **callee).chain(args.iter_mut()).collect()
             }
             ExprKind::ListOf(items) | ExprKind::Join(items) => items.iter_mut().collect(),
             ExprKind::MapOf(entries, _) => {
@@ -708,6 +721,12 @@ impl Owners<'_> {
         if !value.ty.is_counted() {
             return self.expr(value);
         }
+        // A `take` parameter is read once, by the move that starts its task.
+        if let ExprKind::Local(local) = value.kind
+            && self.take.contains(&local)
+        {
+            return;
+        }
         if self.moves {
             if let ExprKind::Join(parts) = &mut value.kind
                 && let ExprKind::Local(first) = parts[0].kind
@@ -719,7 +738,6 @@ impl Owners<'_> {
                 return self.parts(value);
             }
             match &mut value.kind {
-                ExprKind::Local(local) if self.take.contains(local) => return,
                 ExprKind::Local(local) if self.can_move(*local) => {
                     value.kind = ExprKind::Move(*local);
                     return;
@@ -761,6 +779,11 @@ impl Owners<'_> {
                         self.expr(arg);
                     }
                 }
+            }
+            // A task value takes every argument, by decision 183.
+            ExprKind::CallValue(callee, args) => {
+                self.expr(callee);
+                args.iter_mut().for_each(|arg| self.give(arg));
             }
             ExprKind::ListOf(items) => items.iter_mut().for_each(|item| self.give(item)),
             ExprKind::MapOf(entries, _) => {

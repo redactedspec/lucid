@@ -59,8 +59,9 @@ Level: **Read** for the method, **Snippet** for benchmarks.
 - Borrow inference is a heuristic, and correctness does not depend on it.
 - It is unsafe to update a borrowed reference in place, even when its count is 1.
 - Lean cannot create cycles, which is not true of Lucid.
+- Borrow inference runs only on functions that a call names. Code reached through a closure takes owned parameters, since its caller cannot know a callee's annotations. Recalled from the paper, not reread for decision 183.
 
-**For Lucid:** this supports thread tagging in `memory-model.md`, and the rule that correctness never depends on an optimization. The in-place rule must hold in the ownership pass.
+**For Lucid:** this supports thread tagging in `memory-model.md`, and the rule that correctness never depends on an optimization. The in-place rule must hold in the ownership pass. Owned parameters for task values, by decision 183, follow Lean's closures.
 
 Source: [arXiv 1908.05647](https://arxiv.org/abs/1908.05647).
 

@@ -222,7 +222,7 @@ Compiled code reads a list's length and elements inline. A list set, a list push
 
 ### Parameters
 
-A read parameter is a borrowed value. A `take` parameter of a top-level task arrives with a count from the caller, listed in `Task::take`. A lifted task, and a written `equal`, cannot get one, so each takes its own count when it starts.
+A read parameter of a top-level task is a borrowed value. A `take` parameter of a top-level task arrives with a count from the caller, listed in `Task::take`. A written `equal` cannot get one, so it takes its own count when it starts. Code reached through a task value owns every argument, by decision 183: a call through a value gives each counted argument a count, and the code of a lambda, a nested task, or the small task in front of a top-level task moves each counted parameter to a local of its own when it starts. That convention is fixed, so the naive stage keeps those `take` lists. The runtime calls a task value the same way: `lucid_dom_fire` gives its text to the step.
 
 A `change` argument is a pointer to a stack slot of the caller. The caller stores the local there, and loads it back after the call. The task loads it on entry, and stores it in its one exit block, so it is an ordinary variable in between, and its count moves with it. This is the copy-in copy-out of Swift `inout`, and the checker's exclusivity rules make it correct: nothing can see the value during the call. MIR marks this with `Task::change` and `ExprKind::Change`, which only `Call` holds. A task value has no such case, since a task with a `change` parameter has no value form.
 

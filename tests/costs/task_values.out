@@ -1,0 +1,2 @@
+task_values.lcd:6:15: copy: this `list[int]` is held twice, so the next write copies it
+task_values.lcd:23:21: copy: this `list[int]` is held twice, so the next write copies it

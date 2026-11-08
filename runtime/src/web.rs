@@ -252,12 +252,12 @@ pub extern "C" fn lucid_dom_fire(handler: u32) {
     // SAFETY: `text_alloc` made room for the value's bytes after the header.
     // `step` is a live record whose tag is its task's index in the table, and
     // a step may keep a new one, so this holds a count of its own for the call.
+    // A task value takes the count of each argument, by decision 183.
     unsafe {
         dom::dom_value(value.add(1).cast());
         lucid_retain(step);
         let task: Step = std::mem::transmute::<usize, Step>((*step.cast::<Record>()).tag as usize);
         task(step as usize as i64, i64::from(handler), value as usize as i64);
         lucid_release(step);
-        lucid_release(value.cast());
     }
 }
