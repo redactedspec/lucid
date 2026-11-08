@@ -1411,6 +1411,39 @@ fn registry_fetches_and_locks() {
     let output = run(".", &["package", "loud"]);
     assert_eq!(output.status.code(), Some(1));
     assert!(text(&output.stderr).contains("cannot go in an archive"), "{}", text(&output.stderr));
+
+    // The M8 exit: a package uses a registry package built on `std.sql` and
+    // `std.crypto`, and passes `lucid test`.
+    let vault = "use std.crypto\nuse std.sql\nuse std.sql.Db\nuse std.sql.SqlError\n\n\
+        public task open() -> Db or SqlError\n\
+        \x20   let db = try sql.open(\":memory:\")\n\
+        \x20   try db.run(\"CREATE TABLE users (name TEXT PRIMARY KEY, hash TEXT NOT NULL)\", [])\n\
+        \x20   return db\n\n\
+        public task add(db: Db, name: text, password: text) -> int or SqlError\n\
+        \x20   let hash = crypto.hash_password(password)\n\
+        \x20   return try db.run(\"INSERT INTO users VALUES (?, ?)\", [sql.Text(value: name), sql.Text(value: hash)])\n\n\
+        public task login(db: Db, name: text, password: text) -> bool or SqlError\n\
+        \x20   let rows = try db.query(\"SELECT hash FROM users WHERE name = ?\", [sql.Text(value: name)])\n\
+        \x20   if rows.len() == 0\n\
+        \x20       return false\n\
+        \x20   return match rows[0].values[0]\n\
+        \x20       Text(value) -> crypto.check_password(password, value)\n\
+        \x20       _ -> false\n";
+    let files = "\n[permissions]\nfiles = [\"./data\"]\n";
+    publish("vault", "1.0.0", files, vault);
+    let dependency = "vault = { version = \"1.0.0\", allow = [\"files\"] }\n";
+    write("keeper/lucid.toml", &(head("keeper", "0.1.0") + dependency + files));
+    let keeper = "use vault\n\nprint \"keeper\"\n\n\
+        test \"logs in with the right password only\"\n\
+        \x20   let db = try vault.open()\n\
+        \x20   expect try vault.add(db, \"ada\", \"correct horse\") == 1\n\
+        \x20   expect try vault.login(db, \"ada\", \"correct horse\")\n\
+        \x20   expect not try vault.login(db, \"ada\", \"wrong\")\n\
+        \x20   expect not try vault.login(db, \"bob\", \"correct horse\")\n";
+    write("keeper/src/main.lcd", keeper);
+    let output = run(".", &["test", "keeper"]);
+    assert_eq!(output.status.code(), Some(0), "{}{}", text(&output.stdout), text(&output.stderr));
+    assert!(text(&output.stdout).contains("1 tests, 0 failed"), "{}", text(&output.stdout));
 }
 
 /// A string in JSON, for an archive written by hand.
