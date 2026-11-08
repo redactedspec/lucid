@@ -575,13 +575,13 @@ Fix: add the dependency to `lucid.toml`, or write `./` for a local file.
 
 ## E0338: `lucid.toml` is not valid
 
-The manifest has bad syntax, a form outside the supported TOML, an unknown key, a bad name or version, or a `files` or `env` item that is empty or holds a control character, such as the line break that `"\n"` makes.
+The manifest has bad syntax, a form outside the supported TOML, an unknown key, a bad name or version, or a `files` or `env` item that is empty or holds a control character, such as the line break that `"\n"` makes. A dependency with a `version` and no `path` needs `[registry]` with a `url`, which is an `https://` address or a directory. A line of `lucid.lock` that is not `NAME VERSION SHA256` is this error too.
 
-Fix: correct the line the message names. A manifest holds `[package]` with `name` and `version`, and `[dependencies]`.
+Fix: correct the line the message names. A manifest holds `[package]` with `name` and `version`, `[dependencies]`, and `[registry]` if a dependency comes from one. Delete a bad line of `lucid.lock`, and the next command writes it again.
 
 ## E0339: A package has no entry file or two, or a dependency is wrong
 
-A package has `src/main.lcd` or `src/lib.lcd`, not both. A `use ./` cannot reach a file under another `lucid.toml`, since that file would have the other package's permissions. A dependency must exist, have the name it is given, be a library, and not share a name with another package. `lucid run` cannot run a library.
+A package has `src/main.lcd` or `src/lib.lcd`, not both. A `use ./` cannot reach a file under another `lucid.toml`, since that file would have the other package's permissions. A dependency must exist, have the name it is given, be a library, and not share a name with another package. `lucid run` cannot run a library. A package from the registry cannot have a `path` dependency, and its archive must hold the version that `lucid.lock` names.
 
 Fix: follow the message: add or remove an entry file, or correct the dependency's `path` or name.
 
@@ -610,6 +610,24 @@ By the orphan rule, decision 196, a task with `self` in a package needs its rece
 For example, `task shout(self: text) -> text` in a package. The test is `tests/package/orphan`, since it needs a manifest.
 
 Fix: take the value as a plain argument, as `shout(t: text)`, or declare a `type` of the package that holds it. To call one task on many types, declare a trait in the package that names it.
+
+## E0343: A registry cannot give a package
+
+The registry has no index for the package, or no such version, or cannot be reached, or gives an index line or archive that is not valid. An archive may hold only `lucid.toml`, `README.md`, `LICENSE`, and `.lcd` files under `src` with plain lowercase paths, by decision 200. After a fetch, a package whose `lucid.toml` names a dependency that its index line does not is this error too. The test is `registry_fetches_and_locks` in `compiler/tests/golden.rs`, since it needs a registry.
+
+Fix: check the name and version in `lucid.toml` against the registry's `index/NAME`, and check `[registry] url`. For a broken archive, ask its author to publish a new version.
+
+## E0344: Two major versions of one package are wanted
+
+By decision 198, a program holds one version of each package, and a `version` floor reaches only up to the next major version, or the next minor while the major is 0. Two floors in different ranges, such as `1.2.0` and `2.0.0`, from the program or from its dependencies, cannot both hold.
+
+Fix: raise the older floor to the newer major, or use a version of the dependency that wants the same major as the program.
+
+## E0345: An archive's SHA-256 differs from the index or the lock
+
+By decision 199, `lucid.lock` pins each registry package by the SHA-256 of its archive, and the index gives the same hash. A fetched archive whose hash differs from the index, or an index whose hash differs from the lock, means a registry that changed a published version, or an attack. Nothing is unpacked, and the lock is not changed.
+
+Fix: find out why the archive changed before you trust it. To take the registry's new archive on purpose, delete the package's line from `lucid.lock`.
 
 ## E0901: Parses, but cannot run at this milestone
 

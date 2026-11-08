@@ -21,6 +21,8 @@ use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod crypto;
+#[cfg(not(target_arch = "wasm32"))]
+pub use crypto::sha256_hex;
 #[cfg(feature = "exe")]
 mod exe;
 #[cfg(not(target_arch = "wasm32"))]

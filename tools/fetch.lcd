@@ -1,0 +1,288 @@
+# The registry client, by decisions 197 to 201. The compiler runs it as
+# `lucid fetch CACHE REGISTRY LOCK NAME@VERSION...` when `lucid.lock` and the
+# cache do not cover a manifest. It picks versions by minimal version
+# selection, checks each archive's SHA-256 against the index and the lock,
+# unpacks what the cache lacks, and writes the lock. It prints `note TEXT` for
+# the user, and `error CODE NAME TEXT` when it stops.
+
+use std.args
+use std.crypto
+use std.fs
+use std.http
+use std.json
+
+## One line of a registry's index.
+type Release
+    version: text
+    dependencies: map[text, text] = {}
+    sha256: text
+
+## Why the client stopped: a code of docs/errors.md, the package, and why.
+type Problem
+    code: text
+    name: text
+    detail: text
+
+task error_message(self: Problem) -> text
+    return "error {self.code} {self.name} {self.detail}"
+
+task missing(name: text, detail: text) -> Problem
+    return Problem(code: "E0343", name: name, detail: detail)
+
+## The three numbers of a version, or `none`.
+task numbers(version: text) -> list[int]?
+    let parts = version.split(".")
+    if parts.len() != 3
+        return none
+    var out: list[int] = []
+    for part in parts
+        if part is empty or part.len() > 9
+            return none
+        for c in part
+            if not "0123456789".contains(c)
+                return none
+        let n = part.to_int()
+        if n is none
+            return none
+        out.push(n)
+    return out
+
+## The versions that a floor reaches, by decision 198: up to the next major,
+## or the next minor while the major is 0.
+task range(version: list[int]) -> text
+    if version[0] > 0
+        return "{version[0]}"
+    return "0.{version[1]}"
+
+task only(content: text, allowed: text) -> bool
+    for c in content
+        if not allowed.contains(c)
+            return false
+    return true
+
+task valid_name(name: text) -> bool
+    let digits = "0123456789"
+    return (
+        name is not empty
+        and name.len() <= 64
+        and only(name, "abcdefghijklmnopqrstuvwxyz_{digits}")
+        and not digits.contains(name[0..1])
+    )
+
+task valid_hash(hash: text) -> bool
+    return hash.len() == 64 and only(hash, "0123456789abcdef")
+
+## True if an archive may hold `path`, by decision 200. Each part is plain,
+## so no file lands outside the package's directory, and none is a name that
+## Windows keeps for a device.
+task archive_path(path: text) -> bool
+    if path == "lucid.toml" or path == "README.md" or path == "LICENSE"
+        return true
+    if not path.starts_with("src/") or not path.ends_with(".lcd")
+        return false
+    for part in path.split("/")
+        if part is empty or part == "." or part == ".."
+            return false
+        if not only(part, "abcdefghijklmnopqrstuvwxyz0123456789_-.")
+            return false
+        let stem = part.split(".")[0]
+        if stem in ["con", "prn", "aux", "nul"]
+            return false
+        let numbered = stem.starts_with("com") or stem.starts_with("lpt")
+        if stem.len() == 4 and numbered and "0123456789".contains(stem[3..4])
+            return false
+    return true
+
+## The text at `path` in the registry, an `https://` address or a directory.
+task read(registry: text, path: text, name: text) -> text or Problem
+    let at = "{registry}/{path}"
+    if registry.starts_with("https://")
+        let got = http.get(at)
+        if got is http.Response
+            if got.status == 404
+                return missing(name, "the registry has no `{path}`")
+            if got.status != 200
+                return missing(name, "the registry answered {got.status} for `{path}`")
+            let body = got.body_text()
+            if body is none
+                return missing(name, "`{path}` in the registry is not UTF-8")
+            return body
+        return missing(name, "cannot reach `{at}`: {got.error_message()}")
+    let found = fs.read_text(at)
+    if found is text
+        return found
+    return match found
+        NotFound(_) -> missing(name, "the registry has no `{path}`")
+        _ -> missing(name, found.error_message())
+
+## Each version of a package that the registry lists.
+task read_index(registry: text, name: text) -> list[Release] or Problem
+    let raw = try read(registry, "index/{name}", name)
+    var out: list[Release] = []
+    for line in raw.split("\n")
+        let content = line.trim()
+        if content is empty
+            continue
+        let release = json.parse[Release](content)
+        if release is json.JsonError
+            let why = release.error_message()
+            return missing(name, "a line of the index of `{name}` is not valid: {why}")
+        if not valid_hash(release.sha256)
+            return missing(name, "the index of `{name}` holds a bad SHA-256")
+        out.push(release)
+    return out
+
+task find(releases: list[Release], name: text, version: text) -> Release or Problem
+    for release in releases
+        if release.version == version
+            return release
+    return missing(name, "the registry has no `{name}` {version}")
+
+## One floor that a manifest or an index line names, and the package and
+## version that want it, or "" for a package outside the cache.
+type Want
+    by: text = ""
+    by_version: text = ""
+    name: text
+    floor: text
+
+## Minimal version selection, by decision 198. It visits every version that
+## any visited version wants, in any order, as Go's MVS walks its graph, and
+## each package gets the highest floor seen. Two majors are an error only
+## when a chosen version, or a package outside the cache, wants them.
+task select(registry: text, change indexes: map[text, list[Release]], wants: list[Want]) -> map[text, text] or Problem
+    var all = wants
+    var queue: list[Want] = wants
+    var seen: set[text] = set([])
+    var selected: map[text, text] = {}
+    while true
+        let want = queue.pop()
+        if want is none
+            break
+        let name = want.name
+        let floor = want.floor
+        let numbered = numbers(floor)
+        if numbered is none or not valid_name(name)
+            return missing(name, "`{name}` {floor} is not a package and a version")
+        let old = selected.get(name)
+        if old is none
+            selected[name] = floor
+        else
+            let have = numbers(old)
+            if have is not none and numbered > have
+                selected[name] = floor
+        if "{name}@{floor}" in seen
+            continue
+        seen.add("{name}@{floor}")
+        if name not in indexes
+            indexes[name] = try read_index(registry, name)
+        let release = try find(indexes[name], name, floor)
+        for dependency in release.dependencies
+            let next = release.dependencies[dependency]
+            let wanted = Want(by: name, by_version: floor, name: dependency, floor: next)
+            all.push(wanted)
+            queue.push(wanted)
+    for want in all
+        let chosen = selected[want.name]
+        let from_chosen = want.by == "" or selected[want.by] == want.by_version
+        let a = numbers(want.floor)
+        let b = numbers(chosen)
+        if from_chosen and a is not none and b is not none and range(a) != range(b)
+            let detail = "two major versions of `{want.name}` are wanted: {want.floor} and {chosen}"
+            return Problem(code: "E0344", name: want.name, detail: detail)
+    return selected
+
+## `NAME VERSION` to the SHA-256 that `lucid.lock` gives it.
+task read_lock(path: text) -> map[text, text]
+    var out: map[text, text] = {}
+    let raw = fs.read_text(path) else ""
+    for line in raw.split("\n")
+        let parts = line.trim().split(" ")
+        if parts.len() == 3 and not line.starts_with("#")
+            out["{parts[0]} {parts[1]}"] = parts[2]
+    return out
+
+## The directory part of a path in an archive, with a `/` before it, or "".
+task parent(path: text) -> text
+    let parts = path.split("/")
+    var out = ""
+    for i in 0..parts.len() - 1
+        out = "{out}/{parts[i]}"
+    return out
+
+## Fetches an archive, checks it, and unpacks it into the cache. It is
+## written beside its place, then moved there, so a directory in the cache is
+## always whole.
+task unpack(registry: text, dir: text, name: text, release: Release) -> none or Problem
+    let version = release.version
+    let raw = try read(registry, "files/{name}/{version}.lpk", name)
+    let found = crypto.hex(crypto.sha256(raw.bytes()))
+    if found != release.sha256
+        let detail = "the archive of `{name}` {version} has the SHA-256 {found}, and the index gives {release.sha256}"
+        return Problem(code: "E0345", name: name, detail: detail)
+    let files = json.parse[map[text, text]](raw)
+    if files is json.JsonError
+        return missing(name, "the archive of `{name}` {version}: {files.error_message()}")
+    if "lucid.toml" not in files
+        return missing(name, "the archive of `{name}` {version} has no `lucid.toml`")
+    for path in files
+        if not archive_path(path)
+            return missing(name, "the archive of `{name}` {version} holds a bad path `{path}`")
+    # ponytail: a failed write leaves its `.part-` directory in the cache.
+    # Remove such directories here if they ever pile up.
+    let part = "{dir}.part-{crypto.hex(crypto.random_bytes(8))}"
+    for path in files
+        let made = fs.make_dir("{part}{parent(path)}")
+        if made is fs.FileError
+            return missing(name, made.error_message())
+        let wrote = fs.write_text("{part}/{path}", files[path])
+        if wrote is fs.FileError
+            return missing(name, wrote.error_message())
+    let moved = fs.rename(part, dir)
+    # Another process may have unpacked it first.
+    if moved is fs.FileError
+        if not fs.exists("{dir}/lucid.toml")
+            return missing(name, moved.error_message())
+
+task main() -> none or Problem
+    let all = args.all()
+    if all.len() < 3
+        return missing("", "usage: lucid fetch CACHE REGISTRY LOCK NAME@VERSION...")
+    let cache = all[0]
+    let registry = all[1]
+    let lock_path = all[2]
+    var wants: list[Want] = []
+    for wanted in all[3..all.len()]
+        let parts = wanted.split("@")
+        if parts.len() != 2
+            return missing("", "`{wanted}` is not NAME@VERSION")
+        wants.push(Want(name: parts[0], floor: parts[1]))
+    var indexes: map[text, list[Release]] = {}
+    let selected = try select(registry, change indexes, wants)
+    var names: list[text] = []
+    for name in selected
+        names.push(name)
+    names.sort()
+    let pins = read_lock(lock_path)
+    var lock = "# Written by lucid, from the registry. Check it in.\n"
+    for name in names
+        let version = selected[name]
+        let release = try find(indexes[name], name, version)
+        let pinned = pins.get("{name} {version}")
+        if pinned is not none and pinned != release.sha256
+            let detail = "`lucid.lock` gives `{name}` {version} the SHA-256 {pinned}, and the index gives {release.sha256}"
+            return Problem(code: "E0345", name: name, detail: detail)
+        let dir = "{cache}{name}-{version}-{release.sha256}"
+        if not fs.exists("{dir}/lucid.toml")
+            print "note fetching {name} {version}"
+            try unpack(registry, dir, name, release)
+        lock = "{lock}{name} {version} {release.sha256}\n"
+    let old = fs.read_text(lock_path) else ""
+    if old != lock
+        let wrote = fs.write_text(lock_path, lock)
+        if wrote is fs.FileError
+            return missing("", wrote.error_message())
+
+let outcome = main()
+if outcome is Problem
+    print outcome.error_message()

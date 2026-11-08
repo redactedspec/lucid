@@ -23,7 +23,7 @@ use resolve::{load, package_files, package_root};
 use std::io::Write;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--target web] [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\n       lucid fix [--json] [PATH]\n       lucid explain [--json] CODE\n       lucid context [--json] MODULE\n       lucid fmt [--check] [PATH]\nPATH is a file or a package directory, by default the current directory.";
+const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--target web] [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\n       lucid fix [--json] [PATH]\n       lucid explain [--json] CODE\n       lucid context [--json] MODULE\n       lucid fmt [--check] [PATH]\n       lucid package [PATH]\nPATH is a file or a package directory, by default the current directory.";
 
 /// Set for the child process of `lucid test`, to the place of its first test.
 const TEST_FROM: &str = "LUCID_TEST_FROM";
@@ -57,6 +57,12 @@ fn cli(args: &[String]) -> ExitCode {
         ("context", ["--json", module]) => return context(module, true),
         ("context", _) => return usage(),
         ("fmt", _) => return fmt(rest),
+        ("fetch", _) if std::env::var_os(resolve::FETCH_CHILD).is_some() => {
+            return run_tool(resolve::FETCH_PATH, rest);
+        }
+        ("package", []) => return package("."),
+        ("package", [path]) if !path.starts_with('-') => return package(path),
+        ("package", _) => return usage(),
         _ => {}
     }
     // What follows the path of `lucid run` belongs to the program.
@@ -463,7 +469,7 @@ fn context(name: &str, json: bool) -> ExitCode {
 /// docs/compiler.md.
 fn fmt(rest: &[&str]) -> ExitCode {
     if std::env::var_os(FMT_CHILD).is_some() {
-        return run_formatter(rest);
+        return run_tool(resolve::FMT_PATH, rest);
     }
     let (check, path) = match rest {
         [] => (false, "."),
@@ -589,10 +595,11 @@ fn same_tokens(a: &[lexer::Token], b: &[lexer::Token]) -> bool {
         })
 }
 
-/// The child of `lucid fmt`: compiles `tools/fmt.lcd` and runs it on `args`.
-fn run_formatter(args: &[&str]) -> ExitCode {
+/// The child of `lucid fmt` or of a fetch: compiles a program inside the
+/// compiler, `tools/fmt.lcd` or `tools/fetch.lcd`, and runs it on `args`.
+fn run_tool(path: &str, args: &[&str]) -> ExitCode {
     lucid_rt::set_args(args.iter().map(|arg| (*arg).to_string()).collect());
-    let (source, file, mut diags) = load(resolve::FMT_PATH, true);
+    let (source, file, mut diags) = load(path, true);
     if diags.is_empty()
         && let Some(file) = &file
     {
@@ -608,6 +615,100 @@ fn run_formatter(args: &[&str]) -> ExitCode {
     }
     report_errors(&source, &diags, false);
     if diags.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+}
+
+/// True if a registry archive may hold `path`, by decision 200: the manifest,
+/// `README.md`, `LICENSE`, or a `.lcd` file under `src` whose parts are plain
+/// and not a name that Windows keeps for a device. `tools/fetch.lcd` checks
+/// the same rule.
+fn archive_path(path: &str) -> bool {
+    let plain = |part: &str| {
+        let stem = part.split('.').next().unwrap_or("");
+        let numbered = (stem.starts_with("com") || stem.starts_with("lpt"))
+            && stem.len() == 4
+            && stem.as_bytes()[3].is_ascii_digit();
+        !matches!(part, "" | "." | "..")
+            && part
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_-.".contains(&b))
+            && !matches!(stem, "con" | "prn" | "aux" | "nul")
+            && !numbered
+    };
+    matches!(path, "lucid.toml" | "README.md" | "LICENSE")
+        || (path.starts_with("src/") && path.ends_with(".lcd") && path.split('/').all(plain))
+}
+
+/// `lucid package`: checks a library, writes its archive `NAME-VERSION.lpk`
+/// to the current directory, and prints its line of the registry's index. The
+/// author puts the archive at `files/NAME/VERSION.lpk`, and adds the line to
+/// `index/NAME`. See "Registry" in docs/compiler.md.
+fn package(path: &str) -> ExitCode {
+    let fail = |message: String| {
+        emit(std::io::stderr(), &format!("lucid: {message}\n"));
+        ExitCode::FAILURE
+    };
+    let checked = cli(&["check".to_string(), path.to_string()]);
+    if checked != ExitCode::SUCCESS {
+        return checked;
+    }
+    let root = package_root(path);
+    let Ok(text) = std::fs::read_to_string(format!("{root}lucid.toml")) else {
+        return fail(format!("`{path}` is not a package"));
+    };
+    let (Some(manifest), _) = manifest::parse(&text) else {
+        return fail(format!("`{root}lucid.toml` is not valid"));
+    };
+    if !std::path::Path::new(&format!("{root}src/lib.lcd")).is_file() {
+        return fail(format!("`{}` has no `src/lib.lcd`, so nothing could use it", manifest.name));
+    }
+    let mut dependencies = Vec::new();
+    for dependency in &manifest.dependencies {
+        let Some(version) = &dependency.version else {
+            let name = &dependency.name;
+            return fail(format!(
+                "`{name}` is a `path` dependency, which the registry cannot hold"
+            ));
+        };
+        dependencies.push(format!(
+            "{}:{}",
+            diag::json_string(&dependency.name),
+            diag::json_string(version)
+        ));
+    }
+    let mut files = vec!["lucid.toml".to_string()];
+    files.extend(
+        ["README.md", "LICENSE"]
+            .iter()
+            .filter(|file| std::path::Path::new(&format!("{root}{file}")).is_file())
+            .map(|file| file.to_string()),
+    );
+    files.extend(package_files(&root).iter().map(|file| file[root.len()..].to_string()));
+    let mut entries = Vec::new();
+    for file in &files {
+        if !archive_path(file) {
+            let rule = "lowercase letters, digits, `_`, `-`, and `.`";
+            return fail(format!("`{root}{file}` cannot go in an archive: use {rule}"));
+        }
+        match std::fs::read_to_string(format!("{root}{file}")) {
+            Ok(text) => {
+                entries.push(format!("{}:{}", diag::json_string(file), diag::json_string(&text)))
+            }
+            Err(e) => return fail(format!("cannot read `{root}{file}`: {e}")),
+        }
+    }
+    let archive = format!("{{{}}}", entries.join(","));
+    let out = format!("{}-{}.lpk", manifest.name, manifest.version);
+    if let Err(e) = std::fs::write(&out, &archive) {
+        return fail(format!("cannot write `{out}`: {e}"));
+    }
+    let line = format!(
+        "{{\"version\":{},\"dependencies\":{{{}}},\"sha256\":\"{}\"}}\n",
+        diag::json_string(&manifest.version),
+        dependencies.join(","),
+        lucid_rt::sha256_hex(archive.as_bytes())
+    );
+    emit(std::io::stdout(), &line);
+    ExitCode::SUCCESS
 }
 
 /// The result of one test.

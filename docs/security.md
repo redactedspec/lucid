@@ -83,9 +83,10 @@ Permissions are not a sandbox. They limit what dependencies can do by accident o
 
 ## Supply chain
 
-- `lucid.lock` will pin every registry package by the SHA-256 of its archive, by decision 199. A hash that differs is an error, never a new fetch. Planned for M8. Today a dependency is a local path, so nothing pins it.
+- `lucid.lock` pins every registry package by the SHA-256 of its archive, by decision 199. A hash that differs from the index or the lock is error E0345, never a new fetch. A cached package's directory is named by its whole hash, so packages of one name and version from two registries never share one. A path dependency is not pinned.
 - The lock protects only after the first download. Lucid has no checksum log like Go's, so a registry that serves a bad archive to a new user is not caught.
-- An archive holds only paths of lowercase ASCII letters, digits, `_`, `-`, `.`, and `/`, with no `.` or `..` part, so it cannot write outside its cache directory, by decision 200. A registry package cannot have a `path` dependency.
+- An archive holds only `lucid.toml`, `README.md`, `LICENSE`, and `.lcd` files under `src` whose paths hold lowercase ASCII letters, digits, `_`, `-`, `.`, and `/`, with no empty, `.`, or `..` part, and no Windows device name such as `con` or `com1`, so it cannot write outside its cache directory, by decisions 200 and 211. Both `lucid package` and the client check this. A registry package cannot have a `path` dependency.
+- The index and archives are data. Fetching runs no code from them, and the client checks each name, version, and hash in the index before it builds a path from one.
 - Packages have no build scripts and no install hooks. Compiling a dependency never runs its code.
 - A compile-time execution feature, if ever added, must have no access to files or the network.
 

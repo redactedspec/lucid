@@ -772,9 +772,9 @@ fn failed_stdout_write_traps_without_a_position() {
 #[test]
 fn every_error_code_is_tested_and_documented() {
     // missing_file_is_reported, huge_frame_is_rejected,
-    // test_names_are_plain_and_new, web_rejects_foreign_code, and
-    // web_rejects_spawn
-    let mut tested = String::from("E0001 E0902 E0329 E0905 E0907");
+    // test_names_are_plain_and_new, web_rejects_foreign_code,
+    // web_rejects_spawn, and registry_fetches_and_locks
+    let mut tested = String::from("E0001 E0902 E0329 E0905 E0907 E0343 E0344 E0345");
     for err in files(&repo().join("tests").join("fail"), "err") {
         tested += &text(&fs::read(err).expect("cannot read .err file"));
     }
@@ -1194,4 +1194,235 @@ fn web_rejects_spawn() {
         let error = text(&output.stderr);
         assert!(error.contains(&format!("error E0907: {says} cannot run")), "{error}");
     }
+}
+/// The registry, by decisions 197 to 201, from a local directory. `lucid
+/// package` writes an archive and its index line. `lucid run` picks versions
+/// by minimal version selection, fetches into `LUCID_CACHE`, and writes
+/// `lucid.lock`. A changed archive or pin is E0345, two majors E0344, and what
+/// the registry lacks E0343.
+#[test]
+fn registry_fetches_and_locks() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("registry");
+    let _ = fs::remove_dir_all(&dir);
+    let cache = dir.join("cache");
+    let write = |path: &str, content: &str| {
+        let path = dir.join(path);
+        fs::create_dir_all(path.parent().expect("a parent")).expect("cannot make directory");
+        fs::write(path, content).expect("cannot write");
+    };
+    let run = |cwd: &str, args: &[&str]| {
+        let mut command = Command::new(LUCID);
+        command.args(args).current_dir(dir.join(cwd)).env("LUCID_CACHE", &cache);
+        command.output().expect("cannot start lucid")
+    };
+    let head = |name: &str, version: &str| {
+        format!(
+            "[package]\nname = \"{name}\"\nversion = \"{version}\"\n\n\
+             [registry]\nurl = \"../registry\"\n\n[dependencies]\n"
+        )
+    };
+    let add_to_index = |name: &str, line: &str| {
+        let index = format!("registry/index/{name}");
+        let old = fs::read_to_string(dir.join(&index)).unwrap_or_default();
+        write(&index, &format!("{old}{line}"));
+    };
+    let publish = |name: &str, version: &str, dependencies: &str, lib: &str| {
+        let source = format!("{name}-{version}");
+        write(&format!("{source}/lucid.toml"), &(head(name, version) + dependencies));
+        write(&format!("{source}/src/lib.lcd"), lib);
+        let output = run(".", &["package", &source]);
+        assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+        let archive = fs::read(dir.join(format!("{source}.lpk"))).expect("an archive");
+        write(&format!("registry/files/{name}/{version}.lpk"), &text(&archive));
+        add_to_index(name, &text(&output.stdout));
+    };
+    // An archive written by hand, with its hash from `std.crypto`.
+    let publish_raw = |name: &str, version: &str, archive: &str| {
+        write(&format!("registry/files/{name}/{version}.lpk"), archive);
+        let hash = "use std.crypto\nuse std.fs\nuse std.args\n\
+            let data = fs.read_bytes(args.get(0) else \"\") else []\n\
+            print crypto.hex(crypto.sha256(data))\n";
+        write("hash.lcd", hash);
+        let path = format!("registry/files/{name}/{version}.lpk");
+        let sha = text(&run(".", &["run", "hash.lcd", &path]).stdout).trim().to_string();
+        let line = format!("{{\"version\":\"{version}\",\"sha256\":\"{sha}\"}}\n");
+        add_to_index(name, &line);
+    };
+    let says_version =
+        |version: &str| format!("public task version() -> text\n    return \"{version}\"\n");
+    publish("util", "1.1.0", "", &says_version("1.1.0"));
+    publish("util", "1.2.0", "", &says_version("1.2.0"));
+    publish("util", "1.3.0", "", &says_version("1.3.0"));
+    publish("util", "2.0.0", "", &says_version("2.0.0"));
+    let md =
+        "use util\n\npublic task render() -> text\n    return \"md on util {util.version()}\"\n";
+    publish("md", "1.0.0", "util = { version = \"1.1.0\" }\n", md);
+
+    // `md` asks for util 1.1.0 and the app for 1.2.0, so both get 1.2.0, not
+    // the newest 1.3.0.
+    let main = "use md\nuse util\n\nprint md.render()\nprint util.version()\n";
+    let app = |name: &str, dependencies: &str| {
+        write(&format!("{name}/lucid.toml"), &(head(name, "0.1.0") + dependencies));
+        write(&format!("{name}/src/main.lcd"), main);
+    };
+    app("app", "md = { version = \"1.0.0\" }\nutil = { version = \"1.2.0\" }\n");
+    let output = run(".", &["run", "app"]);
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    assert_eq!(text(&output.stdout), "md on util 1.2.0\n1.2.0\n");
+    let stderr = text(&output.stderr);
+    assert!(stderr.contains("lucid: fetching md 1.0.0\n"), "{stderr}");
+    assert!(stderr.contains("lucid: fetching util 1.2.0\n"), "{stderr}");
+    let lock = fs::read_to_string(dir.join("app/lucid.lock")).expect("a lock");
+    let names: Vec<&str> =
+        lock.lines().skip(1).map(|line| &line[..line.rfind(' ').unwrap()]).collect();
+    assert_eq!(names, ["md 1.0.0", "util 1.2.0"], "{lock}");
+    let again = run(".", &["run", "app"]);
+    assert_eq!((text(&again.stdout), text(&again.stderr)), (text(&output.stdout), String::new()));
+
+    // A pin in the lock that the index does not give.
+    let util = lock.lines().find(|line| line.starts_with("util")).expect("a line").to_string();
+    let other = format!("util 1.2.0 {}", "0".repeat(64));
+    fs::write(dir.join("app/lucid.lock"), lock.replace(&util, &other)).expect("cannot write");
+    let pinned = run(".", &["run", "app"]);
+    assert_eq!(pinned.status.code(), Some(1));
+    assert!(
+        text(&pinned.stderr).contains("error E0345: `lucid.lock` gives `util` 1.2.0"),
+        "{}",
+        text(&pinned.stderr)
+    );
+    fs::write(dir.join("app/lucid.lock"), "util 1.2.0\n").expect("cannot write");
+    let bad_lock = run(".", &["run", "app"]);
+    assert!(
+        text(&bad_lock.stderr).contains("app/lucid.lock:1:1: error E0338"),
+        "{}",
+        text(&bad_lock.stderr)
+    );
+    fs::write(dir.join("app/lucid.lock"), &lock).expect("cannot write");
+
+    // An archive that changed after the index gave its hash.
+    let archive = dir.join("registry/files/util/1.2.0.lpk");
+    let original = fs::read(&archive).expect("an archive");
+    let cached = fs::read_dir(&cache).expect("a cache").flatten().map(|entry| entry.path());
+    for entry in cached.filter(|path| file_name(path).starts_with("util-1.2.0-")) {
+        fs::remove_dir_all(entry).expect("cannot remove");
+    }
+    fs::write(&archive, text(&original).replace("1.2.0", "6.6.6")).expect("cannot write");
+    let changed = run(".", &["run", "app"]);
+    assert_eq!(changed.status.code(), Some(1));
+    let stderr = text(&changed.stderr);
+    assert!(
+        stderr.contains("error E0345: the archive of `util` 1.2.0 has the SHA-256"),
+        "{stderr}"
+    );
+    fs::write(&archive, original).expect("cannot write");
+
+    app("majors", "md = { version = \"1.0.0\" }\nutil = { version = \"2.0.0\" }\n");
+    let majors = run(".", &["run", "majors"]);
+    assert_eq!(majors.status.code(), Some(1));
+    let stderr = text(&majors.stderr);
+    assert!(stderr.contains("error E0344: two major versions of `util`"), "{stderr}");
+
+    // A version that MVS passes over may want another major of a package
+    // than the chosen version does. Only the chosen one counts.
+    publish("y", "1.0.0", "", &says_version("y1"));
+    publish("y", "2.0.0", "", &says_version("y2"));
+    publish("util", "1.4.0", "y = { version = \"1.0.0\" }\n", &says_version("1.4.0"));
+    publish("util", "1.5.0", "y = { version = \"2.0.0\" }\n", &says_version("1.5.0"));
+    write("side/lucid.toml", &(head("side", "1.0.0") + "util = { version = \"1.4.0\" }\n"));
+    write("side/src/lib.lcd", "public task nothing() -> int\n    return 0\n");
+    for name in ["passed_over", "passed_under"] {
+        let side = "side = { path = \"../side\" }\n";
+        let util = "util = { version = \"1.5.0\" }\n";
+        let order =
+            if name == "passed_over" { format!("{side}{util}") } else { format!("{util}{side}") };
+        write(&format!("{name}/lucid.toml"), &(head(name, "0.1.0") + &order));
+        write(&format!("{name}/src/main.lcd"), "use util\n\nprint util.version()\n");
+        let output = run(".", &["run", name]);
+        assert_eq!(text(&output.stdout), "1.5.0\n", "{name}: {}", text(&output.stderr));
+    }
+
+    app(
+        "absent",
+        "md = { version = \"1.0.0\" }\nutil = { version = \"1.2.0\" }\nnothing = { version = \"1.0.0\" }\n",
+    );
+    let absent = run(".", &["run", "absent"]);
+    let stderr = text(&absent.stderr);
+    assert!(
+        stderr.contains("absent/lucid.toml:11:1: error E0343: the registry has no"),
+        "{stderr}"
+    );
+
+    write(
+        "no_registry/lucid.toml",
+        "[package]\nname = \"x\"\nversion = \"1.0.0\"\n\n[dependencies]\nmd = { version = \"1.0.0\" }\n",
+    );
+    write("no_registry/src/main.lcd", "print 1\n");
+    let stderr = text(&run(".", &["run", "no_registry"]).stderr);
+    assert!(
+        stderr.contains("error E0338: a dependency with a `version` needs a registry"),
+        "{stderr}"
+    );
+
+    // Archives that break the rules of decision 200. None of their files
+    // may land outside the cache.
+    let manifest = |version: &str, deps: &str| {
+        let toml = format!(
+            "[package]\nname = \"evil\"\nversion = \"{version}\"\n\n[dependencies]\n{deps}"
+        );
+        json_text(&toml)
+    };
+    let lib = json_text("public task version() -> text\n    return \"evil\"\n");
+    let escape = format!(
+        "{{\"lucid.toml\":{},\"src/lib.lcd\":{lib},\"src/../../../escaped.lcd\":{lib}}}",
+        manifest("1.0.0", "")
+    );
+    publish_raw("evil", "1.0.0", &escape);
+    let path_dependency = format!(
+        "{{\"lucid.toml\":{},\"src/lib.lcd\":{lib}}}",
+        manifest("1.1.0", "util = { path = \"../util\" }\n")
+    );
+    publish_raw("evil", "1.1.0", &path_dependency);
+    let liar = format!(
+        "{{\"lucid.toml\":{},\"src/lib.lcd\":{lib}}}",
+        manifest("1.2.0", "util = { version = \"1.1.0\" }\n")
+    );
+    publish_raw("evil", "1.2.0", &liar);
+    for (version, says) in [
+        ("1.0.0", "error E0343: the archive of `evil` 1.0.0 holds a bad path"),
+        ("1.1.0", "error E0339: a package from the registry cannot have a `path` dependency"),
+        ("1.2.0", "error E0343: `util` 1.1.0 is not in `lucid.lock` after a fetch"),
+    ] {
+        let name = format!("evil{}", version.replace('.', ""));
+        write(
+            &format!("{name}/lucid.toml"),
+            &(head(&name, "0.1.0") + &format!("evil = {{ version = \"{version}\" }}\n")),
+        );
+        write(&format!("{name}/src/main.lcd"), "use evil\n\nprint evil.version()\n");
+        let output = run(".", &["run", &name]);
+        assert_eq!(output.status.code(), Some(1), "{version}");
+        assert!(text(&output.stderr).contains(says), "{version}: {}", text(&output.stderr));
+    }
+    assert!(!dir.join("escaped.lcd").exists() && !cache.join("escaped.lcd").exists());
+
+    // `lucid package` takes only what an archive may hold.
+    write("loud/lucid.toml", &head("loud", "1.0.0"));
+    write("loud/src/lib.lcd", "use ./Shout\n");
+    write("loud/src/Shout.lcd", "public task x() -> int\n    return 1\n");
+    let output = run(".", &["package", "loud"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(text(&output.stderr).contains("cannot go in an archive"), "{}", text(&output.stderr));
+}
+
+/// A string in JSON, for an archive written by hand.
+fn json_text(text: &str) -> String {
+    let mut out = String::from("\"");
+    for c in text.chars() {
+        match c {
+            '"' => out += "\\\"",
+            '\\' => out += "\\\\",
+            c if c < ' ' => out += &format!("\\u{:04x}", c as u32),
+            c => out.push(c),
+        }
+    }
+    out + "\""
 }

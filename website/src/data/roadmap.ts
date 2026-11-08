@@ -86,7 +86,7 @@ export const milestones: Milestone[] = [
       { text: '`std.crypto`', done: true },
       { text: '`std.sql` and the `sql` type', done: true },
       { text: 'Orphan rule for tasks with `self`', done: true },
-      { text: 'Registry, `lucid package`, version selection, and `lucid.lock`', done: false },
+      { text: 'Registry, `lucid package`, version selection, and `lucid.lock`', done: true },
       { text: '`lucid lsp`', done: false },
       { text: 'Spec review, then the version 1.0 promise', done: false },
     ],

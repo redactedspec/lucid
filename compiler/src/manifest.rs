@@ -15,7 +15,10 @@ pub const PERMISSIONS: &[&str] = &["net", "files", "env", "process", "unsafe"];
 
 pub struct Manifest {
     pub name: String,
+    pub version: String,
     pub dependencies: Vec<Dependency>,
+    /// `[registry] url`, as written, with its span.
+    pub registry: Option<(String, Span)>,
     /// One for each of `PERMISSIONS`, in that order.
     pub permissions: Vec<Grant>,
 }
@@ -98,8 +101,11 @@ pub fn normal(path: &str) -> PathBuf {
 #[derive(Clone)]
 pub struct Dependency {
     pub name: String,
-    /// As written, relative to the manifest.
+    /// As written, relative to the manifest. Empty for a registry dependency
+    /// that `lucid.lock` and the cache do not cover yet.
     pub path: String,
+    /// The lowest version wanted from the registry, if there is no `path`.
+    pub version: Option<String>,
     pub span: Span,
     /// The permissions that its `allow` entry names, each with its span.
     pub allow: Vec<(String, Span)>,
@@ -365,7 +371,7 @@ fn add(entries: &mut Vec<Entry>, entry: Entry) -> Result<(), Diagnostic> {
 }
 
 /// True if `use name` can spell this name.
-fn valid_name(name: &str) -> bool {
+pub fn valid_name(name: &str) -> bool {
     let mut letters = name.chars();
     letters.next().is_some_and(|c| c.is_ascii_lowercase() || c == '_')
         && letters.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
@@ -373,7 +379,7 @@ fn valid_name(name: &str) -> bool {
         && name != "std"
 }
 
-fn valid_version(version: &str) -> bool {
+pub fn valid_version(version: &str) -> bool {
     let parts: Vec<&str> = version.split('.').collect();
     let number = |part: &&str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
     parts.len() == 3 && parts.iter().all(number)
@@ -394,7 +400,7 @@ fn text_list(entry: &Entry, diags: &mut Vec<Diagnostic>) {
     }
 }
 
-fn read_package(table: &Table, diags: &mut Vec<Diagnostic>) -> Option<String> {
+fn read_package(table: &Table, diags: &mut Vec<Diagnostic>) -> Option<(String, String)> {
     let (mut name, mut version) = (None, None);
     for entry in &table.entries {
         match (entry.key.as_str(), &entry.value) {
@@ -423,7 +429,32 @@ fn read_package(table: &Table, diags: &mut Vec<Diagnostic>) -> Option<String> {
     if name.is_none() {
         diags.push(error("`[package]` needs `name`", table.span));
     }
-    name
+    Some((name?, version?.clone()))
+}
+
+/// `[registry]`: its `url`, an `https://` address or a local directory.
+fn read_registry(table: &Table, diags: &mut Vec<Diagnostic>) -> Option<(String, Span)> {
+    let mut url = None;
+    for entry in &table.entries {
+        match (entry.key.as_str(), &entry.value) {
+            ("url", Value::Text(text)) => {
+                // Any other scheme, or `HTTPS://`, would read as a directory.
+                if text.is_empty() || (text.contains("://") && !text.starts_with("https://")) {
+                    let message = "`url` must be an `https://` address or a directory";
+                    diags.push(error(message, entry.span));
+                }
+                url = Some((text.clone(), entry.span));
+            }
+            ("url", _) => diags.push(error("`url` must be a string", entry.span)),
+            (key, _) => {
+                diags.push(error(format!("`[registry]` has no key `{key}`"), entry.span));
+            }
+        }
+    }
+    if url.is_none() {
+        diags.push(error("`[registry]` needs `url`", table.span));
+    }
+    url
 }
 
 fn read_permissions(table: &Table, diags: &mut Vec<Diagnostic>) -> Vec<Grant> {
@@ -475,12 +506,19 @@ fn read_permissions(table: &Table, diags: &mut Vec<Diagnostic>) -> Vec<Grant> {
 fn read_dependency(entry: &Entry, diags: &mut Vec<Diagnostic>) -> Option<Dependency> {
     check_name(&entry.key, entry.span, diags);
     let mut path = None;
+    let mut version = None;
     let mut allow = Vec::new();
     if let Value::Table(fields) = &entry.value {
         for field in fields {
             match (field.key.as_str(), &field.value) {
                 ("path", Value::Text(text)) => path = Some(text.clone()),
-                ("version", Value::Text(_)) => {}
+                ("version", Value::Text(text)) => {
+                    if !valid_version(text) {
+                        let message = format!("version `{text}` is not three numbers: `1.2.3`");
+                        diags.push(error(message, field.span));
+                    }
+                    version = Some(text.clone());
+                }
                 ("allow", value) => {
                     text_list(field, diags);
                     let Value::List(items) = value else { continue };
@@ -502,23 +540,28 @@ fn read_dependency(entry: &Entry, diags: &mut Vec<Diagnostic>) -> Option<Depende
             }
         }
     }
-    if path.is_none() {
-        let message = format!("dependency `{}` needs a `path`", entry.key);
-        let note = "write `name = { path = \"../name\" }`. A registry is planned for M8";
+    if path.is_none() && version.is_none() {
+        let message = format!("dependency `{}` needs a `path` or a `version`", entry.key);
+        let note = "write `name = { path = \"../name\" }`, or `name = { version = \"1.0.0\" }`";
         diags.push(error(message, entry.span).note(note));
     }
-    Some(Dependency { name: entry.key.clone(), path: path?, span: entry.span, allow })
+    // A `path` wins, and its `version` is only a note to the reader.
+    let version = if path.is_some() { None } else { version };
+    let path = path.unwrap_or_default();
+    Some(Dependency { name: entry.key.clone(), path, version, span: entry.span, allow })
 }
 
 fn read_tables(tables: &[Table]) -> (Option<Manifest>, Vec<Diagnostic>) {
     let mut diags = Vec::new();
     let mut name = None;
+    let mut registry = None;
     let mut dependencies = Vec::new();
     let mut permissions = vec![NOTHING; PERMISSIONS.len()];
     for table in tables {
         match table.name.as_str() {
             "package" => name = read_package(table, &mut diags),
             "permissions" => permissions = read_permissions(table, &mut diags),
+            "registry" => registry = read_registry(table, &mut diags),
             "dependencies" => {
                 let read = table.entries.iter();
                 dependencies.extend(read.filter_map(|e| read_dependency(e, &mut diags)));
@@ -532,7 +575,9 @@ fn read_tables(tables: &[Table]) -> (Option<Manifest>, Vec<Diagnostic>) {
     if !diags.is_empty() {
         return (None, diags);
     }
-    (name.map(|name| Manifest { name, dependencies, permissions }), diags)
+    let manifest =
+        name.map(|(name, version)| Manifest { name, version, dependencies, registry, permissions });
+    (manifest, diags)
 }
 
 #[cfg(test)]
@@ -554,7 +599,7 @@ mod tests {
     fn reads_a_full_manifest() {
         let text = "\u{feff}# top\r\n[package] # note\r\nname = \"blog\"\nversion = '0.1.0'\n\n\
             [permissions]\nnet = true\nunsafe = false\nfiles = [\n  \"./data\", # here\n  'x',\n]\n\
-            env = []\n\n[dependencies]\nmd = { version = \"1.2\", path = \"..\\\\md\", allow = [] }\n\
+            env = []\n\n[dependencies]\nmd = { version = \"1.2.0\", path = \"..\\\\md\", allow = [] }\n\
             mail = {path='../mail',allow=[\"net\"]}\n";
         let (manifest, diags) = parse(text);
         assert!(diags.is_empty(), "{:?}", diags.iter().map(|d| &d.message).collect::<Vec<_>>());
@@ -586,7 +631,14 @@ mod tests {
         bad(&format!("{HEAD}[permissions]\nenv = [\"\"]\n"), "empty string");
         bad(&format!("{HEAD}[permissions]\nfiles = [\"\\new\"]\n"), "control character");
         bad(&format!("{HEAD}[permissions]\nenv = [\"A\\tB\"]\n"), "control character");
-        bad(&format!("{HEAD}[dependencies]\nx = \"1.2\"\n"), "needs a `path`");
+        bad(&format!("{HEAD}[dependencies]\nx = \"1.2\"\n"), "a `path` or a `version`");
+        bad(&format!("{HEAD}[dependencies]\nx = {{ version = \"1.2\" }}\n"), "three numbers");
+        bad(&format!("{HEAD}[registry]\n"), "needs `url`");
+        bad(&format!("{HEAD}[registry]\nurl = \"http://x\"\n"), "`https://`");
+        bad(&format!("{HEAD}[registry]\nurl = \"HTTPS://x\"\n"), "`https://`");
+        bad(&format!("{HEAD}[registry]\nurl = \"file:///x\"\n"), "`https://`");
+        bad(&format!("{HEAD}[registry]\nurl = true\n"), "must be a string");
+        bad(&format!("{HEAD}[registry]\nurl = \"x\"\nkey = \"y\"\n"), "no key `key`");
         bad(&format!("{HEAD}[dependencies]\nx = {{ path = \"a\", }}\n"), "expected a key");
         bad(&format!("{HEAD}[dependencies]\nx = {{ path = \"a\"\n"), "expected `,` or `}`");
         bad(&format!("{HEAD}[dependencies]\nx = {{ path = \"a\", z = true }}\n"), "no key `z`");

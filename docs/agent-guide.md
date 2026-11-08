@@ -742,6 +742,8 @@ markdown = { path = "../markdown", allow = [] }
 - `lucid test` on a package runs the tests of every file in `src`.
 - `use markdown` is the dependency's `src/lib.lcd`. `use markdown.render` reads `src/render.lcd`, or else takes `render` from `src/lib.lcd`. `use markdown.a.b` follows the rule of `./`, from `src`.
 - `use` needs a dependency in this package's own `lucid.toml`. A dependency of a dependency does not count. A local file needs `./`.
+- A dependency from a registry has a `version` and no `path`: `markdown = { version = "1.2.0" }`, with `[registry]` and `url = "https://..."` or a directory. The version is a floor, and the program gets the highest floor any manifest names, never a newer one. `lucid run`, `check`, `test`, and `build` fetch what is missing, and write `lucid.lock`, which pins each archive's SHA-256: check it in. Two major versions of one package are E0344, a package the registry lacks E0343, and a changed archive E0345.
+- `lucid package` checks a library, writes `NAME-VERSION.lpk` to the current directory, and prints its index line. Put the archive at `files/NAME/VERSION.lpk` in the registry, and add the line to `index/NAME`.
 
 ## What is not available
 

@@ -18,6 +18,11 @@ fn random(out: &mut [u8]) {
     SystemRandom::new().fill(out).expect("the system gives random bytes");
 }
 
+/// The SHA-256 of `data` in lowercase hex, for `lucid package`.
+pub fn sha256_hex(data: &[u8]) -> String {
+    digest::digest(&digest::SHA256, data).as_ref().iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// The SHA-256 digest of `data`, 32 bytes.
 ///
 /// # Safety

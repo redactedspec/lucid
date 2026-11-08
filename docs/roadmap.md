@@ -126,7 +126,7 @@ Designed by decisions 188 to 205, see "Ecosystem" in `compiler.md`. Build in thi
 - [x] `std.crypto`, by decisions 193 and 208
 - [x] `std.sql` and the `sql` type, by decisions 194, 195, and 209
 - [x] Orphan rule, by decisions 196 and 210
-- [ ] Registry, `lucid package`, version selection, `lucid.lock`, and the fetch client in Lucid, by decisions 197 to 201. Tests use a local directory registry
+- [x] Registry, `lucid package`, version selection, `lucid.lock`, and the fetch client in Lucid, by decisions 197 to 201 and 211. Tests use a local directory registry
 - [ ] `lucid lsp`, by decision 202
 - [ ] Spec review, then the version 1.0 promise, by decisions 203 and 204
 

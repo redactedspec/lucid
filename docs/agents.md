@@ -26,6 +26,7 @@ Every tool has a stable `--json` output.
 | `lucid explain [--json] CODE` | Cause, example, and fix for an error code, from `errors.md`. `--json` gives `code`, `title`, `cause`, `example`, and `fix` |
 | `lucid test --json` | Per-test results of a file, or of every file in a package's `src`, with values on failure: `name`, `passed`, `file`, `line`, `column`, and `output`, which holds what the test printed and, on failure, the trap message and trace |
 | `lucid fmt [--check] [PATH]` | Put a file, or every file of a package, in the one canonical layout, changing only space and line breaks. `--check` changes nothing, lists each file that would change, and exits with 1 if any would. A file with a lexer error gets its diagnostics and stays as it is |
+| `lucid package [PATH]` | Check a library, write its archive `NAME-VERSION.lpk` to the current directory, and print its line of the registry's index, for upload to a registry |
 | `lucid context [--json] MODULE` | Compact public API of a file, a package directory, or `std.NAME`: each public header with its `##` doc comments, and the fields, variants, or tasks of a type, choice, or trait, with no bodies. `--json` gives `module`, `line`, `kind`, `name`, `signature`, and `doc` |
 | `lucid doc --json` | Full docs as data |
 | `lucid lsp` | Planned for M8, by decision 202: diagnostics, formatting, go to definition, and hover in an editor, on stdin and stdout |

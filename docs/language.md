@@ -648,7 +648,7 @@ version = "0.1.0"
 markdown = { path = "../markdown" }
 ```
 
-`name` uses lowercase letters, digits, and `_`, and cannot be a keyword or `std`. `version` is three numbers. A dependency needs a `path`, relative to the file that names it. Planned for M8: a dependency with only a `version` comes from a registry, by decisions 197 to 199. Its key must equal the name of the package that it reaches. The manifest also holds permissions, see [security.md](security.md). A manifest that breaks these rules is error E0338.
+`name` uses lowercase letters, digits, and `_`, and cannot be a keyword or `std`. `version` is three numbers. A dependency has a `path`, relative to the file that names it, or a `version` and no `path`, which comes from the registry that `[registry] url` names: an `https://` address or a directory. Its key must equal the name of the package that it reaches. The manifest also holds permissions, see [security.md](security.md). A manifest that breaks these rules is error E0338.
 
 A package is a program, with `src/main.lcd`, or a library, with `src/lib.lcd`. It cannot be both, only a library can be a dependency, and only a program can run. `src/lib.lcd` follows the rule for imported modules, so it runs no code. A fault in the shape of a package or a dependency is error E0339.
 
@@ -661,6 +661,20 @@ use markdown.parser.block
 `use markdown` is the module `src/lib.lcd`. A longer path follows the rule of `use ./`, from `src`: `markdown.parser.block` reads `src/parser/block.lcd`, or else takes `block` from `src/parser.lcd`. A single name such as `markdown.render` reads `src/render.lcd`, or else takes `render` from `src/lib.lcd`. A name that the file's own package does not list is error E0337, even if another package depends on it. `public` works across packages as it does across modules.
 
 Each package is one copy in a program, however many packages depend on it. Two packages with one name in a program are error E0339.
+
+### Registry
+
+```toml
+[registry]
+url = "https://packages.example.com"
+
+[dependencies]
+markdown = { version = "1.2.0" }
+```
+
+A `version` is a floor. By minimal version selection, decision 198, the program gets the highest floor that it or any of its dependencies names for each package, never a newer version than some manifest asks for. A floor reaches up to the next major version, or the next minor while the major is 0, so two floors in different ranges are error E0344. A registry package cannot have a `path` dependency, by decision 200.
+
+`lucid.lock`, beside the root manifest, lists each registry package as `NAME VERSION SHA256`, the hash of its archive. Commands write it, and it belongs in version control. When the lock and the cache do not cover a dependency, `lucid run`, `check`, `test`, and `build` fetch what is missing, and say so on stderr. A registry that cannot give a package is error E0343, and an archive whose hash differs from the index or the lock is error E0345. `lucid package` writes a library's archive and its line of the index. See "Registry" in [compiler.md](compiler.md).
 
 ## Concurrency
 

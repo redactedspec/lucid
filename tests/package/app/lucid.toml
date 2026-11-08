@@ -5,4 +5,4 @@ version = "0.1.0"
 
 [dependencies]
 greet = { path = "../greet" }
-shout = { path = "../greet/../shout", version = "1.0" }
+shout = { path = "../greet/../shout", version = "1.0.0" }

@@ -72,7 +72,21 @@ markdown = { path = "../markdown", allow = [] }
 
 `use markdown` reads the dependency's `src/lib.lcd`. `use markdown.render` reads `src/render.lcd`, or else takes `render` from `src/lib.lcd`. A package can only `use` what its own `lucid.toml` lists.
 
-Dependencies are local paths today. A package registry, `lucid.lock`, and version selection are planned for M8.
+### Registry
+
+A dependency with a `version` and no `path` comes from the registry that `[registry]` names, by `https://` address or directory:
+
+```toml title="lucid.toml"
+[registry]
+url = "https://packages.example.com"
+
+[dependencies]
+markdown = { version = "1.2.0" }
+```
+
+A version is a floor. The program gets the highest floor that any manifest names, never a newer one. `lucid run`, `check`, `test`, and `build` fetch what is missing into a cache, and write `lucid.lock`, which pins the SHA-256 of each archive: check it in. Two major versions of one package are E0344, a package the registry lacks is E0343, and an archive that changed is E0345.
+
+A registry is static files: `index/NAME`, with one JSON line per version, and `files/NAME/VERSION.lpk`. `lucid package` writes both for a library.
 
 ## Permissions
 

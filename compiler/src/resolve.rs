@@ -80,6 +80,12 @@ const STD_MODULES: [(&str, &str); 11] = [
 pub const FMT_PATH: &str = "@tools/fmt.lcd";
 const FMT: &str = include_str!("../../tools/fmt.lcd");
 
+/// The registry client, by decision 201, run as `lucid fetch` in a child
+/// process with `FETCH_CHILD` set.
+pub const FETCH_PATH: &str = "@tools/fetch.lcd";
+const FETCH: &str = include_str!("../../tools/fetch.lcd");
+pub const FETCH_CHILD: &str = "LUCID_FETCH_CHILD";
+
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     Task,
@@ -126,11 +132,25 @@ struct Loader {
     /// if its manifest was bad, which is reported once.
     package_ids: HashMap<PathBuf, Option<usize>>,
     packages: Vec<Package>,
+    /// The root's `lucid.lock`: each package's version and archive hash.
+    lock: HashMap<String, (String, String)>,
+    /// The user's package cache, ending in `/`.
+    cache: String,
+    /// Registry dependencies that the lock and the cache do not cover.
+    uncovered: Vec<Dependency>,
+    /// The cache directories that `locked` gave, so a package read from one
+    /// is a registry package.
+    registry_dirs: HashSet<String>,
 }
 
 /// A directory with a `lucid.toml`.
 struct Package {
     name: String,
+    version: String,
+    /// True if it came from the registry, into the cache.
+    registry: bool,
+    /// `[registry] url`, as written.
+    url: Option<String>,
     /// As shown in messages: empty, or ending in `/`.
     dir: String,
     /// With each path in the form of `dir`.
@@ -225,18 +245,179 @@ pub fn package_files(package: &str) -> Vec<String> {
 }
 
 /// Reads and parses a program, from a file or a package directory. Returns the
-/// text that spans refer to. With `run`, a library is an error.
+/// text that spans refer to. With `run`, a library is an error. When `lucid.lock`
+/// and the cache do not cover a registry dependency, the registry client runs
+/// first, and the program loads again. See "Registry" in docs/compiler.md.
 pub fn load(path: &str, run: bool) -> (Source, Option<ast::File>, Vec<Diagnostic>) {
+    let (source, file, diags, fetch) = load_once(path, run);
+    let Some(fetch) = fetch else { return (source, file, diags) };
+    let found = fetch.run();
+    if !found.is_empty() {
+        return (source, None, found);
+    }
+    let (source, file, mut diags, again) = load_once(path, run);
+    let Some(again) = again else { return (source, file, diags) };
+    for (name, version, span) in again.uncovered {
+        let message = format!("`{name}` {version} is not in `lucid.lock` after a fetch");
+        let note = "the registry's index and the package's `lucid.toml` may disagree";
+        diags.push(Diagnostic::new("E0343", message, span).note(note));
+    }
+    (source, None, diags)
+}
+
+/// What the registry client needs, and where to report what it finds.
+struct Fetch {
+    cache: String,
+    url: String,
+    lock: String,
+    /// Each registry dependency of a package outside the cache: its name, its
+    /// lowest version, and its manifest entry.
+    wanted: Vec<(String, String, Span)>,
+    /// Where an error about a package that no manifest here names goes.
+    root: Span,
+    /// The registry dependencies that the lock and the cache do not cover.
+    uncovered: Vec<(String, String, Span)>,
+}
+
+impl Fetch {
+    /// Runs `tools/fetch.lcd` in a child, and turns its `error` lines into
+    /// diagnostics. Its `note` lines go to stderr.
+    fn run(&self) -> Vec<Diagnostic> {
+        let mut args = vec![self.cache.clone(), self.url.clone(), self.lock.clone()];
+        args.extend(self.wanted.iter().map(|(name, version, _)| format!("{name}@{version}")));
+        use std::io::BufRead;
+        let child = std::env::current_exe().and_then(|lucid| {
+            let mut command = std::process::Command::new(lucid);
+            command.arg("fetch").args(&args).env(FETCH_CHILD, "1");
+            command.stdout(std::process::Stdio::piped()).spawn()
+        });
+        let mut child = match child {
+            Ok(child) => child,
+            Err(e) => {
+                let message = format!("cannot start the registry client: {e}");
+                return vec![Diagnostic::new("E0343", message, self.root)];
+            }
+        };
+        let mut found = Vec::new();
+        // Line by line, so each note shows while the fetch goes on.
+        let stdout = child.stdout.take().expect("a piped stdout");
+        for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+            if let Some(note) = line.strip_prefix("note ") {
+                eprintln!("lucid: {note}");
+            } else if let Some(error) = line.strip_prefix("error ") {
+                let mut parts = error.splitn(3, ' ');
+                let (code, name) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+                let code = match code {
+                    "E0344" => "E0344",
+                    "E0345" => "E0345",
+                    _ => "E0343",
+                };
+                let entry = self.wanted.iter().find(|(wanted, ..)| wanted == name);
+                let span = entry.map_or(self.root, |(.., span)| *span);
+                found.push(Diagnostic::new(code, parts.next().unwrap_or(""), span));
+            }
+        }
+        let succeeded = child.wait().is_ok_and(|status| status.success());
+        if found.is_empty() && !succeeded {
+            let message = "the registry client failed, see above";
+            found.push(Diagnostic::new("E0343", message, self.root));
+        }
+        found
+    }
+}
+
+/// The user's package cache, ending in `/`: `LUCID_CACHE`, or else the
+/// system's cache directory with `lucid` added.
+fn cache_dir() -> Option<String> {
+    let var = |name| std::env::var(name).ok().filter(|value| !value.is_empty());
+    let dir = var("LUCID_CACHE").or_else(|| {
+        if cfg!(windows) {
+            var("LOCALAPPDATA").map(|dir| format!("{dir}/lucid"))
+        } else {
+            var("XDG_CACHE_HOME")
+                .map(|dir| format!("{dir}/lucid"))
+                .or_else(|| var("HOME").map(|dir| format!("{dir}/.cache/lucid")))
+        }
+    })?;
+    Some(format!("{}/", dir.trim_end_matches(['/', '\\'])))
+}
+
+/// A version's three numbers, if it has them.
+fn numbers(version: &str) -> Option<[u64; 3]> {
+    let mut parts = version.split('.').map(|part| part.parse().ok());
+    let found = [parts.next()??, parts.next()??, parts.next()??];
+    parts.next().is_none().then_some(found)
+}
+
+/// True if one floor reaches the other's version, by decision 198: the same
+/// major, and the same minor while the major is 0.
+fn same_range(a: [u64; 3], b: [u64; 3]) -> bool {
+    a[0] == b[0] && (a[0] > 0 || a[1] == b[1])
+}
+
+/// Reads `lucid.lock`: a line `NAME VERSION SHA256` for each registry
+/// package, and lines that start with `#`. A bad line is E0338.
+fn read_lock(
+    path: &str,
+    source: &mut Source,
+) -> (HashMap<String, (String, String)>, Vec<Diagnostic>) {
+    let (mut lock, mut diags) = (HashMap::new(), Vec::new());
+    let Ok(text) = std::fs::read_to_string(path) else { return (lock, diags) };
+    let hash = |hash: &str| {
+        hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    };
+    let mut base = None;
+    let mut at = 0;
+    for line in text.split_inclusive('\n') {
+        let (start, content) = (at, line.trim_end());
+        at += line.len();
+        let parts: Vec<&str> = content.split(' ').collect();
+        match parts[..] {
+            _ if content.is_empty() || content.starts_with('#') => {}
+            [name, version, sha]
+                if manifest::valid_name(name) && manifest::valid_version(version) && hash(sha) =>
+            {
+                lock.insert(name.to_string(), (version.to_string(), sha.to_string()));
+            }
+            _ => {
+                let base = *base.get_or_insert_with(|| source.add(path.to_string().leak(), &text));
+                let span = Span { start: base + start, end: base + start + content.len() };
+                let message = "a line of `lucid.lock` must be `NAME VERSION SHA256`";
+                let note = "delete the line, and the next command writes it again";
+                diags.push(Diagnostic::new("E0338", message, span).note(note));
+            }
+        }
+    }
+    (lock, diags)
+}
+
+type Loaded = (Source, Option<ast::File>, Vec<Diagnostic>, Option<Fetch>);
+
+fn load_once(path: &str, run: bool) -> Loaded {
     let mut loader = Loader::default();
     let start = Span { start: 0, end: 0 };
+    let root =
+        if Path::new(path).is_dir() { Some(package_root(path)) } else { package_above(path) };
+    if let Some(root) = &root {
+        let (lock, diags) = read_lock(&format!("{root}lucid.lock"), &mut loader.source);
+        loader.lock = lock;
+        loader.diags = diags;
+    }
+    loader.cache = cache_dir().unwrap_or_default();
     let mut entry = path.to_string();
     if Path::new(path).is_dir() {
         let package = loader.package(&package_root(path), start);
-        let Some(package) = package else { return (loader.source, None, loader.diags) };
+        let Some(package) = package else { return (loader.source, None, loader.diags, None) };
         entry.clone_from(&loader.packages[package].entry);
     }
     let found = loader.module(&entry, Vec::new(), start);
     loader.check_dependencies();
+    if !loader.uncovered.is_empty() {
+        // An error in a manifest may hide a dependency, so it comes first.
+        let fetch =
+            if loader.diags.is_empty() { root.and_then(|root| loader.fetch(&root)) } else { None };
+        return (loader.source, None, loader.diags, fetch);
+    }
     if let Some(dir) = package_above(&entry)
         && let Some(root) = loader.package(&dir, start)
     {
@@ -249,7 +430,7 @@ pub fn load(path: &str, run: bool) -> (Source, Option<ast::File>, Vec<Diagnostic
     }
     let Loader { mut source, mut diags, mut modules, .. } = loader;
     if found.is_none() || !diags.is_empty() {
-        return (source, None, diags);
+        return (source, None, diags, None);
     }
     // With imports, the entry file's names need a prefix too, or a module would
     // see them. Alone, it keeps its names, so that its messages stay plain.
@@ -262,7 +443,7 @@ pub fn load(path: &str, run: bool) -> (Source, Option<ast::File>, Vec<Diagnostic
     // The prelude is a file of its own, so that a trap in its code has a place.
     let base = source.add("@std/prelude.lcd", PRELUDE);
     let file = join(modules, base, library, &mut diags);
-    (source, Some(file), diags)
+    (source, Some(file), diags, None)
 }
 
 fn is_std_module(name: &str) -> bool {
@@ -301,6 +482,9 @@ impl Loader {
         }
         if path == FMT_PATH {
             return Some((self.source.add(shown, FMT), FMT.to_string()));
+        }
+        if path == FETCH_PATH {
+            return Some((self.source.add(shown, FETCH), FETCH.to_string()));
         }
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
@@ -362,26 +546,99 @@ impl Loader {
             self.diags.push(Diagnostic::new("E0339", message, at).note(note));
             return None;
         }
-        let dependencies = found.dependencies.into_iter().map(|mut dependency| {
-            if !Path::new(&dependency.path).is_absolute() {
-                dependency.path = format!("{dir}{}", dependency.path);
-            }
-            dependency.path = dir_prefix(&dependency.path);
+        let registry = self.registry_dirs.contains(dir);
+        let mut dependencies = Vec::new();
+        for mut dependency in found.dependencies {
             dependency.span = dependency.span.shifted(base);
             for (_, span) in &mut dependency.allow {
                 *span = span.shifted(base);
             }
-            dependency
-        });
+            if let Some(version) = &dependency.version {
+                dependency.path = self.locked(&dependency.name, version).unwrap_or_default();
+                if dependency.path.is_empty() {
+                    self.uncovered.push(dependency.clone());
+                } else {
+                    self.registry_dirs.insert(dependency.path.clone());
+                }
+            } else if registry {
+                let message = "a package from the registry cannot have a `path` dependency";
+                self.diags.push(Diagnostic::new("E0339", message, dependency.span));
+                continue;
+            } else {
+                if !Path::new(&dependency.path).is_absolute() {
+                    dependency.path = format!("{dir}{}", dependency.path);
+                }
+                dependency.path = dir_prefix(&dependency.path);
+            }
+            dependencies.push(dependency);
+        }
         self.packages.push(Package {
             name: found.name,
+            version: found.version,
+            registry,
+            url: found.registry.map(|(url, _)| url),
             dir: dir.to_string(),
-            dependencies: dependencies.collect(),
+            dependencies,
             entry: format!("{src}{}.lcd", if main { "main" } else { "lib" }),
             library: lib,
             permissions: found.permissions,
         });
         Some(self.packages.len() - 1)
+    }
+
+    /// The cache directory of a registry dependency, if `lucid.lock` holds a
+    /// version that `floor` reaches and the cache holds that version.
+    fn locked(&self, name: &str, floor: &str) -> Option<String> {
+        let (version, hash) = self.lock.get(name)?;
+        let (have, want) = (numbers(version)?, numbers(floor)?);
+        let dir = format!("{}{name}-{version}-{hash}/", self.cache);
+        let cached = Path::new(&format!("{dir}lucid.toml")).is_file();
+        (same_range(have, want) && have >= want && !self.cache.is_empty() && cached).then_some(dir)
+    }
+
+    /// What the registry client needs, or `None` with a diagnostic.
+    fn fetch(&mut self, root: &str) -> Option<Fetch> {
+        let at = self.package(root, Span { start: 0, end: 0 })?;
+        let first = self.uncovered[0].span;
+        let Some(url) = self.packages[at].url.clone() else {
+            let message = "a dependency with a `version` needs a registry";
+            let note = format!("add `[registry]` with `url` to `{root}lucid.toml`");
+            self.diags.push(Diagnostic::new("E0338", message, first).note(note));
+            return None;
+        };
+        if self.cache.is_empty() {
+            let message = "no directory for the package cache";
+            let note = "set `LUCID_CACHE` to a directory";
+            self.diags.push(Diagnostic::new("E0343", message, first).note(note));
+            return None;
+        }
+        let url = if url.starts_with("https://") || Path::new(&url).is_absolute() {
+            url
+        } else {
+            format!("{root}{url}")
+        };
+        let mut wanted = Vec::new();
+        for package in self.packages.iter().filter(|package| !package.registry) {
+            for dependency in &package.dependencies {
+                if let Some(version) = &dependency.version {
+                    wanted.push((dependency.name.clone(), version.clone(), dependency.span));
+                }
+            }
+        }
+        let uncovered = self.uncovered.iter().map(|dependency| {
+            let version = dependency.version.clone().unwrap_or_default();
+            (dependency.name.clone(), version, dependency.span)
+        });
+        let manifest = format!("{root}lucid.toml");
+        let file = self.source.files.iter().find(|file| file.path == manifest);
+        Some(Fetch {
+            cache: self.cache.clone(),
+            url: url.trim_end_matches(['/', '\\']).to_string(),
+            lock: format!("{root}lucid.lock"),
+            wanted,
+            uncovered: uncovered.collect(),
+            root: file.map_or(first, |file| Span { start: file.start, end: file.start }),
+        })
     }
 
     /// Reports a fault in a dependency entry, once, however many `use`s reach it.
@@ -395,8 +652,14 @@ impl Loader {
     /// The library that a manifest entry names.
     fn dependency(&mut self, dependency: &Dependency) -> Option<usize> {
         let name = &dependency.name;
+        if dependency.path.is_empty() {
+            return None;
+        }
         let manifest = format!("{}lucid.toml", dependency.path);
-        if !Path::new(&manifest).is_file() || !exact_path(Path::new(&manifest)) {
+        // A cache path holds the spelling of `LUCID_CACHE`, which the system
+        // may match in another case, and the loader wrote the rest itself.
+        let spelled = dependency.version.is_some() || exact_path(Path::new(&manifest));
+        if !Path::new(&manifest).is_file() || !spelled {
             let message = format!("no `lucid.toml` in `{}`, with this spelling", dependency.path);
             self.fault(dependency, message);
             return None;
@@ -410,6 +673,12 @@ impl Loader {
         }
         if !package.library {
             self.fault(dependency, format!("`{name}` has no `src/lib.lcd`, so nothing can use it"));
+            return None;
+        }
+        let locked = self.lock.get(name).map(|(version, _)| version);
+        if package.registry && locked != Some(&package.version) {
+            let message = format!("the archive of `{name}` holds version {}", package.version);
+            self.fault(dependency, message);
             return None;
         }
         Some(id)

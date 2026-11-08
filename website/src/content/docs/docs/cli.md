@@ -12,6 +12,7 @@ lucid fix [--json] [PATH]
 lucid explain [--json] CODE
 lucid context [--json] MODULE
 lucid fmt [--check] [PATH]
+lucid package [PATH]
 ```
 
 `PATH` is a `.lcd` file or a package directory. A directory means the nearest package at or above it, and no `PATH` means the current directory.
@@ -31,8 +32,9 @@ lucid fmt [--check] [PATH]
 | `lucid fix` | Applies the fixes that diagnostics show as `fix:` |
 | `lucid explain CODE` | Prints the cause, an example, and a fix for an error code |
 | `lucid context MODULE` | Prints the public API of a file, a package, or a `std` module, with its doc comments |
+| `lucid package` | Checks a library, writes its archive `NAME-VERSION.lpk` to the current directory, and prints its line of the registry's index |
 
-`lucid lsp`, a language server, and `lucid package`, for the registry, are planned for M8.
+`lucid lsp`, a language server, is planned for M8.
 
 ## JSON output
 
