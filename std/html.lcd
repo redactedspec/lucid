@@ -75,13 +75,13 @@ task unsafe_attr(name: text, value: text) -> text
     if not is_name(name, true)
         return "std.html cannot set an attribute with this name"
     let lowered = name.lower()
-    if starts(lowered, "on") or lowered == "formaction" or lowered == "srcdoc"
+    if lowered.starts_with("on") or lowered == "formaction" or lowered == "srcdoc"
         return "std.html cannot set an attribute that runs code"
     var url = ""
     for c in value.lower()
         if c > " "
             url = "{url}{c}"
-    if starts(url, "javascript:") or starts(url, "data:text/html")
+    if url.starts_with("javascript:") or url.starts_with("data:text/html")
         return "std.html cannot set a `javascript:` or `data:text/html` value"
     return ""
 
@@ -95,9 +95,6 @@ task is_name(name: text, attribute: bool) -> bool
         if not plain and not (attribute and (c == "_" or c == ":"))
             return false
     return true
-
-task starts(value: text, prefix: text) -> bool
-    return value.len() >= prefix.len() and value[0..prefix.len()] == prefix
 
 # An element that has no end tag and no children.
 task is_void(tag: text) -> bool

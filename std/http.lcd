@@ -151,10 +151,10 @@ task parse_url(url: text) -> Target or NetError
             return Failed(detail: "a URL needs printable ASCII, with other characters percent-encoded")
     var secure = false
     var rest = ""
-    if starts(url, "https://")
+    if url.starts_with("https://")
         secure = true
         rest = url[8..url.len()]
-    else if starts(url, "http://")
+    else if url.starts_with("http://")
         rest = url[7..url.len()]
     else
         return Failed(detail: "a URL starts with http:// or https://")
@@ -167,10 +167,10 @@ task parse_url(url: text) -> Target or NetError
         i += 1
     let authority = rest[0..end]
     var path = rest[end..rest.len()]
-    let hash = index_of(path, "#")
-    if hash >= 0
+    let hash = path.find("#")
+    if hash is not none
         path = path[0..hash]
-    if path.is_empty() or starts(path, "?")
+    if path.is_empty() or path.starts_with("?")
         path = "/{path}"
     for c in authority
         let plain = (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9")
@@ -178,8 +178,8 @@ task parse_url(url: text) -> Target or NetError
             return Failed(detail: "the host of a URL is a name or an IPv4 address, with no user name or password")
     var host = authority
     var port = if secure then 443 else 80
-    let colon = index_of(authority, ":")
-    if colon >= 0
+    let colon = authority.find(":")
+    if colon is not none
         host = authority[0..colon]
         let n = authority[colon + 1..authority.len()].to_int()
         if n is none or n < 1 or n > 65535
@@ -425,7 +425,7 @@ task read_request(connection: Connection, change buffer: list[byte]) -> Read
         return Bad(status: 400)
     let lines = raw.split("\r\n")
     let start = lines[0].split(" ")
-    if start.len() != 3 or not is_token(start[0]) or not starts(start[1], "/")
+    if start.len() != 3 or not is_token(start[0]) or not start[1].starts_with("/")
         return Bad(status: 400)
     let version = start[2]
     if version != "HTTP/1.1" and version != "HTTP/1.0"
@@ -437,8 +437,8 @@ task read_request(connection: Connection, change buffer: list[byte]) -> Read
             return Bad(status: 400)
         headers.push(h)
     var request = Request(method: start[0], path: start[1], headers: headers)
-    let mark = index_of(request.path, "?")
-    if mark >= 0
+    let mark = request.path.find("?")
+    if mark is not none
         request.query = request.path[mark + 1..request.path.len()]
         request.path = request.path[0..mark]
     var hosts = 0
@@ -461,7 +461,7 @@ task read_request(connection: Connection, change buffer: list[byte]) -> Read
             chunked = true
         else if h.name == "connection"
             for option in h.value.split(",")
-                if trim(option).lower() == "close"
+                if trim_spaces(option).lower() == "close"
                     close = true
     # RFC 9112 asks for exactly one `Host` in HTTP/1.1. Two lengths, or a
     # length with chunks, are how requests are smuggled past a proxy.
@@ -492,10 +492,10 @@ task read_chunks(connection: Connection, change buffer: list[byte], limit: int) 
         if line is none
             return Gone
         var size_part = line
-        let semi = index_of(line, ";")
-        if semi >= 0
+        let semi = line.find(";")
+        if semi is not none
             size_part = line[0..semi]
-        let size = hex(trim(size_part))
+        let size = hex(trim_spaces(size_part))
         if size is none
             return Bad(status: 400)
         if size == 0
@@ -556,13 +556,13 @@ task find_blank_line(data: list[byte], from: int) -> int
 # around it. A folded line, a space before the colon, a stray CR or LF, and
 # a name that is not a token give `none`.
 task parse_header(line: text) -> Header?
-    let colon = index_of(line, ":")
-    if colon < 1 or index_of(line, "\r") >= 0 or index_of(line, "\n") >= 0
+    let colon = line.find(":")
+    if colon is none or colon < 1 or line.contains("\r") or line.contains("\n")
         return none
     let name = line[0..colon]
     if not is_token(name)
         return none
-    return Header(name: name.lower(), value: trim(line[colon + 1..line.len()]))
+    return Header(name: name.lower(), value: trim_spaces(line[colon + 1..line.len()]))
 
 # True if `name` is a token of RFC 9110: no space, and no separator.
 task is_token(name: text) -> bool
@@ -570,24 +570,13 @@ task is_token(name: text) -> bool
         return false
     for c in name
         let plain = (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9")
-        if not plain and index_of("!#$%&'*+-.^_`|~", c) < 0
+        if not plain and not "!#$%&'*+-.^_`|~".contains(c)
             return false
     return true
 
-# The place of the first `part`, a single character, in `content`, or -1.
-task index_of(content: text, part: text) -> int
-    var i = 0
-    for c in content
-        if c == part
-            return i
-        i += 1
-    return -1
-
-task starts(value: text, prefix: text) -> bool
-    return value.len() >= prefix.len() and value[0..prefix.len()] == prefix
-
-# `content` with no spaces or tabs at either end.
-task trim(content: text) -> text
+# `content` with no spaces or tabs at either end: the optional white space
+# of RFC 9110, which is narrower than `trim`.
+task trim_spaces(content: text) -> text
     var start = 0
     var end = content.len()
     while start < end and is_blank(content[start..start + 1])
@@ -606,8 +595,8 @@ task hex(digits: text) -> int?
         return none
     var n = 0
     for c in digits.lower()
-        let digit = index_of("0123456789abcdef", c)
-        if digit < 0
+        let digit = "0123456789abcdef".find(c)
+        if digit is none
             return none
         n = n * 16 + digit
     return n
