@@ -139,7 +139,7 @@ Started after the version 1.0 promise. Designed by decisions 214 to 220, see "Se
 - [x] `LUCID_DUMP` in the Rust compiler, for `tokens`, `ast`, `mir`, and `owned`, and the golden test that compares dumps, by decision 215
 - [x] Lexer and parser in Lucid, in `compiler/lucid/`. Token and tree dumps, and their diagnostics, match
 - [x] Text append in place through a `change` parameter or a field, by decision 222
-- [ ] Resolver with `lucid.toml` reading in Lucid. `resolved` dumps and diagnostics match, by decision 223
+- [x] Resolver with `lucid.toml` reading in Lucid. `resolved` dumps and diagnostics match, by decision 223
 - [ ] Type checker, `derive`, and monomorphizer in Lucid. MIR dumps and diagnostics match
 - [ ] Ownership pass, `--costs`, and `--unsafe` in Lucid. `owned` dumps match
 - [ ] Crate `lucid_backend`, the MIR reader, and the C ABI, by decisions 216 and 217. The Lucid compiler runs `check`, `run`, and `build`, and the golden tests of those commands pass with it

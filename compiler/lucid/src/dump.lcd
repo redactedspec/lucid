@@ -4,6 +4,8 @@
 use ./ast
 use ./diag
 use ./lexer
+use ./manifest
+use ./resolve
 
 # One node per line, indented two spaces per level. A line holds a name and
 # atoms, and the node's children follow it, one level deeper.
@@ -110,6 +112,64 @@ task token(change out: Out, item: lexer.Token)
             out.depth -= 1
         _ ->
             return
+
+## What the resolver gives: the files read, what it records about them, and
+## the joined tree, if loading got that far. Printed even with errors.
+public task resolved(found: resolve.Resolved) -> text
+    var out = new_out()
+    let source = found.source
+    out.line("Source")
+    out.count(source.files.len())
+    let grants = found.grants
+    if grants is none
+        out.atom("-")
+    else
+        out.count(grants.len())
+        for grant in grants
+            match grant
+                All -> out.atom("all")
+                Listed(items) ->
+                    out.atom("list")
+                    out.count(items.len())
+                    for item in items
+                        out.text(item)
+    out.depth += 1
+    for file in source.files
+        out.line("File")
+        out.text(file.path)
+        out.count(file.start)
+    for item in found.no_unsafe
+        out.line("NoUnsafe")
+        out.count(item.start)
+        out.text(item.manifest)
+    for item in found.packages
+        out.line("Package")
+        out.count(item.start)
+        out.count(item.package)
+    let web = found.web_only
+    if web is none
+        out.absent()
+    else
+        out.line("WebOnly")
+        out.span(web)
+    let host = found.host_only
+    if host is none
+        out.absent()
+    else
+        out.line("HostOnly")
+        out.span(host.span)
+        out.text(host.module)
+    out.depth -= 1
+    let file = found.file
+    if file is none
+        out.absent()
+    else
+        out.line("File")
+        out.count(file.stmts.len())
+        out.depth += 1
+        stmts(change out, file.stmts)
+        out.depth -= 1
+    return out.finish()
 
 public task tree(file: ast.File) -> text
     var out = new_out()

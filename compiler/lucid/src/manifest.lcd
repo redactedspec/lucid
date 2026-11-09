@@ -1,0 +1,706 @@
+# Reads `lucid.toml`: the part of TOML 1.0 that a manifest needs, by hand.
+# Ports manifest.rs. See decision 121.
+#
+# Tables hold keys with bare names. A value is a string, `true`, `false`, an
+# array, or an inline table. Anything else is E0338, never a guess.
+
+use ./diag
+use ./lexer
+
+# Deep enough for any manifest, and it keeps hostile input off the stack.
+let MAX_DEPTH = 8
+
+## The permissions, in the order of a package's grants.
+public task permissions() -> list[text]
+    return ["net", "files", "env", "process", "unsafe"]
+
+## What one permission gives: everything, or only the listed paths or names.
+## `false` and an empty list give nothing.
+public choice Grant
+    All
+    Listed(items: list[text])
+
+public task held(self: Grant) -> bool
+    return match self
+        All -> true
+        Listed(items) -> items is not empty
+
+# The listed items, or none for `All`.
+task listed(self: Grant) -> list[text]?
+    return match self
+        All -> none
+        Listed(items) -> items
+
+## True if this grant gives all that `other` gives. `files` compares paths
+## after `.` and `..` are removed, and a path covers all below it.
+public task covers(self: Grant, other: Grant, permission: text, windows: bool) -> bool
+    let mine = self.listed()
+    if mine is none
+        return true
+    let theirs = other.listed()
+    if theirs is none
+        return false
+    for item in theirs
+        if not covered(mine, item, permission, windows)
+            return false
+    return true
+
+task covered(mine: list[text], item: text, permission: text, windows: bool) -> bool
+    for own in mine
+        if permission == "files"
+            let path = normal(item, windows)
+            let base = normal(own, windows)
+            # An empty path, as `.` becomes, is a prefix of every path, so it
+            # covers only paths that stay inside it.
+            if starts(path, base) and (base is not empty or inside(path))
+                return true
+        else if own == item
+            return true
+    return false
+
+# One part of a path, as Rust's `Component`: its kind is "prefix", "root",
+# "parent", or "normal". `.` is left out, since `normal` drops it.
+public type Part
+    kind: text
+    name: text
+
+# The parts of a path. On Windows, `\` also separates, and `C:` is a prefix.
+# ponytail: no `\\server\share` prefix, which reads as a root and names here,
+# so only a grant that lists a share can differ from the Rust compiler.
+public task components(path: text, windows: bool) -> list[Part]
+    var parts: list[Part] = []
+    var rest = path
+    if windows and rest.len() >= 2 and rest[1..2] == ":"
+        let letter = rest[0..1].lower()
+        if letter >= "a" and letter <= "z"
+            parts.push(Part(kind: "prefix", name: rest[0..2]))
+            rest = rest[2..rest.len()]
+    if rest.starts_with("/") or (windows and rest.starts_with("\\"))
+        parts.push(Part(kind: "root", name: "/"))
+    for piece in rest.split("/")
+        let pieces = if windows then piece.split("\\") else [piece]
+        for name in pieces
+            if name == ".."
+                parts.push(Part(kind: "parent", name: name))
+            else if name != "." and name is not empty
+                parts.push(Part(kind: "normal", name: name))
+    return parts
+
+# A path with `.` removed, and each `..` taken against the part before it.
+# A `..` with no part before it stays.
+task normal(path: text, windows: bool) -> list[Part]
+    var out: list[Part] = []
+    for part in components(path, windows)
+        if part.kind == "parent" and out is not empty and out[out.len() - 1].kind == "normal"
+            let gone = out.pop()
+        else
+            out.push(part)
+    return out
+
+task starts(path: list[Part], base: list[Part]) -> bool
+    if base.len() > path.len()
+        return false
+    for i in 0..base.len()
+        if path[i].kind != base[i].kind or path[i].name != base[i].name
+            return false
+    return true
+
+task inside(path: list[Part]) -> bool
+    return path is empty or path[0].kind == "normal"
+
+public type Manifest
+    name: text
+    version: text
+    dependencies: list[Dependency]
+    # `[registry] url`, as written.
+    registry: text?
+    # One for each of `permissions()`, in that order.
+    permissions: list[Grant]
+
+public type Dependency
+    name: text
+    # As written, relative to the manifest. Empty for a registry dependency
+    # that `lucid.lock` and the cache do not cover yet.
+    path: text
+    # The lowest version wanted from the registry, if there is no `path`.
+    version: text?
+    span: diag.Span
+    # The permissions that its `allow` entry names.
+    allow: list[Allowed]
+
+public type Allowed
+    name: text
+    span: diag.Span
+
+## A manifest, or none with at least one diagnostic.
+public type Read
+    manifest: Manifest?
+    diags: list[diag.Diagnostic]
+
+choice Value
+    TextValue(value: text)
+    BoolValue(value: bool)
+    ListValue(items: list[Item])
+    TableValue(entries: list[Entry])
+
+type Item
+    value: Value
+    span: diag.Span
+
+type Entry
+    key: text
+    span: diag.Span
+    value: Value
+
+type Table
+    name: text
+    span: diag.Span
+    entries: list[Entry]
+
+type Key
+    name: text
+    span: diag.Span
+
+choice Failure
+    Failed
+
+task error_message(self: Failure) -> text
+    return "the manifest reader recorded a diagnostic"
+
+type Reader
+    src: list[byte]
+    text: text
+    # The character index of each byte offset, and of the end.
+    chars: list[int]
+    at: int
+    # The one diagnostic that stopped the reader.
+    failure: list[diag.Diagnostic]
+
+## Parses a manifest, whose UTF-8 bytes are `src`.
+public task parse(src: list[byte], text: text) -> Read
+    var chars: list[int] = []
+    var count = 0
+    for b in src
+        let n = b.to_int()
+        if n < 128 or n >= 192
+            count += 1
+        chars.push(count - 1)
+    chars.push(count)
+    var reader = Reader(src: src, text: text, chars: chars, at: 0, failure: [])
+    if src.len() >= 3 and src[0].to_int() == 239 and src[1].to_int() == 187
+        if src[2].to_int() == 191
+            reader.at = 3
+    let found = reader.tables()
+    return match found
+        tables: list[Table] -> read_tables(tables)
+        _ -> Read(manifest: none, diags: reader.failure)
+
+task error(message: text, span: diag.Span) -> diag.Diagnostic
+    return diag.new("E0338", message, span)
+
+task with_note(message: text, span: diag.Span, note: text) -> diag.Diagnostic
+    var d = error(message, span)
+    d.notes.push(note)
+    return d
+
+task fail(change self: Reader, message: text, span: diag.Span) -> Failure
+    self.failure.push(error(message, span))
+    return Failed
+
+# Fails with an empty span here.
+task fail_here(change self: Reader, message: text) -> Failure
+    let span = self.here()
+    return self.fail(message, span)
+
+# Fails with a span from `start` to here.
+task fail_from(change self: Reader, message: text, start: int) -> Failure
+    let span = self.span(start)
+    return self.fail(message, span)
+
+# The byte at `place`, or -1 past the end.
+task byte_at(self: Reader, place: int) -> int
+    if place < self.src.len()
+        return self.src[place].to_int()
+    return -1
+
+task peek(self: Reader) -> int
+    return self.byte_at(self.at)
+
+task slice(self: Reader, from: int, to: int) -> text
+    return self.text[self.chars[from]..self.chars[to]]
+
+task span(self: Reader, start: int) -> diag.Span
+    return diag.span(start, self.at)
+
+task here(self: Reader) -> diag.Span
+    return diag.span(self.at, self.at)
+
+task eat(change self: Reader, b: int) -> bool
+    let found = self.peek() == b
+    if found
+        self.at += 1
+    return found
+
+# True if `word` follows.
+task follows(self: Reader, word: text) -> bool
+    let bytes = word.bytes()
+    for i in 0..bytes.len()
+        if self.byte_at(self.at + i) != bytes[i].to_int()
+            return false
+    return true
+
+# Skips spaces and a comment on this line.
+task blanks(change self: Reader)
+    while self.peek() == 32 or self.peek() == 9
+        self.at += 1
+    if self.peek() == 35
+        while self.at < self.src.len() and self.peek() != 10
+            self.at += 1
+
+# Skips blanks and line breaks.
+task lines(change self: Reader)
+    while true
+        self.blanks()
+        let b = self.peek()
+        if b != 10 and b != 13
+            return
+        self.at += 1
+
+task line_end(change self: Reader) -> none or Failure
+    self.blanks()
+    let cr = self.eat(13)
+    let b = self.peek()
+    if b != -1 and not self.eat(10)
+        return self.fail_here("expected the end of the line")
+
+task key(change self: Reader) -> Key or Failure
+    let start = self.at
+    while true
+        let b = self.peek()
+        if is_key_byte(b)
+            self.at += 1
+        else
+            break
+    if self.at == start
+        return self.fail_here("expected a key")
+    return Key(name: self.slice(start, self.at), span: self.span(start))
+
+task tables(change self: Reader) -> list[Table] or Failure
+    var tables: list[Table] = []
+    self.lines()
+    while self.peek() != -1
+        let start = self.at
+        if self.eat(91)
+            if self.peek() == 91
+                return self.fail_from("`lucid.toml` has no arrays of tables", start)
+            let key = try self.key()
+            if not self.eat(93)
+                let note = "write `name = {{ path = \"...\" }}` under `[dependencies]`"
+                let here = self.here()
+                self.failure.push(with_note("expected `]`", here, note))
+                return Failed
+            try self.line_end()
+            for table in tables
+                if table.name == key.name
+                    return self.fail("table `{key.name}` appears twice", key.span)
+            tables.push(Table(name: key.name, span: key.span, entries: []))
+        else
+            let entry = try self.entry(0)
+            try self.line_end()
+            if tables is empty
+                return self.fail("a key must follow a table header", entry.span)
+            let last = tables.len() - 1
+            try self.add_entry(change tables[last].entries, entry)
+        self.lines()
+    return tables
+
+task entry(change self: Reader, depth: int) -> Entry or Failure
+    let key = try self.key()
+    self.blanks()
+    if not self.eat(61)
+        return self.fail_here("expected `=`")
+    self.blanks()
+    let item = try self.value(depth)
+    return Entry(key: key.name, span: key.span, value: item.value)
+
+task value(change self: Reader, depth: int) -> Item or Failure
+    let start = self.at
+    if depth > MAX_DEPTH
+        return self.fail_here("values are nested too deep")
+    let c = self.peek()
+    var value: Value = BoolValue(value: true)
+    if c == 34
+        value = try self.basic_string()
+    else if c == 39
+        value = try self.literal_string()
+    else if c == 91
+        value = try self.list(depth)
+    else if c == 123
+        value = try self.inline_table(depth)
+    else if self.follows("true")
+        self.at += 4
+    else if self.follows("false")
+        self.at += 5
+        value = BoolValue(value: false)
+    else
+        return self.fail_here("expected a string, `true`, `false`, `[`, or `{{`")
+    return Item(value: value, span: self.span(start))
+
+# True if the character at `place` is a control character, as Rust's
+# `char::is_control` reads it: U+0000 to U+001F, and U+007F to U+009F.
+task control_at(self: Reader, place: int) -> bool
+    let b = self.byte_at(place)
+    if b < 32 or b == 127
+        return b >= 0
+    let next = self.byte_at(place + 1)
+    return b == 194 and next >= 128 and next <= 159
+
+# The number of bytes of the character that starts with byte `b`.
+task width(b: int) -> int
+    if b < 192
+        return 1
+    if b < 224
+        return 2
+    if b < 240
+        return 3
+    return 4
+
+task basic_string(change self: Reader) -> Value or Failure
+    let start = self.at
+    self.at += 1
+    var out = ""
+    while self.peek() != -1
+        let b = self.peek()
+        let control = self.control_at(self.at)
+        let next = self.at + width(b)
+        let c = self.slice(self.at, next)
+        self.at = next
+        if b == 34
+            return TextValue(value: out)
+        if b == 92
+            let escape = self.peek()
+            if escape == 92
+                out = "{out}\\"
+            else if escape == 34
+                out = "{out}\""
+            else if escape == 110
+                out = "{out}\n"
+            else if escape == 114
+                out = "{out}\r"
+            else if escape == 116
+                out = "{out}\t"
+            else
+                return self.fail_here("this escape is not supported")
+            self.at += 1
+        else if b == 10 or b == 13
+            break
+        else if control and b != 9
+            return self.fail_here("a string cannot hold a control character")
+        else
+            out = "{out}{c}"
+    return self.fail_from("this string has no end on its line", start)
+
+task literal_string(change self: Reader) -> Value or Failure
+    let start = self.at
+    self.at += 1
+    # The rest of the line, as Rust's `str::lines` cuts it.
+    var end = self.at
+    while end < self.src.len() and self.byte_at(end) != 10
+        end += 1
+    if end > self.at and self.byte_at(end - 1) == 13
+        end -= 1
+    var close = self.at
+    while close < end and self.byte_at(close) != 39
+        close += 1
+    if close == end
+        return self.fail_here("this string has no end on its line")
+    var place = self.at
+    while place < close
+        if self.control_at(place) and self.byte_at(place) != 9
+            return self.fail_from("a string cannot hold a control character", start)
+        place += width(self.byte_at(place))
+    let out = self.slice(self.at, close)
+    self.at = close + 1
+    return TextValue(value: out)
+
+# An array may span lines, and may end with a comma.
+task list(change self: Reader, depth: int) -> Value or Failure
+    self.at += 1
+    var items: list[Item] = []
+    self.lines()
+    while not self.eat(93)
+        let item = try self.value(depth + 1)
+        items.push(item)
+        self.lines()
+        let comma = self.eat(44)
+        if not comma and self.peek() != 93
+            return self.fail_here("expected `,` or `]`")
+        self.lines()
+    return ListValue(items: items)
+
+# An inline table sits on one line, and has no comma after its last pair.
+task inline_table(change self: Reader, depth: int) -> Value or Failure
+    self.at += 1
+    var entries: list[Entry] = []
+    self.blanks()
+    var done = self.eat(125)
+    while not done
+        self.blanks()
+        let entry = try self.entry(depth + 1)
+        try self.add_entry(change entries, entry)
+        self.blanks()
+        done = self.eat(125)
+        if not done and not self.eat(44)
+            return self.fail_here("expected `,` or `}}`")
+    return TableValue(entries: entries)
+
+task add_entry(change self: Reader, change entries: list[Entry], entry: Entry) -> none or Failure
+    for old in entries
+        if old.key == entry.key
+            return self.fail("key `{entry.key}` appears twice", entry.span)
+    entries.push(entry)
+
+## True if `use name` can spell this name.
+public task valid_name(name: text) -> bool
+    if name is empty or name == "std" or name in lexer.keywords()
+        return false
+    let bytes = name.bytes()
+    for i in 0..bytes.len()
+        let b = bytes[i].to_int()
+        let lower = b >= 97 and b <= 122
+        if not (lower or b == 95 or (i > 0 and is_digit(b)))
+            return false
+    return true
+
+public task valid_version(version: text) -> bool
+    let parts = version.split(".")
+    if parts.len() != 3
+        return false
+    for part in parts
+        if part is empty
+            return false
+        for b in part.bytes()
+            if not is_digit(b.to_int())
+                return false
+    return true
+
+task check_name(name: text, span: diag.Span, change diags: list[diag.Diagnostic])
+    if not valid_name(name)
+        let note = "use lowercase letters, digits, and `_`, and no keyword or `std`"
+        diags.push(with_note("`{name}` cannot be a package name", span, note))
+
+task text_of(value: Value) -> text?
+    return match value
+        TextValue(found) -> found
+        _ -> none
+
+task text_list(entry: Entry, change diags: list[diag.Diagnostic])
+    let fine = match entry.value
+        ListValue(items) -> all_text(items)
+        _ -> false
+    if not fine
+        diags.push(error("`{entry.key}` must be a list of strings", entry.span))
+
+task all_text(items: list[Item]) -> bool
+    for item in items
+        if text_of(item.value) is none
+            return false
+    return true
+
+type Named
+    name: text
+    version: text
+
+task read_package(table: Table, change diags: list[diag.Diagnostic]) -> Named?
+    var name: text? = none
+    var version: text? = none
+    for entry in table.entries
+        let found = text_of(entry.value)
+        let key = entry.key
+        if key == "name" and found is not none
+            check_name(found, entry.span, change diags)
+            name = found
+        else if key == "version" and found is not none
+            if not valid_version(found)
+                diags.push(error("version `{found}` is not three numbers: `1.2.3`", entry.span))
+            version = found
+        else if key == "name" or key == "version"
+            diags.push(error("`{key}` must be a string", entry.span))
+        else
+            diags.push(error("`[package]` has no key `{key}`", entry.span))
+    if version is none
+        diags.push(error("`[package]` needs `version`", table.span))
+    if name is none
+        diags.push(error("`[package]` needs `name`", table.span))
+    if name is none or version is none
+        return none
+    return Named(name: name, version: version)
+
+# `[registry]`: its `url`, an `https://` address or a local directory.
+task read_registry(table: Table, change diags: list[diag.Diagnostic]) -> text?
+    var url: text? = none
+    for entry in table.entries
+        let found = text_of(entry.value)
+        if entry.key == "url" and found is not none
+            # Any other scheme, or `HTTPS://`, would read as a directory.
+            let scheme = found.contains("://") and not found.starts_with("https://")
+            if found is empty or scheme
+                let message = "`url` must be an `https://` address or a directory"
+                diags.push(error(message, entry.span))
+            url = found
+        else if entry.key == "url"
+            diags.push(error("`url` must be a string", entry.span))
+        else
+            diags.push(error("`[registry]` has no key `{entry.key}`", entry.span))
+    if url is none
+        diags.push(error("`[registry]` needs `url`", table.span))
+    return url
+
+task nothing() -> list[Grant]
+    var grants: list[Grant] = []
+    for permission in permissions()
+        grants.push(Listed(items: []))
+    return grants
+
+# True if a text holds a control character, as `control_at` reads one.
+task has_control(value: text) -> bool
+    let bytes = value.bytes()
+    for i in 0..bytes.len()
+        let b = bytes[i].to_int()
+        if b < 32 or b == 127
+            return true
+        if b == 194 and i + 1 < bytes.len()
+            let next = bytes[i + 1].to_int()
+            if next >= 128 and next <= 159
+                return true
+    return false
+
+task read_permissions(table: Table, change diags: list[diag.Diagnostic]) -> list[Grant]
+    var grants = nothing()
+    let names = permissions()
+    for entry in table.entries
+        let key = entry.key
+        var at = -1
+        for i in 0..names.len()
+            if names[i] == key
+                at = i
+        if at < 0
+            diags.push(error("no permission `{key}`", entry.span))
+            continue
+        let listed = key == "files" or key == "env"
+        var grant: Grant = Listed(items: [])
+        match entry.value
+            BoolValue(value) ->
+                if value
+                    grant = All
+            ListValue(items) ->
+                if listed
+                    grant = read_list(entry, items, change diags)
+                else
+                    diags.push(error("`{key}` must be `true` or `false`", entry.span))
+            _ ->
+                if listed
+                    let message = "`{key}` must be `true`, `false`, or a list of strings"
+                    diags.push(error(message, entry.span))
+                else
+                    diags.push(error("`{key}` must be `true` or `false`", entry.span))
+        grants[at] = grant
+    return grants
+
+task read_list(entry: Entry, items: list[Item], change diags: list[diag.Diagnostic]) -> Grant
+    let key = entry.key
+    text_list(entry, change diags)
+    var found: list[text] = []
+    for item in items
+        let value = text_of(item.value)
+        if value is not none
+            found.push(value)
+    var blank = false
+    var control = false
+    for value in found
+        blank = blank or value is empty
+        control = control or has_control(value)
+    if blank
+        diags.push(error("`{key}` cannot list an empty string", entry.span))
+    # The runtime reads grants one per line, so a line break in an item
+    # would split it into other grants.
+    if control
+        let message = "`{key}` cannot list a control character. In a \"...\" string, write `\\` as `\\\\`"
+        diags.push(error(message, entry.span))
+    return Listed(items: found)
+
+task read_dependency(entry: Entry, change diags: list[diag.Diagnostic]) -> Dependency
+    check_name(entry.key, entry.span, change diags)
+    var path: text? = none
+    var version: text? = none
+    var allow: list[Allowed] = []
+    let fields = match entry.value
+        TableValue(entries) -> entries
+        _ -> []
+    for field in fields
+        let found = text_of(field.value)
+        let key = field.key
+        if key == "path" and found is not none
+            path = found
+        else if key == "version" and found is not none
+            if not valid_version(found)
+                diags.push(error("version `{found}` is not three numbers: `1.2.3`", field.span))
+            version = found
+        else if key == "allow"
+            text_list(field, change diags)
+            let items = match field.value
+                ListValue(listed) -> listed
+                _ -> []
+            for item in items
+                let name = text_of(item.value)
+                if name is not none
+                    if name in permissions()
+                        allow.push(Allowed(name: name, span: item.span))
+                    else
+                        diags.push(error("no permission `{name}`", item.span))
+        else if key == "path" or key == "version"
+            diags.push(error("`{key}` must be a string", field.span))
+        else
+            diags.push(error("a dependency has no key `{key}`", field.span))
+    if path is none and version is none
+        let message = "dependency `{entry.key}` needs a `path` or a `version`"
+        let note = "write `name = {{ path = \"../name\" }}`, or `name = {{ version = \"1.0.0\" }}`"
+        diags.push(with_note(message, entry.span, note))
+    # A `path` wins, and its `version` is only a note to the reader.
+    let wanted = if path is none then version else none
+    return Dependency(name: entry.key, path: path else "", version: wanted, span: entry.span, allow: allow)
+
+task read_tables(tables: list[Table]) -> Read
+    var diags: list[diag.Diagnostic] = []
+    var named: Named? = none
+    var registry: text? = none
+    var dependencies: list[Dependency] = []
+    var grants = nothing()
+    var has_package = false
+    for table in tables
+        if table.name == "package"
+            named = read_package(table, change diags)
+            has_package = true
+        else if table.name == "permissions"
+            grants = read_permissions(table, change diags)
+        else if table.name == "registry"
+            registry = read_registry(table, change diags)
+        else if table.name == "dependencies"
+            for entry in table.entries
+                dependencies.push(read_dependency(entry, change diags))
+        else
+            diags.push(error("no table `[{table.name}]`", table.span))
+    if not has_package
+        diags.push(error("`lucid.toml` needs a `[package]` table", diag.span(0, 0)))
+    if diags is not empty or named is none
+        return Read(manifest: none, diags: diags)
+    let manifest = Manifest(name: named.name, version: named.version, dependencies: dependencies, registry: registry, permissions: grants)
+    return Read(manifest: manifest, diags: diags)
+
+task is_digit(b: int) -> bool
+    return b >= 48 and b <= 57
+
+# An ASCII letter or digit, `_`, or `-`.
+task is_key_byte(b: int) -> bool
+    let letter = (b >= 97 and b <= 122) or (b >= 65 and b <= 90)
+    return letter or is_digit(b) or b == 95 or b == 45

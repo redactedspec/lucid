@@ -32,10 +32,53 @@ public task new(code: text, message: text, span: Span) -> Diagnostic
 public task fix(change self: Diagnostic, description: text, span: Span, text: text)
     self.fixes.push(Fix(description: description, edits: [Edit(span: span, text: text)]))
 
-## One file, as `Source` holds it in diag.rs: its path as given, and its bytes.
-public type Source
+## The same diagnostic, fixes too, in a file that starts at `base`.
+public task shifted(self: Diagnostic, base: int) -> Diagnostic
+    var out = self
+    out.span = span(self.span.start + base, self.span.end + base)
+    for change fix in out.fixes
+        for change edit in fix.edits
+            edit.span = span(edit.span.start + base, edit.span.end + base)
+    return out
+
+## One file in a `Source`.
+public type SourceFile
     path: text
+    start: int
+
+## Every file of a program, end to end, so that a span alone gives its file.
+public type Source
     bytes: list[byte]
+    files: list[SourceFile]
+
+## A source of one file.
+public task one(path: text, bytes: list[byte]) -> Source
+    var source = Source(bytes: [], files: [])
+    let start = source.add_file(path, bytes)
+    return source
+
+## Adds a file, and returns where it starts. A line break follows it, so the
+## next file starts on a line of its own, and the offset of this file's end
+## still falls in this file.
+public task add_file(change self: Source, path: text, bytes: list[byte]) -> int
+    let start = self.bytes.len()
+    self.files.push(SourceFile(path: path, start: start))
+    for b in bytes
+        self.bytes.push(b)
+    self.bytes.push(10)
+    return start
+
+## The position in `files` of the file that holds a byte offset.
+public task file_index(files: list[SourceFile], offset: int) -> int
+    var low = 0
+    var high = files.len()
+    while low < high
+        let middle = (low + high) // 2
+        if files[middle].start <= offset
+            low = middle + 1
+        else
+            high = middle
+    return if low > 0 then low - 1 else 0
 
 ## Maps byte offsets to 1-based lines and columns. Columns count characters.
 public type Lines
@@ -50,23 +93,30 @@ public task lines(source: Source) -> Lines
             starts.push(i + 1)
     return Lines(source: source, starts: starts)
 
-## The line and column of a byte offset, as a type of two numbers.
+## The file, line, and column of a byte offset.
 public type Place
+    file: text
     line: int
     column: int
 
-public task place(self: Lines, offset: int) -> Place
-    # The number of line starts at or before `offset`.
+# The number of line starts before `offset`, or at it with `at`.
+task starts_before(starts: list[int], offset: int, at: bool) -> int
     var low = 0
-    var high = self.starts.len()
+    var high = starts.len()
     while low < high
         let middle = (low + high) // 2
-        if self.starts[middle] <= offset
+        let start = starts[middle]
+        if start < offset or (at and start == offset)
             low = middle + 1
         else
             high = middle
-    let line = low
+    return low
+
+public task place(self: Lines, offset: int) -> Place
+    let file = self.source.files[file_index(self.source.files, offset)]
+    let line = starts_before(self.starts, offset, true)
     let start = self.starts[line - 1]
+    let local = line - starts_before(self.starts, file.start, false)
     let bytes = self.source.bytes
     var column = 1
     for i in start..offset
@@ -74,10 +124,45 @@ public task place(self: Lines, offset: int) -> Place
         let b = bytes[i].to_int()
         if b < 128 or b >= 192
             column += 1
-    if line == 1 and offset >= 3 and bytes.len() >= 3
-        if bytes[0].to_int() == 239 and bytes[1].to_int() == 187 and bytes[2].to_int() == 191
-            column -= 1
-    return Place(line: line, column: column)
+    if local == 1 and offset >= start + 3
+        if bytes[start].to_int() == 239 and bytes[start + 1].to_int() == 187
+            if bytes[start + 2].to_int() == 191
+                column -= 1
+    return Place(file: file.path, line: local, column: column)
+
+## Text with each module name of a package as its user writes it: `@a.lib.b`
+## is `a.b`, and `@a.c.b` is `a.c.b`. The resolver adds the `@`, and no
+## written name has one.
+public task plain(value: text) -> text
+    if not value.contains("@")
+        return value
+    let parts = value.split("@")
+    var out = parts[0]
+    for i in 1..parts.len()
+        let part = parts[i]
+        var length = 0
+        for c in part
+            if not is_name_char(c)
+                break
+            length += 1
+        let package = part[0..length]
+        let rest = part[length..part.len()]
+        if package is empty or not rest.starts_with(".")
+            out = "{out}@{part}"
+        else if rest.starts_with(".lib.")
+            out = "{out}{package}{rest[4..rest.len()]}"
+        else
+            out = "{out}{package}{rest}"
+    return out
+
+# True if a character is alphanumeric, as Rust's `char::is_alphanumeric`
+# reads it, or `_`.
+# ponytail: ASCII letters and digits only, and any non-ASCII character. A
+# package name is ASCII, so only odd text after an `@` can differ.
+task is_name_char(c: text) -> bool
+    let b = c.bytes()[0].to_int()
+    let letter = (b >= 97 and b <= 122) or (b >= 65 and b <= 90)
+    return letter or (b >= 48 and b <= 57) or b == 95 or b >= 128
 
 ## Merges parser diagnostics into `diags`, except on lines that already have
 ## one. The lexer's recovery often causes a second, misleading parse error.
@@ -105,11 +190,11 @@ public task render_text(source: Source, diags: list[Diagnostic]) -> text
     var out = ""
     for d in sorted(diags)
         let at = lines.place(d.span.start)
-        out = "{out}{source.path}:{at.line}:{at.column}: error {d.code}: {d.message}\n"
+        out = "{out}{at.file}:{at.line}:{at.column}: error {d.code}: {plain(d.message)}\n"
         for note in d.notes
-            out = "{out}  note: {note}\n"
+            out = "{out}  note: {plain(note)}\n"
         for fix in d.fixes
-            out = "{out}  fix: {fix.description}\n"
+            out = "{out}  fix: {plain(fix.description)}\n"
     return out
 
 public task render_json(source: Source, diags: list[Diagnostic]) -> text
@@ -122,14 +207,14 @@ public task render_json(source: Source, diags: list[Diagnostic]) -> text
         var notes = ""
         for note in d.notes
             let comma = if notes is empty then "" else ","
-            notes = "{notes}{comma}{json_string(note)}"
+            notes = "{notes}{comma}{json_string(plain(note))}"
         var fixes = ""
         for fix in d.fixes
             let comma = if fixes is empty then "" else ","
             fixes = "{fixes}{comma}{fix_json(lines, fix)}"
         let comma = if first then "" else ","
         first = false
-        out = "{out}{comma}{{\"code\":{json_string(d.code)},\"severity\":\"error\",\"message\":{json_string(d.message)},\"file\":{json_string(source.path)},\"line\":{at.line},\"column\":{at.column},\"end_line\":{end.line},\"end_column\":{end.column},\"notes\":[{notes}],\"fixes\":[{fixes}]}}"
+        out = "{out}{comma}{{\"code\":{json_string(d.code)},\"severity\":\"error\",\"message\":{json_string(plain(d.message))},\"file\":{json_string(at.file)},\"line\":{at.line},\"column\":{at.column},\"end_line\":{end.line},\"end_column\":{end.column},\"notes\":[{notes}],\"fixes\":[{fixes}]}}"
     return "{out}]\n"
 
 task fix_json(lines: Lines, fix: Fix) -> text
@@ -139,7 +224,7 @@ task fix_json(lines: Lines, fix: Fix) -> text
         let end = lines.place(edit.span.end)
         let comma = if edits is empty then "" else ","
         edits = "{edits}{comma}{{\"line\":{at.line},\"column\":{at.column},\"end_line\":{end.line},\"end_column\":{end.column},\"text\":{json_string(edit.text)}}}"
-    return "{{\"description\":{json_string(fix.description)},\"edits\":[{edits}]}}"
+    return "{{\"description\":{json_string(plain(fix.description))},\"edits\":[{edits}]}}"
 
 ## A JSON string, escaped as diag.rs escapes it.
 public task json_string(value: text) -> text

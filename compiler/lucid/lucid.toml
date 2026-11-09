@@ -4,4 +4,4 @@ version = "0.1.0"
 
 [permissions]
 files = true
-env = ["LUCID_DUMP"]
+env = ["LUCID_DUMP", "LUCID_CACHE", "LOCALAPPDATA", "XDG_CACHE_HOME", "HOME"]

@@ -1,0 +1,1560 @@
+# Loads a program's modules and joins them into one tree. Ports resolve.rs.
+# Each top-level name of an imported module becomes `module.name`, a form
+# that no written name can take, so later stages see one file with no
+# clashes. See "Modules" in docs/compiler.md and decision 115.
+#
+# All files sit end to end in one `Source`, so a span needs no file id.
+
+use std.env
+use std.fs
+use ./ast
+use ./diag
+use ./lexer
+use ./manifest
+use ./parser
+
+# What every file sees. The checker treats these like the file's own.
+task prelude() -> text
+    let lines = [
+        "trait Error",
+        "    task error_message(self) -> text",
+        "",
+        "public task sort[T: Order](change self: list[T])",
+        "    let count = self.len()",
+        "    var width = 1",
+        "    while width < count",
+        "        var merged: list[T] = []",
+        "        var start = 0",
+        "        while start < count",
+        "            var middle = start + width",
+        "            if middle > count",
+        "                middle = count",
+        "            var end = middle + width",
+        "            if end > count",
+        "                end = count",
+        "            var a = start",
+        "            var b = middle",
+        "            while a < middle and b < end",
+        "                if self[b] < self[a]",
+        "                    merged.push(self[b])",
+        "                    b += 1",
+        "                else",
+        "                    merged.push(self[a])",
+        "                    a += 1",
+        "            while a < middle",
+        "                merged.push(self[a])",
+        "                a += 1",
+        "            while b < end",
+        "                merged.push(self[b])",
+        "                b += 1",
+        "            start = end",
+        "        self = merged",
+        "        width *= 2",
+    ]
+    var out = ""
+    for line in lines
+        out = "{out}{line}\n"
+    return out
+
+# The modules of the standard library.
+task std_modules() -> list[text]
+    return ["args", "crypto", "dom", "env", "fs", "html", "http", "json", "net", "sql", "time"]
+
+# A `std` module in the spec but not built yet, whose `use` reports E0901.
+task is_planned_std_module(name: text) -> bool
+    return name == "process"
+
+# The permission that a `std` module needs, or an empty text.
+task std_permission(module: text) -> text
+    if module == "fs" or module == "sql"
+        return "files"
+    if module == "env"
+        return "env"
+    if module == "net" or module == "http"
+        return "net"
+    if module == "process"
+        return "process"
+    return ""
+
+# Type and trait names that a program cannot define, as `is_built_in` in
+# check.rs lists them.
+task is_built_in(name: text) -> bool
+    let names = [
+        "bool", "text", "sql", "list", "map", "set", "spawned", "channel", "lock",
+        "int", "i64", "float", "byte", "u8", "i8", "i16", "i32", "u16", "u32", "u64", "f32",
+        "pointer",
+        "Equal", "Order", "Show", "Hash", "Add", "Sub", "Mul", "Div", "Json",
+        "Copy",
+    ]
+    return name in names
+
+# A literal value, as `is_literal` in check.rs reads one.
+task is_literal(value: ast.Expr) -> bool
+    return match value.kind
+        IntExpr(digits) -> true
+        FloatExpr(digits) -> true
+        BoolExpr(flag) -> true
+        NoneExpr -> true
+        TextExpr(parts) -> all_literal(parts)
+        _ -> false
+
+task all_literal(parts: list[ast.TextPart]) -> bool
+    for part in parts
+        match part
+            ExprText(inner) ->
+                return false
+            _ ->
+                continue
+    return true
+
+## The file a span of `Source` falls in, and which package holds it.
+public type FilePackage
+    start: int
+    package: int
+
+## A file whose package lacks the `unsafe` permission.
+public type NoUnsafe
+    start: int
+    manifest: text
+
+## The first `use` of a `std` module that only one kind of target can build.
+public type TargetUse
+    span: diag.Span
+    module: text
+
+## What `load` gives: the files, what it records about them, the joined
+## tree if loading got that far, and the diagnostics.
+public type Resolved
+    source: diag.Source
+    file: ast.File?
+    diags: list[diag.Diagnostic]
+    no_unsafe: list[NoUnsafe]
+    packages: list[FilePackage]
+    # The root package's grants, one for each of `manifest.permissions()`.
+    grants: list[manifest.Grant]?
+    web_only: diag.Span?
+    host_only: TargetUse?
+
+# One name of a module: its full name, its kind, which is "task", "data",
+# "trait", or "value", and whether it is public.
+type NameEntry
+    full: text
+    kind: text
+    is_public: bool
+
+# One `use`. `item` is the name it takes from the module, if not all of it.
+type Import
+    binding: text
+    span: diag.Span
+    module: int
+    item: ast.Name?
+
+type Module
+    # Empty for the entry file.
+    key: list[text]
+    stmts: list[ast.Stmt]
+    imports: list[Import]
+
+# A directory with a `lucid.toml`.
+type Package
+    name: text
+    version: text
+    # True if it came from the registry, into the cache.
+    registry: bool
+    # `[registry] url`, as written.
+    url: text?
+    # As shown in messages: empty, or ending in `/`.
+    dir: text
+    # With each path in the form of `dir`.
+    dependencies: list[manifest.Dependency]
+    # `src/main.lcd` or `src/lib.lcd`.
+    entry: text
+    library: bool
+    # One for each of `manifest.permissions()`.
+    permissions: list[manifest.Grant]
+
+task grant(self: Package, permission: text) -> manifest.Grant
+    let names = manifest.permissions()
+    for i in 0..names.len()
+        if names[i] == permission
+            return self.permissions[i]
+    return manifest.Listed(items: [])
+
+# A version and an archive hash from `lucid.lock`.
+type Locked
+    version: text
+    hash: text
+
+# A file that `read` added to the source: where it starts, and its text.
+type ReadFile
+    base: int
+    bytes: list[byte]
+    text: text
+
+# A file found for a `use`, and the name it takes from it, if any.
+type Located
+    file: text
+    item: ast.Name?
+
+type Loader
+    source: diag.Source
+    diags: list[diag.Diagnostic]
+    # In dependency order, so the entry file comes last.
+    modules: list[Module]
+    loaded: map[text, int]
+    # The files whose imports are being read, for finding cycles.
+    open: list[text]
+    # By real directory, so two spellings of a path are one package. -1 if
+    # its manifest was bad, which is reported once.
+    package_ids: map[text, int]
+    packages: list[Package]
+    # The root's `lucid.lock`: each package's version and archive hash.
+    lock: map[text, Locked]
+    # The user's package cache, ending in `/`.
+    cache: text
+    # Registry dependencies that the lock and the cache do not cover.
+    uncovered: list[manifest.Dependency]
+    # The cache directories that `locked` gave, so a package read from one
+    # is a registry package.
+    registry_dirs: set[text]
+    windows: bool
+    no_unsafe: list[NoUnsafe]
+    file_packages: list[FilePackage]
+    grants: list[manifest.Grant]?
+    web_only: diag.Span?
+    host_only: TargetUse?
+
+# True on Windows, where a real path starts with a drive or `\\`, not `/`.
+task on_windows() -> bool
+    let here = fs.real_path(".") else "/"
+    return not here.starts_with("/")
+
+task join_texts(items: list[text], separator: text) -> text
+    var out = ""
+    for i in 0..items.len()
+        out = if i == 0 then items[i] else "{out}{separator}{items[i]}"
+    return out
+
+task is_separator(c: text) -> bool
+    return c == "/" or c == "\\"
+
+# `path` with each final `/` and `\` removed.
+task trim_separators(path: text) -> text
+    var end = path.len()
+    while end > 0 and is_separator(path[end - 1..end])
+        end -= 1
+    return path[0..end]
+
+# `path` with a final `/`, or empty for the current directory.
+task dir_prefix(path: text) -> text
+    let dir = trim_separators(path)
+    if dir == "."
+        return ""
+    if dir is empty
+        return path
+    return "{dir}/"
+
+# The part of a file's path up to its name.
+task dir_of(file: text) -> text
+    var end = file.len()
+    while end > 0 and not is_separator(file[end - 1..end])
+        end -= 1
+    return file[0..end]
+
+# A directory in the form of `dir_of`, as a path that the system can open.
+task openable(dir: text) -> text
+    return if dir is empty then "." else dir
+
+# `name` inside the directory `dir`.
+task inside(dir: text, name: text) -> text
+    if dir is empty or is_separator(dir[dir.len() - 1..dir.len()])
+        return "{dir}{name}"
+    return "{dir}/{name}"
+
+task is_dir(path: text) -> bool
+    let listed = fs.list_dir(path)
+    return listed is not fs.FileError
+
+task is_file(path: text) -> bool
+    return fs.exists(path) and not is_dir(path)
+
+# True if a path starts at a root, as Rust's `Path::is_absolute` reads it.
+task is_absolute(path: text, windows: bool) -> bool
+    if not windows
+        return path.starts_with("/")
+    if path.len() >= 2 and is_separator(path[0..1]) and is_separator(path[1..2])
+        return true
+    return path.len() >= 3 and path[1..2] == ":" and is_separator(path[2..3])
+
+# The directory that holds a real path, or an empty text at a root.
+task parent(real: text, windows: bool) -> text
+    var end = real.len()
+    while end > 0 and not (real[end - 1..end] == "/" or (windows and real[end - 1..end] == "\\"))
+        end -= 1
+    if end == 0 or end == real.len()
+        return ""
+    let up = real[0..end - 1]
+    if up is empty or (windows and up.len() == 2 and up[1..2] == ":")
+        return real[0..end]
+    return up
+
+# The file name of a path without its last extension, as Rust's
+# `Path::file_stem` gives it.
+task file_stem(path: text, windows: bool) -> text
+    var start = path.len()
+    while start > 0 and not (path[start - 1..start] == "/" or (windows and path[start - 1..start] == "\\"))
+        start -= 1
+    let name = path[start..path.len()]
+    var dot = name.len()
+    while dot > 0 and name[dot - 1..dot] != "."
+        dot -= 1
+    if dot <= 1
+        return name
+    return name[0..dot - 1]
+
+# True if each named step of a path has exactly this spelling. A file
+# system that ignores case must not make one file two modules, or let a
+# program work only on Windows. A directory that cannot be listed gets the
+# benefit of doubt.
+task exact_path(path: text, windows: bool) -> bool
+    var at = ""
+    for part in manifest.components(path, windows)
+        if part.kind == "normal"
+            let listed = fs.list_dir(openable(at))
+            match listed
+                names: list[text] ->
+                    if part.name not in names
+                        return false
+                _ ->
+                    continue
+        if part.kind == "prefix"
+            at = part.name
+        else if part.kind == "root"
+            at = "{at}/"
+        else
+            at = inside(at, part.name)
+    return true
+
+# True if the file `dir` + `parts` + `.lcd` exists with exactly this
+# spelling, for the reason in `exact_path`.
+task exact_file(dir: text, parts: list[text]) -> bool
+    var at = openable(dir)
+    for place in 0..parts.len()
+        let last = place + 1 == parts.len()
+        let name = if last then "{parts[place]}.lcd" else parts[place]
+        let listed = fs.list_dir(at)
+        match listed
+            names: list[text] ->
+                if name not in names
+                    return false
+            _ ->
+                return false
+        at = inside(at, name)
+    return is_file(at)
+
+# The directory of the nearest `lucid.toml` at or above a file, reached with
+# `..` so that its path stays short in messages.
+task package_above(file: text, windows: bool) -> text?
+    let dir = dir_of(file)
+    let found = fs.real_path(openable(dir))
+    if found is fs.FileError
+        return none
+    var real = found
+    var up = dir
+    while real is not empty
+        let manifest_path = if is_separator(real[real.len() - 1..real.len()]) then "{real}lucid.toml" else (if windows then "{real}\\lucid.toml" else "{real}/lucid.toml")
+        if is_file(manifest_path) and exact_path(manifest_path, windows)
+            return up
+        up = "{up}../"
+        real = parent(real, windows)
+    return none
+
+# The package that a directory on the command line means: its own, or the
+# one around it, so a command works from anywhere in a package.
+task package_root(dir: text, windows: bool) -> text
+    let prefix = dir_prefix(dir)
+    return package_above("{prefix}x", windows) else prefix
+
+# The user's package cache, ending in `/`: `LUCID_CACHE`, or else the
+# system's cache directory with `lucid` added.
+task cache_dir(windows: bool) -> text
+    var dir = env.get("LUCID_CACHE") else ""
+    if dir is empty and windows
+        let local = env.get("LOCALAPPDATA") else ""
+        if local is not empty
+            dir = "{local}/lucid"
+    if dir is empty and not windows
+        let xdg = env.get("XDG_CACHE_HOME") else ""
+        let home = env.get("HOME") else ""
+        if xdg is not empty
+            dir = "{xdg}/lucid"
+        else if home is not empty
+            dir = "{home}/.cache/lucid"
+    if dir is empty
+        return ""
+    return "{trim_separators(dir)}/"
+
+# A version's three numbers, if it has them.
+task numbers(version: text) -> list[int]?
+    let parts = version.split(".")
+    if parts.len() != 3
+        return none
+    var found: list[int] = []
+    for part in parts
+        if part.starts_with("+") or part.starts_with("-")
+            return none
+        let n = part.to_int()
+        if n is none
+            return none
+        found.push(n)
+    return found
+
+# True if one floor reaches the other's version, by decision 198: the same
+# major, and the same minor while the major is 0.
+task same_range(a: list[int], b: list[int]) -> bool
+    return a[0] == b[0] and (a[0] > 0 or a[1] == b[1])
+
+# True if `a` is at least `b`, compared number by number.
+task at_least(a: list[int], b: list[int]) -> bool
+    for i in 0..3
+        if a[i] != b[i]
+            return a[i] > b[i]
+    return true
+
+task is_hash(value: text) -> bool
+    if value.len() != 64
+        return false
+    for b in value.bytes()
+        let n = b.to_int()
+        if not ((n >= 48 and n <= 57) or (n >= 97 and n <= 102))
+            return false
+    return true
+
+# `value` with whitespace at its end removed.
+# ponytail: ASCII whitespace only, where Rust's `trim_end` also takes Unicode
+# spaces. A lock line that ends in one is an error either way.
+task trim_end(value: text) -> text
+    var end = value.len()
+    while end > 0
+        let c = value[end - 1..end]
+        if c == " " or c == "\t" or c == "\n" or c == "\r"
+            end -= 1
+        else
+            break
+    return value[0..end]
+
+# Reads `lucid.lock`: a line `NAME VERSION SHA256` for each registry
+# package, and lines that start with `#`. A bad line is E0338.
+task read_lock(change self: Loader, path: text)
+    let content = fs.read_text(path)
+    if content is fs.FileError
+        return
+    var base = -1
+    var at = 0
+    let pieces = content.split("\n")
+    for i in 0..pieces.len()
+        let line = pieces[i]
+        let start = at
+        at += line.bytes().len() + 1
+        if i + 1 == pieces.len() and line is empty
+            break
+        let kept = trim_end(line)
+        let parts = kept.split(" ")
+        if kept is empty or kept.starts_with("#")
+            continue
+        if parts.len() == 3 and manifest.valid_name(parts[0]) and manifest.valid_version(parts[1]) and is_hash(parts[2])
+            self.lock[parts[0]] = Locked(version: parts[1], hash: parts[2])
+            continue
+        if base < 0
+            base = self.source.add_file(path, content.bytes())
+        let span = diag.span(base + start, base + start + kept.bytes().len())
+        var d = diag.new("E0338", "a line of `lucid.lock` must be `NAME VERSION SHA256`", span)
+        d.notes.push("delete the line, and the next command writes it again")
+        self.diags.push(d)
+
+## Reads and parses a program, from a file or a package directory. With
+## `run`, a library is an error. A registry dependency that `lucid.lock` and
+## the cache do not cover is an error: only the Rust `lucid` fetches, by
+## decision 214.
+public task load(path: text, run: bool) -> Resolved
+    let windows = on_windows()
+    var loader = Loader(
+        source: diag.Source(bytes: [], files: []),
+        diags: [],
+        modules: [],
+        loaded: {},
+        open: [],
+        package_ids: {},
+        packages: [],
+        lock: {},
+        cache: "",
+        uncovered: [],
+        registry_dirs: set([]),
+        windows: windows,
+        no_unsafe: [],
+        file_packages: [],
+        grants: none,
+        web_only: none,
+        host_only: none,
+    )
+    let file = loader.load_file(path, run)
+    return Resolved(
+        source: loader.source,
+        file: file,
+        diags: loader.diags,
+        no_unsafe: loader.no_unsafe,
+        packages: loader.file_packages,
+        grants: loader.grants,
+        web_only: loader.web_only,
+        host_only: loader.host_only,
+    )
+
+task load_file(change self: Loader, path: text, run: bool) -> ast.File?
+    let windows = self.windows
+    let start = diag.span(0, 0)
+    let directory = is_dir(path)
+    var root: text? = none
+    if directory
+        root = package_root(path, windows)
+    else
+        root = package_above(path, windows)
+    if root is not none
+        self.read_lock("{root}lucid.lock")
+    self.cache = cache_dir(windows)
+    var entry = path
+    if directory
+        let package = self.package(package_root(path, windows), start)
+        if package < 0
+            return none
+        entry = self.packages[package].entry
+    let found = self.module(entry, [], start)
+    self.check_dependencies()
+    if self.uncovered is not empty
+        # An error in a manifest may hide a dependency, so it comes first.
+        if self.diags is empty and root is not none
+            self.missing(root)
+        return none
+    let dir = package_above(entry, windows)
+    if dir is not none
+        let holder = self.package(dir, start)
+        if holder >= 0
+            self.grants = self.packages[holder].permissions
+    let library = self.is_library(entry)
+    if run and library
+        self.diags.push(diag.new("E0339", "`{entry}` is a library, so it cannot run", start))
+    if found < 0 or self.diags is not empty
+        return none
+    # With imports, the entry file's names need a prefix too, or a module
+    # would see them. Alone, it keeps its names, so that its messages stay
+    # plain.
+    if self.modules.len() > 1
+        let last = self.modules.len() - 1
+        self.modules[last].key = [file_stem(entry, windows)]
+    # The prelude is a file of its own, so that a trap in its code has a place.
+    let text = prelude()
+    let base = self.source.add_file("@std/prelude.lcd", text.bytes())
+    return join(self.modules, base, text, library, change self.diags)
+
+# Reports each registry dependency that `lucid.lock` and the cache do not
+# cover, after the checks that the Rust `lucid` makes before it fetches.
+task missing(change self: Loader, root: text)
+    let at = self.package(root, diag.span(0, 0))
+    if at < 0
+        return
+    let first = self.uncovered[0].span
+    if self.packages[at].url is none
+        var d = diag.new("E0338", "a dependency with a `version` needs a registry", first)
+        d.notes.push("add `[registry]` with `url` to `{root}lucid.toml`")
+        self.diags.push(d)
+        return
+    if self.cache is empty
+        var d = diag.new("E0343", "no directory for the package cache", first)
+        d.notes.push("set `LUCID_CACHE` to a directory")
+        self.diags.push(d)
+        return
+    for dependency in self.uncovered
+        let version = dependency.version else ""
+        let message = "`{dependency.name}` {version} is not in `lucid.lock` or the cache"
+        var d = diag.new("E0343", message, dependency.span)
+        d.notes.push("run `lucid check` with the Rust `lucid` to fetch it")
+        self.diags.push(d)
+
+# True if a file is the `src/lib.lcd` of its package, by any spelling.
+task is_library(self: Loader, file: text) -> bool
+    let dir = package_above(file, self.windows)
+    if dir is none
+        return false
+    let lib = fs.real_path("{dir}src/lib.lcd")
+    let real = fs.real_path(file)
+    match lib
+        found: text ->
+            match real
+                same: text -> return found == same
+                _ -> return false
+        _ -> return false
+
+# Valid UTF-8 at the start of `bytes`, as Rust's `valid_up_to` counts it.
+public task valid_up_to(bytes: list[byte]) -> int
+    var at = 0
+    let size = bytes.len()
+    while at < size
+        let b = bytes[at].to_int()
+        var need = 0
+        var low = 128
+        var high = 191
+        if b < 128
+            need = 0
+        else if b >= 194 and b <= 223
+            need = 1
+        else if b == 224
+            need = 2
+            low = 160
+        else if (b >= 225 and b <= 236) or b == 238 or b == 239
+            need = 2
+        else if b == 237
+            need = 2
+            high = 159
+        else if b == 240
+            need = 3
+            low = 144
+        else if b >= 241 and b <= 243
+            need = 3
+        else if b == 244
+            need = 3
+            high = 143
+        else
+            return at
+        for i in 1..need + 1
+            if at + i >= size
+                return at
+            let next = bytes[at + i].to_int()
+            if next < low or next > high
+                return at
+            low = 128
+            high = 191
+        at += need + 1
+    return at
+
+## Reads one file into a source, and reports a file that cannot be read or
+## is not UTF-8. The text is empty when there is a diagnostic.
+public task read_into(change source: diag.Source, change diags: list[diag.Diagnostic], path: text, used_at: diag.Span) -> ReadFile
+    var real = path
+    if path.starts_with("@std/") and path.ends_with(".lcd")
+        let module = path[5..path.len() - 4]
+        if module in std_modules()
+            # ponytail: read from `std/` under the current directory, until
+            # the backend gives the files held inside, by decision 217.
+            real = "std/{module}.lcd"
+    let read = fs.read_bytes(real)
+    match read
+        bytes: list[byte] ->
+            let valid = valid_up_to(bytes)
+            if valid < bytes.len()
+                let base = source.add_file(path, bytes[0..valid])
+                diags.push(diag.new("E0002", "file is not valid UTF-8", diag.span(base + valid, base + valid)))
+                return ReadFile(base: -1, bytes: [], text: "")
+            let base = source.add_file(path, bytes)
+            let content = fs.read_text(real) else ""
+            return ReadFile(base: base, bytes: bytes, text: content)
+        e: fs.FileError ->
+            let gone = source.add_file(path, [])
+            # ponytail: the message is `std.fs`'s, where Rust shows the
+            # system's words. Only a path that cannot be read differs.
+            diags.push(diag.new("E0001", "cannot read `{path}`: {e.error_message()}", used_at))
+            return ReadFile(base: -1, bytes: [], text: "")
+
+task read(change self: Loader, path: text, used_at: diag.Span) -> ReadFile
+    return read_into(change self.source, change self.diags, path, used_at)
+
+## Moves tokens to a file that starts at `base`.
+public task shift(tokens: list[lexer.Token], base: int) -> list[lexer.Token]
+    var out = tokens
+    for change token in out
+        token.span = diag.span(token.span.start + base, token.span.end + base)
+        match token.kind
+            TextToken(parts) ->
+                var moved: list[lexer.RawPart] = []
+                for part in parts
+                    match part
+                        ExprPart(inner) -> moved.push(lexer.ExprPart(tokens: shift(inner, base)))
+                        _ -> moved.push(part)
+                token.kind = lexer.TextToken(parts: moved)
+            _ ->
+                continue
+    return out
+
+# Reads the package in `dir`, once. -1 means that it is reported.
+task package(change self: Loader, dir: text, used_at: diag.Span) -> int
+    let real = fs.real_path(openable(dir)) else ""
+    if real is not empty
+        let known = self.package_ids.get(real)
+        if known is not none
+            return known
+    let id = self.read_package(dir, used_at)
+    if real is not empty
+        self.package_ids[real] = id
+    return id
+
+task read_package(change self: Loader, dir: text, used_at: diag.Span) -> int
+    let file = self.read("{dir}lucid.toml", used_at)
+    if file.base < 0
+        return -1
+    let base = file.base
+    let parsed = manifest.parse(file.bytes, file.text)
+    for d in parsed.diags
+        self.diags.push(d.shifted(base))
+    let found = parsed.manifest
+    if found is none
+        return -1
+    let at = diag.span(base, base)
+    let src = "{dir}src/"
+    let main = exact_file(dir, ["src", "main"])
+    let lib = exact_file(dir, ["src", "lib"])
+    if main == lib
+        let message = if main then "a package has `src/main.lcd` or `src/lib.lcd`, not both" else "a package needs `src/main.lcd` or `src/lib.lcd`"
+        self.diags.push(diag.new("E0339", message, at))
+        return -1
+    for other in self.packages
+        if other.name == found.name
+            var d = diag.new("E0339", "two packages are named `{found.name}`", at)
+            d.notes.push("the other one is in `{other.dir}`")
+            self.diags.push(d)
+            return -1
+    let registry = dir in self.registry_dirs
+    var dependencies: list[manifest.Dependency] = []
+    for written in found.dependencies
+        var dependency = written
+        dependency.span = diag.span(written.span.start + base, written.span.end + base)
+        for change allowed in dependency.allow
+            allowed.span = diag.span(allowed.span.start + base, allowed.span.end + base)
+        let version = dependency.version
+        if version is not none
+            dependency.path = self.locked(dependency.name, version) else ""
+            if dependency.path is empty
+                self.uncovered.push(dependency)
+            else
+                self.registry_dirs.add(dependency.path)
+        else if registry
+            let message = "a package from the registry cannot have a `path` dependency"
+            self.diags.push(diag.new("E0339", message, dependency.span))
+            continue
+        else
+            if not is_absolute(dependency.path, self.windows)
+                dependency.path = "{dir}{dependency.path}"
+            dependency.path = dir_prefix(dependency.path)
+        dependencies.push(dependency)
+    let entry = if main then "{src}main.lcd" else "{src}lib.lcd"
+    self.packages.push(Package(
+        name: found.name,
+        version: found.version,
+        registry: registry,
+        url: found.registry,
+        dir: dir,
+        dependencies: dependencies,
+        entry: entry,
+        library: lib,
+        permissions: found.permissions,
+    ))
+    return self.packages.len() - 1
+
+# The cache directory of a registry dependency, if `lucid.lock` holds a
+# version that `floor` reaches and the cache holds that version.
+task locked(self: Loader, name: text, floor: text) -> text?
+    let entry = self.lock.get(name)
+    if entry is none
+        return none
+    let have = numbers(entry.version)
+    let want = numbers(floor)
+    if have is none or want is none
+        return none
+    let dir = "{self.cache}{name}-{entry.version}-{entry.hash}/"
+    let cached = is_file("{dir}lucid.toml")
+    if same_range(have, want) and at_least(have, want) and self.cache is not empty and cached
+        return dir
+    return none
+
+# Reports a fault in a dependency entry, once, however many `use`s reach it.
+task fault(change self: Loader, dependency: manifest.Dependency, message: text)
+    for d in self.diags
+        if d.code == "E0339" and d.span == dependency.span
+            return
+    self.diags.push(diag.new("E0339", message, dependency.span))
+
+# The library that a manifest entry names, or -1.
+task dependency(change self: Loader, dependency: manifest.Dependency) -> int
+    let name = dependency.name
+    if dependency.path is empty
+        return -1
+    let manifest_path = "{dependency.path}lucid.toml"
+    # A cache path holds the spelling of `LUCID_CACHE`, which the system may
+    # match in another case, and the loader wrote the rest itself.
+    let spelled = dependency.version is not none or exact_path(manifest_path, self.windows)
+    if not is_file(manifest_path) or not spelled
+        self.fault(dependency, "no `lucid.toml` in `{dependency.path}`, with this spelling")
+        return -1
+    let id = self.package(dependency.path, dependency.span)
+    if id < 0
+        return -1
+    let package = self.packages[id]
+    if package.name != name
+        self.fault(dependency, "the package in `{package.dir}` is named `{package.name}`")
+        return -1
+    if not package.library
+        self.fault(dependency, "`{name}` has no `src/lib.lcd`, so nothing can use it")
+        return -1
+    let locked = self.lock.get(name)
+    let same = locked is not none and locked.version == package.version
+    if package.registry and not same
+        self.fault(dependency, "the archive of `{name}` holds version {package.version}")
+        return -1
+    return id
+
+# Checks every entry of every manifest read, used or not, so a bad entry
+# shows before its first `use`. `packages` grows during the walk.
+task check_dependencies(change self: Loader)
+    var at = 0
+    while at < self.packages.len()
+        let dependencies = self.packages[at].dependencies
+        for dependency in dependencies
+            let id = self.dependency(dependency)
+            if id >= 0
+                self.check_allow(at, id, dependency)
+        at += 1
+
+# The rules of E0340 for one dependency: it holds only what its `allow`
+# entry names, the parent holds all of that, and the parent's lists cover
+# the dependency's lists.
+task check_allow(change self: Loader, parent_id: int, child_id: int, dependency: manifest.Dependency)
+    let parent = self.packages[parent_id]
+    let child = self.packages[child_id]
+    for permission in manifest.permissions()
+        let own = parent.grant(permission)
+        let theirs = child.grant(permission)
+        var allowed: diag.Span? = none
+        for entry in dependency.allow
+            if allowed is none and entry.name == permission
+                allowed = entry.span
+        if allowed is not none and not own.held()
+            var d = diag.new("E0340", "`{parent.name}` cannot allow `{permission}`", allowed)
+            d.notes.push("a package can only pass on a permission that it holds")
+            self.diags.push(d)
+        else if theirs.held() and allowed is none
+            var d = diag.new("E0340", "`{child.name}` needs the `{permission}` permission", dependency.span)
+            d.notes.push("name it in `allow`, if `{child.name}` may have it")
+            self.diags.push(d)
+        else if theirs.held() and not own.covers(theirs, permission, self.windows)
+            let message = "`{child.name}` lists more under `{permission}` than `{parent.name}` does"
+            var d = diag.new("E0340", message, dependency.span)
+            d.notes.push("add the rest to `{permission}` in `{parent.dir}lucid.toml`")
+            self.diags.push(d)
+
+# The package that holds a file, unless the file ships with the compiler.
+task holder(change self: Loader, file: text, used_at: diag.Span) -> int
+    if file.starts_with("@")
+        return -1
+    let dir = package_above(file, self.windows)
+    if dir is none
+        return -1
+    return self.package(dir, used_at)
+
+# Loads a file and all it imports. -1 if it cannot be read as text.
+task module(change self: Loader, path: text, key: list[text], used_at: diag.Span) -> int
+    let known = self.loaded.get(path)
+    if known is not none
+        return known
+    let file = self.read(path, used_at)
+    if file.base < 0
+        return -1
+    let base = file.base
+    let holder = self.holder(path, used_at)
+    if holder >= 0
+        self.file_packages.push(FilePackage(start: base, package: holder))
+        let package = self.packages[holder]
+        if not package.grant("unsafe").held()
+            self.no_unsafe.push(NoUnsafe(start: base, manifest: "{package.dir}lucid.toml"))
+    let lexed = lexer.lex(file.bytes, file.text)
+    var diags: list[diag.Diagnostic] = []
+    for d in lexed.diags
+        diags.push(d.shifted(base))
+    let parsed = parser.parse(shift(lexed.tokens, base))
+    diag.add_unless_same_line(self.source, change diags, parsed.diags)
+    for d in diags
+        self.diags.push(d)
+    self.open.push(path)
+    var imports: list[Import] = []
+    for item in parsed.file.stmts
+        match item.kind
+            UseStmt(relative, written, alias) ->
+                var import: Import? = none
+                if relative
+                    import = self.import(path, key, written, alias, item.span)
+                else
+                    import = self.import_package(path, written, alias, item.span)
+                if import is not none
+                    imports.push(import)
+            _ ->
+                continue
+    let gone = self.open.pop()
+    let id = self.modules.len()
+    self.modules.push(Module(key: key, stmts: parsed.file.stmts, imports: imports))
+    self.loaded[path] = id
+    return id
+
+task names_of(written: list[ast.Name]) -> list[text]
+    var parts: list[text] = []
+    for name in written
+        parts.push(name.text)
+    return parts
+
+task with_note(code: text, message: text, span: diag.Span, note: text) -> diag.Diagnostic
+    var d = diag.new(code, message, span)
+    d.notes.push(note)
+    return d
+
+# Finds what `use ./a.b` means from the file at `from`. A file `a/b.lcd`
+# comes first, and then the name `b` in `a.lcd`.
+task import(change self: Loader, from: text, key: list[text], written: list[ast.Name], alias: ast.Name?, span: diag.Span) -> Import?
+    let dir = dir_of(from)
+    let parts = names_of(written)
+    let last = written[written.len() - 1]
+    let located = locate(dir, parts, last)
+    if located is none
+        let message = "cannot find module `./{join_texts(parts, ".")}`"
+        let note = "looked for `{dir}{join_texts(parts, "/")}.lcd`"
+        self.diags.push(with_note("E0334", message, span, note))
+        return none
+    # Its own `lucid.toml` would give the file other permissions.
+    let found_holder = self.holder(located.file, span)
+    let from_holder = self.holder(from, span)
+    if found_holder != from_holder
+        let message = "`./{join_texts(parts, ".")}` is in another package"
+        let note = "use it as a dependency, by its name, with no `./`"
+        self.diags.push(with_note("E0339", message, span, note))
+        return none
+    var new_key: list[text] = []
+    let kept = if key is empty then 0 else key.len() - 1
+    for i in 0..kept
+        new_key.push(key[i])
+    let module_count = if located.item is none then parts.len() else parts.len() - 1
+    for i in 0..module_count
+        new_key.push(parts[i])
+    let binding = if alias is none then last.text else alias.text
+    return self.bind(located.file, new_key, binding, located.item, span)
+
+# Finds what `use name.a` means from the file at `from`. `name` must be a
+# dependency of the package that holds the file. `use name` is its
+# `src/lib.lcd`. A path follows the rule of `use ./`, from `src`, and a
+# single name that is no file is a name in `src/lib.lcd`.
+task import_package(change self: Loader, from: text, written: list[ast.Name], alias: ast.Name?, span: diag.Span) -> Import?
+    let first = written[0]
+    if first.text == "std"
+        return self.import_std(from, written, alias, span)
+    let dir = package_above(from, self.windows)
+    if dir is none
+        let note = "no `lucid.toml` holds this file. A local module needs `./`"
+        self.diags.push(with_note("E0337", "`{first.text}` is not a dependency", span, note))
+        return none
+    let holder = self.package(dir, span)
+    if holder < 0
+        return none
+    let package = self.packages[holder]
+    var found: manifest.Dependency? = none
+    for dependency in package.dependencies
+        if found is none and dependency.name == first.text
+            found = dependency
+    if found is none
+        let note = "add it to `[dependencies]` in `{package.dir}lucid.toml`. A local module needs `./`"
+        self.diags.push(with_note("E0337", "`{first.text}` is not a dependency", span, note))
+        return none
+    let target = self.dependency(found)
+    if target < 0
+        return none
+    let library = self.packages[target]
+    let src = "{library.dir}src/"
+    let last = written[written.len() - 1]
+    var parts = names_of(written[1..written.len()])
+    var located: Located? = none
+    if parts is empty
+        parts.push("lib")
+        located = Located(file: library.entry, item: none)
+    else
+        located = locate(src, parts, last)
+    if located is none and parts.len() == 1
+        located = Located(file: library.entry, item: last)
+        parts = ["lib", parts[0]]
+    if located is none
+        let message = "cannot find module `{first.text}.{join_texts(parts, ".")}`"
+        let note = "looked for `{src}{join_texts(parts, "/")}.lcd`"
+        self.diags.push(with_note("E0334", message, span, note))
+        return none
+    # No written name starts with `@`, so a package's modules cannot meet a
+    # local module of the same name.
+    var key = ["@{library.name}"]
+    let module_count = if located.item is none then parts.len() else parts.len() - 1
+    for i in 0..module_count
+        key.push(parts[i])
+    let binding = if alias is none then last.text else alias.text
+    return self.bind(located.file, key, binding, located.item, span)
+
+# `use std.a` is a module of the standard library, and `use std.a.b` takes
+# the name `b` from it. A module not built yet stays in the tree, and
+# reports E0901.
+task import_std(change self: Loader, from: text, written: list[ast.Name], alias: ast.Name?, span: diag.Span) -> Import?
+    if written.len() < 2
+        let note = "name one of its modules, as in `use std.fs`"
+        self.diags.push(with_note("E0334", "`std` is not a module", span, note))
+        return none
+    let module = written[1]
+    let permission = std_permission(module.text)
+    if permission is not empty
+        let holder = self.holder(from, span)
+        if holder >= 0 and not self.packages[holder].grant(permission).held()
+            let message = "`std.{module.text}` needs the `{permission}` permission"
+            let note = "add it under `[permissions]` in `{self.packages[holder].dir}lucid.toml`"
+            self.diags.push(with_note("E0340", message, span, note))
+            return none
+    if module.text not in std_modules()
+        if not is_planned_std_module(module.text)
+            let message = "the standard library has no module `{module.text}`"
+            self.diags.push(diag.new("E0334", message, span))
+        return none
+    var item: ast.Name? = none
+    var last = module
+    if written.len() == 3
+        item = written[2]
+        last = written[2]
+    else if written.len() > 3
+        let message = "`std.{module.text}` has no modules inside it"
+        self.diags.push(diag.new("E0334", message, span))
+        return none
+    if module.text == "dom" and self.web_only is none
+        self.web_only = span
+    let host = ["crypto", "net", "http", "sql"]
+    if module.text in host and self.host_only is none
+        self.host_only = TargetUse(span: span, module: "std.{module.text}")
+    let file = "@std/{module.text}.lcd"
+    let binding = if alias is none then last.text else alias.text
+    return self.bind(file, ["@std", module.text], binding, item, span)
+
+# Loads an imported file, unless that would close a cycle.
+task bind(change self: Loader, found: text, key: list[text], binding: text, item: ast.Name?, span: diag.Span) -> Import?
+    if found in self.open
+        let note = "move what both files need into a third module"
+        self.diags.push(with_note("E0335", "`{found}` imports itself, through this `use`", span, note))
+        return none
+    let module = self.module(found, key, span)
+    if module < 0
+        return none
+    return Import(binding: binding, span: span, module: module, item: item)
+
+# Finds the file of a path from `dir`: `a/b.lcd` first, and then the name
+# `b` in `a.lcd`.
+task locate(dir: text, parts: list[text], last: ast.Name) -> Located?
+    if exact_file(dir, parts)
+        return Located(file: "{dir}{join_texts(parts, "/")}.lcd", item: none)
+    let module = parts[0..parts.len() - 1]
+    if module is not empty and exact_file(dir, module)
+        return Located(file: "{dir}{join_texts(module, "/")}.lcd", item: last)
+    return none
+
+task is_method(sig: ast.TaskSig) -> bool
+    return sig.params is not empty and sig.params[0].name.text == "self"
+
+# Every top-level name of a module.
+task own_names(module: Module) -> map[text, NameEntry]
+    var names: map[text, NameEntry] = {}
+    for item in module.stmts
+        match item.kind
+            TaskStmt(def) ->
+                if not is_method(def.sig)
+                    add_name(change names, module.key, def.sig.name, "task", def.is_public)
+            TypeStmt(def) -> add_name(change names, module.key, def.name, "data", def.is_public)
+            TraitStmt(def) -> add_name(change names, module.key, def.name, "trait", def.is_public)
+            ChoiceStmt(def) ->
+                add_name(change names, module.key, def.name, "data", def.is_public)
+                for variant in def.variants
+                    add_name(change names, module.key, variant.name, "data", def.is_public)
+            LetStmt(mutable, name, ty, value) -> add_name(change names, module.key, name, "value", false)
+            _ ->
+                continue
+    return names
+
+task add_name(change names: map[text, NameEntry], key: list[text], name: ast.Name, kind: text, is_public: bool)
+    if name.text in names
+        return
+    var parts = key
+    parts.push(name.text)
+    names[name.text] = NameEntry(full: join_texts(parts, "."), kind: kind, is_public: is_public)
+
+# Reports what a module that is not the entry file cannot hold.
+task check_library(stmts: list[ast.Stmt], change diags: list[diag.Diagnostic])
+    for item in stmts
+        let allowed = match item.kind
+            UseStmt(relative, path, alias) -> true
+            TestStmt(name, body) -> true
+            TaskStmt(def) -> true
+            TypeStmt(def) -> true
+            ChoiceStmt(def) -> true
+            TraitStmt(def) -> true
+            LetStmt(mutable, name, ty, value) -> not mutable and is_literal(value)
+            _ -> false
+        if not allowed
+            let note = "it holds declarations and `let` with a literal value"
+            diags.push(with_note("E0336", "an imported module cannot run code", item.span, note))
+
+task is_test(item: ast.Stmt) -> bool
+    return match item.kind
+        TestStmt(name, body) -> true
+        _ -> false
+
+# True for a `use` that leaves the tree: all but one of a planned `std`
+# module, which stays and reports E0901.
+task leaves(item: ast.Stmt) -> bool
+    return match item.kind
+        UseStmt(relative, path, alias) -> relative or path[0].text != "std" or path.len() < 2 or not is_planned_std_module(path[1].text)
+        _ -> false
+
+# Renames every module, then puts their statements in one file. An entry
+# file that is a library follows the rules of an imported module, so
+# `lucid check` reports what would fail in a program that imports it.
+task join(modules: list[Module], prelude_base: int, prelude_text: text, library_entry: bool, change diags: list[diag.Diagnostic]) -> ast.File
+    let lexed = lexer.lex(prelude_text.bytes(), prelude_text)
+    let prelude_file = parser.parse(shift(lexed.tokens, prelude_base)).file
+    var stmts = prelude_file.stmts
+    var exports: list[map[text, NameEntry]] = []
+    let count = modules.len()
+    var keys: list[text] = []
+    for module in modules
+        keys.push(join_texts(module.key, "."))
+    for id in 0..count
+        let module = modules[id]
+        let imported = id + 1 < count
+        if imported or library_entry
+            check_library(module.stmts, change diags)
+        var kept: list[ast.Stmt] = []
+        for item in module.stmts
+            # `lucid test` runs the entry file's tests.
+            if not (imported and is_test(item))
+                kept.push(item)
+        let own = own_names(module)
+        var names = own
+        var aliases: map[text, int] = {}
+        for import in module.imports
+            let binding = import.binding
+            if binding in names or binding in aliases
+                diags.push(diag.new("E0304", "`{binding}` is already defined", import.span))
+                continue
+            let built_in = is_built_in(binding) or binding == "Error"
+            let item = import.item
+            if item is none
+                aliases[binding] = import.module
+                continue
+            if built_in
+                diags.push(diag.new("E0304", "`{binding}` is already defined", import.span))
+                continue
+            let entry = exports[import.module].get(item.text)
+            if entry is none
+                diags.push(diag.new("E0301", "the module has no name `{item.text}`", item.span))
+            else
+                check_public(entry, item.text, item.span, change diags)
+                names[binding] = entry
+        var renamer = Renamer(names: names, aliases: aliases, exports: exports, keys: keys, scopes: [], diags: [])
+        let renamed = renamer.stmts(kept)
+        for d in renamer.diags
+            diags.push(d)
+        for item in renamed
+            if not leaves(item)
+                stmts.push(item)
+        exports.push(own)
+    return ast.File(stmts: stmts)
+
+task check_public(entry: NameEntry, name: text, span: diag.Span, change diags: list[diag.Diagnostic])
+    if not entry.is_public
+        let note = "mark it `public` in `{entry.full}` to use it here"
+        diags.push(with_note("E0333", "`{name}` is private to its module", span, note))
+
+# Rewrites one module's names. A local keeps its name, and hides a
+# top-level one by the same rules as in the checker.
+type Renamer
+    names: map[text, NameEntry]
+    # Each module that `use` names, by the name that it has here.
+    aliases: map[text, int]
+    exports: list[map[text, NameEntry]]
+    keys: list[text]
+    scopes: list[set[text]]
+    diags: list[diag.Diagnostic]
+
+task local(self: Renamer, name: text) -> bool
+    for scope in self.scopes
+        if name in scope
+            return true
+    return false
+
+task bind_local(change self: Renamer, name: text)
+    let last = self.scopes.len() - 1
+    self.scopes[last].add(name)
+
+task open_scope(change self: Renamer)
+    self.scopes.push(set([]))
+
+task close_scope(change self: Renamer)
+    let gone = self.scopes.pop()
+
+task block(change self: Renamer, body: list[ast.Stmt]) -> list[ast.Stmt]
+    self.open_scope()
+    let out = self.stmts(body)
+    self.close_scope()
+    return out
+
+task stmts(change self: Renamer, body: list[ast.Stmt]) -> list[ast.Stmt]
+    var out: list[ast.Stmt] = []
+    for item in body
+        out.push(self.stmt(item))
+    return out
+
+# A top-level name that this module declares or imports, renamed.
+task rename(self: Renamer, name: ast.Name) -> ast.Name
+    let entry = self.names.get(name.text)
+    if entry is none
+        return name
+    return ast.Name(text: entry.full, span: name.span)
+
+# `module.name`. A name that it lacks stays in this form, which no
+# declaration has, so the checker reports it as it would any other.
+task member(change self: Renamer, module: int, name: text, span: diag.Span) -> text
+    let entry = self.exports[module].get(name)
+    if entry is none
+        return "{self.keys[module]}.{name}"
+    check_public(entry, name, span, change self.diags)
+    return entry.full
+
+task stmt(change self: Renamer, item: ast.Stmt) -> ast.Stmt
+    let span = item.span
+    var kind = item.kind
+    match item.kind
+        TestStmt(name, body) ->
+            kind = ast.TestStmt(name: name, body: self.block(body))
+        UnsafeStmt(body) ->
+            kind = ast.UnsafeStmt(body: self.block(body))
+        TaskStmt(def) ->
+            kind = ast.TaskStmt(def: self.task_def(def))
+        TypeStmt(def) ->
+            var out = def
+            out.name = self.rename(def.name)
+            out.type_params = self.type_params(def.type_params)
+            match def.body
+                AliasBody(target) ->
+                    out.body = ast.AliasBody(ty: self.ty(target))
+                FieldsBody(fields) ->
+                    var renamed: list[ast.Field] = []
+                    for field in fields
+                        var next = field
+                        next.ty = self.ty(field.ty)
+                        next.default = self.maybe_expr(field.default)
+                        renamed.push(next)
+                    out.body = ast.FieldsBody(fields: renamed)
+            kind = ast.TypeStmt(def: out)
+        ChoiceStmt(def) ->
+            var out = def
+            out.name = self.rename(def.name)
+            out.type_params = self.type_params(def.type_params)
+            var variants: list[ast.Variant] = []
+            for variant in def.variants
+                let name = self.rename(variant.name)
+                variants.push(ast.Variant(name: name, params: self.params(variant.params)))
+            out.variants = variants
+            kind = ast.ChoiceStmt(def: out)
+        TraitStmt(def) ->
+            var out = def
+            out.name = self.rename(def.name)
+            out.type_params = self.type_params(def.type_params)
+            var tasks: list[ast.TaskSig] = []
+            for sig in def.tasks
+                tasks.push(self.signature(sig))
+            out.tasks = tasks
+            kind = ast.TraitStmt(def: out)
+        LetStmt(mutable, name, ty, value) ->
+            let new_ty = self.maybe_ty(ty)
+            let new_value = self.expr(value)
+            var new_name = name
+            if self.scopes is empty
+                new_name = self.rename(name)
+            else
+                self.bind_local(name.text)
+            kind = ast.LetStmt(mutable: mutable, name: new_name, ty: new_ty, value: new_value)
+        IfStmt(branches, otherwise) ->
+            var renamed: list[ast.Branch] = []
+            for branch in branches
+                let condition = self.expr(branch.condition)
+                renamed.push(ast.Branch(condition: condition, body: self.block(branch.body)))
+            var other: list[ast.Stmt]? = none
+            if otherwise is not none
+                other = self.block(otherwise)
+            kind = ast.IfStmt(branches: renamed, otherwise: other)
+        WhileStmt(condition, body) ->
+            let new_condition = self.expr(condition)
+            kind = ast.WhileStmt(condition: new_condition, body: self.block(body))
+        ForStmt(changes, name, iterable, body) ->
+            let new_iterable = self.expr(iterable)
+            self.open_scope()
+            self.bind_local(name.text)
+            let new_body = self.stmts(body)
+            self.close_scope()
+            kind = ast.ForStmt(changes: changes, name: name, iterable: new_iterable, body: new_body)
+        ReturnStmt(value) ->
+            kind = ast.ReturnStmt(value: self.maybe_expr(value))
+        PrintStmt(value) ->
+            kind = ast.PrintStmt(value: self.expr(value))
+        ExpectStmt(value) ->
+            kind = ast.ExpectStmt(value: self.expr(value))
+        ExprStmt(value) ->
+            kind = ast.ExprStmt(value: self.expr(value))
+        AssignStmt(target, op, value) ->
+            let new_target = self.expr(target)
+            kind = ast.AssignStmt(target: new_target, op: op, value: self.expr(value))
+        _ ->
+            return item
+    return ast.Stmt(kind: kind, span: span)
+
+task task_def(change self: Renamer, def: ast.TaskDef) -> ast.TaskDef
+    var out = def
+    if self.scopes is not empty
+        self.bind_local(def.sig.name.text)
+    else if not is_method(def.sig)
+        out.sig.name = self.rename(def.sig.name)
+    out.sig = self.signature(out.sig)
+    let body = def.body
+    if body is not none
+        self.open_scope()
+        for param in out.sig.params
+            self.bind_local(param.name.text)
+        out.body = self.stmts(body)
+        self.close_scope()
+    return out
+
+task signature(change self: Renamer, sig: ast.TaskSig) -> ast.TaskSig
+    var out = sig
+    out.type_params = self.type_params(sig.type_params)
+    out.params = self.params(sig.params)
+    out.returns = self.maybe_ty(sig.returns)
+    return out
+
+# A parameter that reuses a type's name is an error in the checker, which
+# sees it only under the full name.
+task type_params(change self: Renamer, params: list[ast.TypeParam]) -> list[ast.TypeParam]
+    var out: list[ast.TypeParam] = []
+    for param in params
+        var next = param
+        let entry = self.names.get(param.name.text)
+        if entry is not none and (entry.kind == "data" or entry.kind == "trait")
+            next.name = self.rename(param.name)
+        var bounds: list[ast.Type] = []
+        for bound in param.bounds
+            bounds.push(self.ty(bound))
+        next.bounds = bounds
+        out.push(next)
+    return out
+
+task params(change self: Renamer, params: list[ast.Param]) -> list[ast.Param]
+    var out: list[ast.Param] = []
+    for param in params
+        var next = param
+        next.ty = self.maybe_ty(param.ty)
+        next.default = self.maybe_expr(param.default)
+        out.push(next)
+    return out
+
+task maybe_ty(change self: Renamer, ty: ast.Type?) -> ast.Type?
+    if ty is none
+        return none
+    return self.ty(ty)
+
+task maybe_expr(change self: Renamer, value: ast.Expr?) -> ast.Expr?
+    if value is none
+        return none
+    return self.expr(value)
+
+task tys(change self: Renamer, items: list[ast.Type]) -> list[ast.Type]
+    var out: list[ast.Type] = []
+    for item in items
+        out.push(self.ty(item))
+    return out
+
+task ty(change self: Renamer, ty: ast.Type) -> ast.Type
+    var kind = ty.kind
+    match ty.kind
+        NamedType(path, args) ->
+            let new_args = self.tys(args)
+            var new_path = path
+            if path.len() == 1
+                let entry = self.names.get(path[0].text)
+                if entry is not none and (entry.kind == "data" or entry.kind == "trait")
+                    new_path = [self.rename(path[0])]
+            else if path.len() == 2
+                let id = self.aliases.get(path[0].text)
+                if id is not none
+                    let full = self.member(id, path[1].text, ty.span)
+                    new_path = [ast.Name(text: full, span: ty.span)]
+            kind = ast.NamedType(path: new_path, args: new_args)
+        TaskType(params, returns) ->
+            let new_params = self.tys(params)
+            kind = ast.TaskType(params: new_params, returns: self.maybe_ty(returns))
+        UnionType(members) ->
+            kind = ast.UnionType(members: self.tys(members))
+        OptionalType(inner) ->
+            kind = ast.OptionalType(inner: self.ty(inner))
+        SharedType(inner) ->
+            kind = ast.SharedType(inner: self.ty(inner))
+        WeakType(inner) ->
+            kind = ast.WeakType(inner: self.ty(inner))
+        AnyType(inner) ->
+            kind = ast.AnyType(inner: self.ty(inner))
+        NoneType ->
+            return ty
+    return ast.Type(kind: kind, span: ty.span)
+
+task exprs(change self: Renamer, items: list[ast.Expr]) -> list[ast.Expr]
+    var out: list[ast.Expr] = []
+    for item in items
+        out.push(self.expr(item))
+    return out
+
+# The module that `base` names, if it is a name that is no local and some
+# `use` binds.
+task alias_of(self: Renamer, base: ast.Expr) -> int?
+    match base.kind
+        NameExpr(module) ->
+            if self.local(module)
+                return none
+            return self.aliases.get(module)
+        _ ->
+            return none
+
+task expr(change self: Renamer, value: ast.Expr) -> ast.Expr
+    let span = value.span
+    var kind = value.kind
+    match value.kind
+        FieldExpr(base, name) ->
+            let id = self.alias_of(base)
+            if id is not none
+                kind = ast.NameExpr(name: self.member(id, name.text, span))
+            else
+                kind = ast.FieldExpr(base: self.expr(base), name: name)
+        NameExpr(name) ->
+            let entry = self.names.get(name)
+            if not self.local(name) and entry is not none
+                kind = ast.NameExpr(name: entry.full)
+        TextExpr(parts) ->
+            var renamed: list[ast.TextPart] = []
+            for part in parts
+                match part
+                    ExprText(inner) -> renamed.push(ast.ExprText(value: self.expr(inner)))
+                    _ -> renamed.push(part)
+            kind = ast.TextExpr(parts: renamed)
+        ListExpr(items) ->
+            kind = ast.ListExpr(items: self.exprs(items))
+        MapExpr(entries) ->
+            var renamed: list[ast.Entry] = []
+            for entry in entries
+                let key = self.expr(entry.key)
+                renamed.push(ast.Entry(key: key, value: self.expr(entry.value)))
+            kind = ast.MapExpr(entries: renamed)
+        UnaryExpr(op, inner) ->
+            kind = ast.UnaryExpr(op: op, inner: self.expr(inner))
+        OptionalExpr(inner) ->
+            kind = ast.OptionalExpr(inner: self.expr(inner))
+        BinaryExpr(op, left, right) ->
+            let new_left = self.expr(left)
+            kind = ast.BinaryExpr(op: op, left: new_left, right: self.expr(right))
+        IsExpr(subject, negated, target) ->
+            let new_subject = self.expr(subject)
+            var new_target = target
+            match target
+                IsType(target_ty) ->
+                    new_target = ast.IsType(ty: self.ty(target_ty))
+                _ ->
+                    new_target = target
+            kind = ast.IsExpr(value: new_subject, negated: negated, target: new_target)
+        IfExpr(condition, yes, otherwise) ->
+            let new_condition = self.expr(condition)
+            let new_yes = self.expr(yes)
+            kind = ast.IfExpr(condition: new_condition, yes: new_yes, otherwise: self.expr(otherwise))
+        LambdaExpr(params, body) ->
+            self.open_scope()
+            for param in params
+                self.bind_local(param.text)
+            let new_body = self.expr(body)
+            self.close_scope()
+            kind = ast.LambdaExpr(params: params, body: new_body)
+        CallExpr(callee, args) ->
+            let new_callee = self.expr(callee)
+            var renamed: list[ast.Arg] = []
+            for arg in args
+                var next = arg
+                next.value = self.expr(arg.value)
+                renamed.push(next)
+            kind = ast.CallExpr(callee: new_callee, args: renamed)
+        IndexExpr(base, indices) ->
+            let new_base = self.expr(base)
+            kind = ast.IndexExpr(base: new_base, indices: self.exprs(indices))
+        TypeExpr(inner) ->
+            kind = ast.TypeExpr(ty: self.ty(inner))
+        MatchExpr(subject, arms) ->
+            let new_subject = self.expr(subject)
+            var renamed: list[ast.Arm] = []
+            for arm in arms
+                self.open_scope()
+                let pattern = self.pattern(arm.pattern)
+                var body = arm.body
+                match arm.body
+                    ArmExpr(inner) ->
+                        body = ast.ArmExpr(value: self.expr(inner))
+                    ArmStmt(inner) ->
+                        body = ast.ArmStmt(stmt: self.stmt(inner))
+                    ArmBlock(inner) ->
+                        body = ast.ArmBlock(body: self.stmts(inner))
+                self.close_scope()
+                renamed.push(ast.Arm(pattern: pattern, body: body))
+            kind = ast.MatchExpr(subject: new_subject, arms: renamed)
+        _ ->
+            return value
+    return ast.Expr(kind: kind, span: span)
+
+# The name that `name` has where it is declared, if it is a type or
+# variant. An import may have renamed it.
+task data_name(self: Renamer, name: text) -> text?
+    let entry = self.names.get(name)
+    if entry is none or entry.kind != "data"
+        return none
+    let parts = entry.full.split(".")
+    return parts[parts.len() - 1]
+
+# A variant needs no prefix: the type of the subject finds it, so a pattern
+# needs no import. The checker rejects a binding that reads like a type or
+# variant of any module, so only other names bind here.
+task pattern(change self: Renamer, item: ast.Pattern) -> ast.Pattern
+    var kind = item.kind
+    match item.kind
+        LiteralPattern(value) ->
+            kind = ast.LiteralPattern(value: self.expr(value))
+        NamePattern(name) ->
+            let written = self.data_name(name.text)
+            if written is none
+                self.bind_local(name.text)
+            else
+                kind = ast.NamePattern(name: ast.Name(text: written, span: name.span))
+        VariantPattern(name, bindings) ->
+            var new_name = name
+            let written = self.data_name(name.text)
+            if written is not none
+                new_name = ast.Name(text: written, span: name.span)
+            for binding in bindings
+                self.bind_local(binding.text)
+            kind = ast.VariantPattern(name: new_name, bindings: bindings)
+        TypedPattern(name, ty) ->
+            let new_ty = self.ty(ty)
+            self.bind_local(name.text)
+            kind = ast.TypedPattern(name: name, ty: new_ty)
+        _ ->
+            return item
+    return ast.Pattern(kind: kind, span: item.span)

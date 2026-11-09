@@ -11,6 +11,7 @@ use ./diag
 use ./dump
 use ./lexer
 use ./parser
+use ./resolve
 
 ## Why the compiler stops with exit code 1: the text it prints to stderr.
 type Stop
@@ -20,7 +21,7 @@ task error_message(self: Stop) -> text
     return self.message
 
 task usage() -> Stop
-    return Stop(message: "usage: lucid check [--json] FILE, with LUCID_DUMP=tokens or ast")
+    return Stop(message: "usage: lucid check [--json] PATH, with LUCID_DUMP=tokens, ast, or resolved")
 
 task main() -> none or Stop
     let words = args.all()
@@ -36,24 +37,31 @@ task main() -> none or Stop
         else
             return usage()
     let stage = env.get("LUCID_DUMP") else ""
-    if path is empty or (stage != "tokens" and stage != "ast")
+    if path is empty
         return usage()
-    try dump_syntax(path, stage, json)
+    if stage == "resolved"
+        let found = resolve.load(path, false)
+        print dump.resolved(found)
+        try finish(found.source, found.diags, json)
+    else if stage == "tokens" or stage == "ast"
+        try dump_syntax(path, stage, json)
+    else
+        return usage()
 
 # `LUCID_DUMP=tokens` or `ast` under `lucid check`: one file, with no imports.
 task dump_syntax(path: text, stage: text, json: bool) -> none or Stop
-    var source = diag.Source(path: path, bytes: [])
+    var source = diag.one(path, [])
     var diags: list[diag.Diagnostic] = []
     let read = fs.read_bytes(path)
     match read
         bytes: list[byte] ->
             let valid = valid_up_to(bytes)
             if valid < bytes.len()
-                source.bytes = bytes[0..valid]
+                source = diag.one(path, bytes[0..valid])
                 let at = diag.span(valid, valid)
                 diags.push(diag.new("E0002", "file is not valid UTF-8", at))
             else
-                source.bytes = bytes
+                source = diag.one(path, bytes)
                 let content = fs.read_text(path) else ""
                 let lexed = lexer.lex(bytes, content)
                 diags = lexed.diags
@@ -66,6 +74,11 @@ task dump_syntax(path: text, stage: text, json: bool) -> none or Stop
         e: fs.FileError ->
             let at = diag.span(0, 0)
             diags.push(diag.new("E0001", "cannot read `{path}`: {e.error_message()}", at))
+    try finish(source, diags, json)
+
+# Reports the diagnostics: with `--json` on stdout, and else as the message
+# of the `Stop` that ends the compiler.
+task finish(source: diag.Source, diags: list[diag.Diagnostic], json: bool) -> none or Stop
     report_errors(source, diags, json)
     if diags is not empty
         let shown = if json then "" else diag.render_text(source, diags)
