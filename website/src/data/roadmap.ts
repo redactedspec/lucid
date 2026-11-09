@@ -95,17 +95,18 @@ export const milestones: Milestone[] = [
     id: 'M9',
     title: 'Self-hosted front end',
     status: 'active',
-    summary: 'The lexer, parser, checker, and ownership pass ported to Lucid, one stage at a time. Starts after the 1.0 promise.',
+    summary: 'The lexer, parser, checker, and ownership pass ported to Lucid, one stage at a time, each checked against the Rust stage. Code generation stays in Rust.',
     exit: 'The compiler written in Lucid builds itself, and a second build is byte-identical.',
     steps: [
+      { text: '`LUCID_DUMP` stage dumps and a test that compares both compilers', done: false },
       { text: 'Lexer and parser in Lucid', done: false },
       { text: 'Resolver, type checker, and monomorphizer in Lucid', done: false },
-      { text: 'MIR and ownership pass in Lucid', done: false },
-      { text: 'Cranelift called through a small C ABI wrapper in Rust', done: false },
-      { text: 'Documented bootstrap path from a pinned release binary', done: false },
+      { text: 'Ownership pass, `--costs`, and `--unsafe` in Lucid', done: false },
+      { text: 'Rust backend behind a small C ABI: the Lucid compiler runs `check`, `run`, and `build`', done: false },
+      { text: 'Fixed point of three builds, and the bootstrap path', done: false },
     ],
   },
 ];
 
 export const later =
-  'Not planned yet: macOS, an LLVM release backend, plain types stored inline, and compile-time evaluation.';
+  'Not planned yet: macOS, the Lucid compiler for every command, `shared` and `weak`, an LLVM release backend, plain types stored inline, and compile-time evaluation.';

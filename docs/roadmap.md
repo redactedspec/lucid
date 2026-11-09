@@ -134,16 +134,17 @@ Designed by decisions 188 to 205, see "Ecosystem" in `compiler.md`. Build in thi
 
 ## M9: Self-hosted front end
 
-Start only after the version 1.0 stability promise. Port one stage at a time. The Rust version of each stage stays until its Lucid version passes all tests.
+Started after the version 1.0 promise. Designed by decisions 214 to 220, see "Self-hosting" in `compiler.md`. Port one stage at a time, each checked against its Rust stage by dumps. The Rust front end and driver stay, and `lucid` stays the Rust program, by decision 214. Build in this order:
 
-- [ ] Lexer and parser in Lucid
-- [ ] Resolver, type checker, and monomorphizer in Lucid
-- [ ] MIR and ownership pass in Lucid
-- [ ] Cranelift called through a small C ABI wrapper in Rust
-- [ ] Documented bootstrap path from a pinned release binary
+- [ ] `LUCID_DUMP` in the Rust compiler, for `tokens`, `ast`, `mir`, and `owned`, and the golden test that compares dumps, by decision 215
+- [ ] Lexer and parser in Lucid, in `compiler/lucid/`. Token and tree dumps, and their diagnostics, match
+- [ ] Resolver with `lucid.toml` reading, type checker, `derive`, and monomorphizer in Lucid. MIR dumps and diagnostics match
+- [ ] Ownership pass, `--costs`, and `--unsafe` in Lucid. `owned` dumps match
+- [ ] Crate `lucid_backend`, the MIR reader, and the C ABI, by decisions 216 and 217. The Lucid compiler runs `check`, `run`, and `build`, and the golden tests of those commands pass with it
+- [ ] Fixed point and bootstrap path, by decisions 218 and 219: `/Brepro`, the stage test on Windows and in WSL, and the steps in `compiler.md`
 
 **Exit:** the Lucid-written compiler builds itself. A second build from that output is byte-identical.
 
 ## Later, not planned
 
-macOS, by decision 205. `shared` and `weak`, by decision 213. Native backend in Lucid, LLVM release backend, plain types stored inline, literal types, compile-time evaluation.
+macOS, by decision 205. The Lucid compiler for every command, then deleting the Rust front end, by decisions 214 and 219. `shared` and `weak`, by decision 213. Native backend in Lucid, LLVM release backend, plain types stored inline, literal types, compile-time evaluation.
