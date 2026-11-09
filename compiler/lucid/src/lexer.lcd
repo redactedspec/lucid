@@ -1,0 +1,570 @@
+# Turns source text into tokens. Ports lexer.rs. See "Layout" and "Tokens" in
+# docs/grammar.md.
+
+use ./diag
+
+let TAB = 9
+let LINE = 10
+let RETURN = 13
+let SPACE = 32
+let QUOTE = 34
+let HASH = 35
+let BACKSLASH = 92
+let UNDERSCORE = 95
+let OPEN_BRACE = 123
+let CLOSE_BRACE = 125
+
+## Deepest allowed nesting of text interpolation, blocks, and expressions.
+public task max_depth() -> int
+    return 128
+
+public choice TokenKind
+    NameToken(name: text)
+    IntToken(digits: text)
+    FloatToken(digits: text)
+    TextToken(parts: list[RawPart])
+    # A keyword or an operator.
+    SymToken(sym: text)
+    NewlineToken
+    IndentToken
+    DedentToken
+    EofToken
+
+public choice RawPart
+    LiteralPart(value: text)
+    # The tokens of one `{expression}`, ended by a `}` token.
+    ExprPart(tokens: list[Token])
+
+public type Token
+    kind: TokenKind
+    span: diag.Span
+
+## The name of a token's kind, as lexer.rs names its variant.
+public task tag(self: TokenKind) -> text
+    return match self
+        NameToken(_) -> "Name"
+        IntToken(_) -> "Int"
+        FloatToken(_) -> "Float"
+        TextToken(_) -> "Text"
+        SymToken(_) -> "Sym"
+        NewlineToken -> "Newline"
+        IndentToken -> "Indent"
+        DedentToken -> "Dedent"
+        EofToken -> "Eof"
+
+public task describe(self: TokenKind) -> text
+    return match self
+        NameToken(name) -> "name `{name}`"
+        IntToken(_) -> "number"
+        FloatToken(_) -> "number"
+        TextToken(_) -> "text"
+        SymToken(sym) -> "`{sym}`"
+        NewlineToken -> "end of line"
+        IndentToken -> "indentation"
+        DedentToken -> "end of block"
+        EofToken -> "end of file"
+
+public task keywords() -> list[text]
+    return [
+        "and", "any", "as", "break", "change", "choice", "continue", "else", "empty", "expect",
+        "extern", "false", "for", "if", "in", "is", "let", "match", "none", "not", "or", "print",
+        "public", "return", "self", "shared", "spawn", "take", "task", "test", "then", "trait",
+        "true", "try", "type", "unsafe", "use", "var", "weak", "while",
+    ]
+
+# Longest first, so that the first match is the longest match.
+task symbols() -> list[text]
+    return [
+        "...", "..=", "..", "./", ".", "=>", "==", "=", "!=", "<<", "<=", "<", ">>", ">=", ">",
+        "->", "-=", "-", "+=", "+", "*=", "*", "//", "/=", "/", "%", "&", "|", "^", "~", "(", ")",
+        "[", "]", "{{", "}}", ",", ":", "?",
+    ]
+
+## The tokens of a file and the diagnostics of lexing it.
+public type Lexed
+    tokens: list[Token]
+    diags: list[diag.Diagnostic]
+
+# A piece of the text between two quotes, before dedenting.
+choice Piece
+    # Characters as written, with no line break.
+    Run(value: text)
+    # An escape or a doubled brace, already decoded.
+    Escaped(value: text)
+    # An interpolation, whose tokens are the next in order.
+    Hole
+    Break
+
+type Lexer
+    src: list[byte]
+    text: text
+    # The character index of each byte offset, and of the end.
+    chars: list[int]
+    keywords: set[text]
+    symbols: list[text]
+    symbol_bytes: list[list[byte]]
+    pos: int
+    # Widths of the open blocks. The bottom entry is always 0.
+    indents: list[int]
+    # Open brackets. Layout is off while this is above 0.
+    depth: int
+    text_depth: int
+    # Set when nesting exceeds the limit and the rest of the file is dropped.
+    gave_up: bool
+    line_start: bool
+    line_has_tokens: bool
+    diags: list[diag.Diagnostic]
+
+## Lexes `text`, whose UTF-8 bytes are `src`.
+public task lex(src: list[byte], text: text) -> Lexed
+    var chars: list[int] = []
+    var count = 0
+    for b in src
+        let n = b.to_int()
+        if n < 128 or n >= 192
+            count += 1
+        chars.push(count - 1)
+    # A continuation byte maps to its character, which no span ends inside.
+    chars.push(count)
+    var start = 0
+    if src.len() >= 3 and src[0].to_int() == 239 and src[1].to_int() == 187
+        if src[2].to_int() == 191
+            start = 3
+    let symbols = symbols()
+    var symbol_bytes: list[list[byte]] = []
+    for symbol in symbols
+        symbol_bytes.push(symbol.bytes())
+    var lexer = Lexer(
+        src: src,
+        text: text,
+        chars: chars,
+        keywords: set(keywords()),
+        symbols: symbols,
+        symbol_bytes: symbol_bytes,
+        pos: start,
+        indents: [0],
+        depth: 0,
+        text_depth: 0,
+        gave_up: false,
+        line_start: true,
+        line_has_tokens: false,
+        diags: [],
+    )
+    var out: list[Token] = []
+    lexer.scan(change out, false)
+    lexer.finish(change out)
+    return Lexed(tokens: out, diags: lexer.diags)
+
+# The byte at `place`, or -1 past the end.
+task at(self: Lexer, place: int) -> int
+    if place < self.src.len()
+        return self.src[place].to_int()
+    return -1
+
+task peek(self: Lexer) -> int
+    return self.at(self.pos)
+
+task slice(self: Lexer, from: int, to: int) -> text
+    return self.text[self.chars[from]..self.chars[to]]
+
+task span_from(self: Lexer, start: int) -> diag.Span
+    return diag.span(start, self.pos)
+
+task error(change self: Lexer, code: text, message: text, start: int)
+    self.diags.push(diag.new(code, message, self.span_from(start)))
+
+task push(change self: Lexer, change out: list[Token], kind: TokenKind, start: int)
+    out.push(Token(kind: kind, span: self.span_from(start)))
+    self.line_has_tokens = true
+
+task is_letter(b: int) -> bool
+    return (b >= 97 and b <= 122) or (b >= 65 and b <= 90)
+
+task is_digit(b: int) -> bool
+    return b >= 48 and b <= 57
+
+task is_word(b: int) -> bool
+    return is_letter(b) or is_digit(b) or b == UNDERSCORE
+
+task is_hex(b: int) -> bool
+    return is_digit(b) or (b >= 97 and b <= 102) or (b >= 65 and b <= 70)
+
+# The number of bytes of the character that starts with byte `b`.
+task width(b: int) -> int
+    if b < 192
+        return 1
+    if b < 224
+        return 2
+    if b < 240
+        return 3
+    return 4
+
+# Scans tokens to end of file, or to the `}` that closes an interpolation.
+# Returns true when it stopped at that `}`.
+task scan(change self: Lexer, change out: list[Token], interpolation: bool) -> bool
+    let floor = self.depth
+    while true
+        if self.line_start
+            self.line_start = false
+            if self.depth == 0
+                self.layout(change out)
+        let c = self.peek()
+        if c == -1
+            return false
+        let start = self.pos
+        if c == SPACE or c == TAB
+            self.pos += 1
+        else if c == RETURN and self.at(self.pos + 1) == LINE
+            self.pos += 1
+        else if c == LINE
+            self.pos += 1
+            if self.depth == 0
+                if self.line_has_tokens
+                    out.push(Token(kind: NewlineToken, span: self.span_from(start)))
+                    self.line_has_tokens = false
+                self.line_start = true
+        else if c == HASH
+            while self.peek() != -1 and self.peek() != LINE
+                self.pos += 1
+        else if c == QUOTE
+            self.text(change out)
+        else if is_digit(c)
+            self.number(change out)
+        else if c == UNDERSCORE or is_letter(c)
+            self.name(change out)
+        else
+            let sym = self.symbol()
+            if sym is empty
+                self.pos += width(c)
+                let shown = escape_debug(self.slice(start, self.pos))
+                self.error("E0103", "unexpected character `{shown}`", start)
+            else
+                self.pos += sym.len()
+                self.push(change out, SymToken(sym: sym), start)
+                if sym == "(" or sym == "[" or sym == "{{"
+                    self.depth += 1
+                else if sym == "}}" and interpolation and self.depth == floor
+                    return true
+                else if (sym == ")" or sym == "]" or sym == "}}") and self.depth > floor
+                    self.depth -= 1
+    return false
+
+# The longest symbol at `pos`, or empty.
+task symbol(self: Lexer) -> text
+    for i in 0..self.symbols.len()
+        let bytes = self.symbol_bytes[i]
+        var found = true
+        for j in 0..bytes.len()
+            if self.at(self.pos + j) != bytes[j].to_int()
+                found = false
+                break
+        if found
+            return self.symbols[i]
+    return ""
+
+# As Rust's `char::escape_debug`, for the characters the lexer rejects.
+# ponytail: every character from 128 up shows as itself, where Rust escapes
+# the ones it cannot print; port its tables if a test needs one.
+task escape_debug(c: text) -> text
+    let b = c.bytes()[0].to_int()
+    if b == 0
+        return "\\0"
+    if b == RETURN
+        return "\\r"
+    if b == 39
+        return "\\'"
+    if b == BACKSLASH
+        return "\\\\"
+    if b < 32 or b == 127
+        return "\\u{{{diag.hex(b)}}}"
+    return c
+
+# Handles the start of a line, and leaves `pos` after the indentation.
+task layout(change self: Lexer, change out: list[Token])
+    let start = self.pos
+    var width = 0
+    var tab = false
+    while true
+        let b = self.peek()
+        if b == SPACE
+            width += 1
+        else if b == TAB
+            width += 4
+            tab = true
+        else
+            break
+        self.pos += 1
+    let next = self.peek()
+    if next == -1 or next == LINE or next == HASH
+        return
+    if next == RETURN and self.at(self.pos + 1) == LINE
+        return
+    if tab
+        let span = self.span_from(start)
+        var spaces = ""
+        for i in start..self.pos
+            spaces = if self.at(i) == TAB then "{spaces}    " else "{spaces} "
+        var d = diag.new("E0101", "tab in indentation; indent with 4 spaces", span)
+        d.fix("replace each tab with 4 spaces", span, spaces)
+        self.diags.push(d)
+    let top = self.indents[self.indents.len() - 1]
+    if width > top
+        self.indents.push(width)
+        out.push(Token(kind: IndentToken, span: self.span_from(start)))
+    while self.indents[self.indents.len() - 1] > width
+        self.indents.pop()
+        out.push(Token(kind: DedentToken, span: self.span_from(start)))
+    let last = self.indents[self.indents.len() - 1]
+    let matched = width == top + 4 or (width <= top and last == width)
+    if not matched and not tab
+        let message = "indentation of {width} spaces; each block is 4 spaces deeper"
+        self.error("E0102", message, start)
+
+task finish(change self: Lexer, change out: list[Token])
+    let start = self.pos
+    if self.line_has_tokens
+        out.push(Token(kind: NewlineToken, span: self.span_from(start)))
+    for _ in 1..self.indents.len()
+        out.push(Token(kind: DedentToken, span: self.span_from(start)))
+    out.push(Token(kind: EofToken, span: self.span_from(start)))
+
+task name(change self: Lexer, change out: list[Token])
+    let start = self.pos
+    while is_word(self.peek())
+        self.pos += 1
+    let word = self.slice(start, self.pos)
+    let kind = if word in self.keywords then SymToken(sym: word) else NameToken(name: word)
+    self.push(change out, kind, start)
+
+task number(change self: Lexer, change out: list[Token])
+    let start = self.pos
+    var float = false
+    var valid = true
+    let second = self.at(self.pos + 1)
+    if self.peek() == 48 and (second == 120 or second == 98)
+        let hex = second == 120
+        self.pos += 2
+        valid = is_radix_digit(self.peek(), hex)
+        while self.peek() == UNDERSCORE or is_radix_digit(self.peek(), hex)
+            self.pos += 1
+    else
+        while self.peek() == UNDERSCORE or is_digit(self.peek())
+            self.pos += 1
+        if self.peek() == 46 and is_digit(self.at(self.pos + 1))
+            float = true
+            self.pos += 1
+            while self.peek() == UNDERSCORE or is_digit(self.peek())
+                self.pos += 1
+            self.exponent()
+    if is_word(self.peek())
+        valid = false
+        while is_word(self.peek())
+            self.pos += 1
+    let lexeme = self.slice(start, self.pos)
+    if not valid or self.at(self.pos - 1) == UNDERSCORE
+        self.error("E0107", "malformed number `{lexeme}`", start)
+    let kind = if float then FloatToken(digits: lexeme) else IntToken(digits: lexeme)
+    self.push(change out, kind, start)
+
+task is_radix_digit(b: int, hex: bool) -> bool
+    if hex
+        return is_hex(b)
+    return b == 48 or b == 49
+
+# Consumes an exponent. Leaves `pos` alone if there is no complete one.
+task exponent(change self: Lexer)
+    let e = self.peek()
+    if e != 101 and e != 69
+        return
+    let after = self.at(self.pos + 1)
+    let sign = if after == 43 or after == 45 then 1 else 0
+    if is_digit(self.at(self.pos + 1 + sign))
+        self.pos += 1 + sign
+        while self.peek() == UNDERSCORE or is_digit(self.peek())
+            self.pos += 1
+
+# True if bytes from `place` are three quotes.
+task triple_at(self: Lexer, place: int) -> bool
+    return self.at(place) == QUOTE and self.at(place + 1) == QUOTE and self.at(place + 2) == QUOTE
+
+task text(change self: Lexer, change out: list[Token])
+    let start = self.pos
+    let triple = self.triple_at(self.pos)
+    self.pos += if triple then 3 else 1
+    if triple
+        var end = self.pos
+        var blank = true
+        while end < self.src.len() and self.at(end) != LINE
+            let b = self.at(end)
+            if b != SPACE and b != TAB and b != RETURN and b != 11 and b != 12
+                blank = false
+            end += 1
+        if blank
+            self.pos = if end + 1 < self.src.len() then end + 1 else self.src.len()
+        else
+            self.error("E0108", "`\"\"\"` must end its line", start)
+    var pieces: list[Piece] = []
+    var exprs: list[list[Token]] = []
+    # Plain characters from here up to `pos` are not in `pieces` yet.
+    var run = self.pos
+    while true
+        let at = self.pos
+        let c = self.peek()
+        let next = self.at(at + 1)
+        let plain = c != -1 and c != QUOTE and c != LINE and c != RETURN and c != BACKSLASH
+        if plain and c != OPEN_BRACE and c != CLOSE_BRACE and c != 0
+            self.pos += 1
+            continue
+        if c == RETURN and next != LINE
+            self.pos += 1
+            continue
+        if c == QUOTE and triple and not self.triple_at(at)
+            self.pos += 1
+            continue
+        if at > run
+            pieces.push(Run(value: self.slice(run, at)))
+        if c == -1
+            if not self.gave_up
+                self.error("E0104", "text is not closed", start)
+            break
+        else if c == QUOTE
+            self.pos += if triple then 3 else 1
+            break
+        else if c == LINE and not triple
+            self.error("E0104", "text is not closed before end of line", start)
+            break
+        else if c == LINE
+            pieces.push(Break)
+            self.pos += 1
+        else if c == RETURN
+            self.pos += 1
+        else if c == BACKSLASH
+            if next == 110 or next == 116 or next == 114 or next == BACKSLASH or next == QUOTE
+                let decoded = if next == 110 then "\n" else if next == 116 then "\t" else if next == 114 then "\r" else self.slice(at + 1, at + 2)
+                pieces.push(Escaped(value: decoded))
+                self.pos += 2
+            else
+                self.pos += 1
+                self.error("E0105", "unknown escape; use \\n \\t \\r \\\\ or \\\"", at)
+        else if c == OPEN_BRACE and next == OPEN_BRACE
+            pieces.push(Escaped(value: "{{"))
+            self.pos += 2
+        else if c == CLOSE_BRACE and next == CLOSE_BRACE
+            pieces.push(Escaped(value: "}}"))
+            self.pos += 2
+        else if c == CLOSE_BRACE
+            self.pos += 1
+            let span = self.span_from(at)
+            var d = diag.new("E0106", "`}}` in text; write `}}}}` for a literal brace", span)
+            d.fix("write `}}}}`", span, "}}}}")
+            self.diags.push(d)
+        else if c == OPEN_BRACE
+            pieces.push(Hole)
+            exprs.push(self.interpolation())
+        else
+            self.pos += 1
+            self.error("E0103", "unexpected character NUL", at)
+        run = self.pos
+    if triple
+        pieces = dedent(pieces)
+    var parts: list[RawPart] = []
+    var literal = ""
+    var hole = 0
+    for piece in pieces
+        match piece
+            Run(value) ->
+                literal = "{literal}{value}"
+            Escaped(value) ->
+                literal = "{literal}{value}"
+            Break ->
+                literal = "{literal}\n"
+            Hole ->
+                if literal is not empty
+                    parts.push(LiteralPart(value: literal))
+                    literal = ""
+                parts.push(ExprPart(tokens: exprs[hole]))
+                hole += 1
+    if literal is not empty
+        parts.push(LiteralPart(value: literal))
+    self.push(change out, TextToken(parts: parts), start)
+
+task interpolation(change self: Lexer) -> list[Token]
+    let start = self.pos
+    self.pos += 1
+    if self.text_depth == max_depth()
+        self.error("E0205", "nesting is too deep", start)
+        self.pos = self.src.len()
+        self.gave_up = true
+    var tokens: list[Token] = []
+    self.text_depth += 1
+    self.depth += 1
+    let closed = self.scan(change tokens, true)
+    self.depth -= 1
+    self.text_depth -= 1
+    if not closed
+        tokens.push(Token(kind: SymToken(sym: "}}"), span: self.span_from(start)))
+    return tokens
+
+# One line of a `"""` text, for dedenting.
+type Line
+    pieces: list[Piece]
+    # Spaces before anything else.
+    lead: int
+    # Only spaces, or nothing.
+    blank: bool
+
+# Removes the common indentation of a `"""` text. The line of the closing
+# quotes counts toward it, and that line and its line break are dropped if
+# blank.
+task dedent(pieces: list[Piece]) -> list[Piece]
+    var lines: list[Line] = []
+    var current = Line(pieces: [], lead: 0, blank: true)
+    for piece in pieces
+        match piece
+            Break ->
+                lines.push(current)
+                current = Line(pieces: [], lead: 0, blank: true)
+            Run(value) ->
+                if current.blank
+                    var spaces = 0
+                    for b in value.bytes()
+                        if b.to_int() != SPACE
+                            break
+                        spaces += 1
+                    current.lead += spaces
+                    if spaces < value.len()
+                        current.blank = false
+                current.pieces.push(piece)
+            _ ->
+                current.blank = false
+                current.pieces.push(piece)
+    lines.push(current)
+    let last = lines.len() - 1
+    var common = -1
+    for i in 0..lines.len()
+        if i == last or not lines[i].blank
+            if common == -1 or lines[i].lead < common
+                common = lines[i].lead
+    if common == -1
+        common = 0
+    let kept = if lines[last].blank then last else last + 1
+    var out: list[Piece] = []
+    for i in 0..kept
+        if i > 0
+            out.push(Break)
+        let line = lines[i]
+        # Every leading space is in the first piece, a run.
+        var cut = if line.lead < common then line.lead else common
+        for piece in line.pieces
+            if cut > 0
+                match piece
+                    Run(value) ->
+                        let rest = value[cut..value.len()]
+                        cut = 0
+                        if rest is not empty
+                            out.push(Run(value: rest))
+                    _ ->
+                        out.push(piece)
+            else
+                out.push(piece)
+    return out

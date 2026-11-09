@@ -1,0 +1,1123 @@
+# Recursive-descent parser for docs/grammar.md. Ports parser.rs. Each task is
+# named after the grammar rule it parses. A rule gives `Failure` when its
+# diagnostic is already recorded.
+
+use ./ast
+use ./diag
+use ./lexer
+
+## The tree of a file and the diagnostics of parsing it.
+public type Parsed
+    file: ast.File
+    diags: list[diag.Diagnostic]
+
+choice Failure
+    Failed
+
+task error_message(self: Failure) -> text
+    return "the parser recorded a diagnostic"
+
+type Parser
+    # Ends with `Eof`, or with `}` while parsing an interpolation.
+    tokens: list[lexer.Token]
+    pos: int
+    depth: int
+    # Operators and postfix forms so far in this item. See `link`.
+    links: int
+    diags: list[diag.Diagnostic]
+
+# Longest allowed chain of operators and postfix forms in one item.
+let MAX_LINKS = 1024
+
+public task parse(tokens: list[lexer.Token]) -> Parsed
+    var p = Parser(tokens: tokens, pos: 0, depth: 0, links: 0, diags: [])
+    var stmts: list[ast.Stmt] = []
+    while p.kind().tag() != "Eof"
+        let before = p.begin()
+        match p.statement(true)
+            s: ast.Stmt -> stmts.push(s)
+            _ -> p.recovered(before)
+    return Parsed(file: ast.File(stmts: stmts), diags: p.diags)
+
+task token(self: Parser) -> lexer.Token
+    let last = self.tokens.len() - 1
+    return self.tokens[if self.pos < last then self.pos else last]
+
+task kind(self: Parser) -> lexer.TokenKind
+    return self.token().kind
+
+task kind_at(self: Parser, offset: int) -> lexer.TokenKind
+    let last = self.tokens.len() - 1
+    let at = self.pos + offset
+    return self.tokens[if at < last then at else last].kind
+
+task at_tag(self: Parser, tag: text) -> bool
+    return self.kind().tag() == tag
+
+task is_sym(kind: lexer.TokenKind, sym: text) -> bool
+    return match kind
+        SymToken(s) -> s == sym
+        _ -> false
+
+task at(self: Parser, sym: text) -> bool
+    return is_sym(self.kind(), sym)
+
+task start(self: Parser) -> int
+    return self.token().span.start
+
+# The span from `start` to the end of the last consumed token.
+task since(self: Parser, start: int) -> diag.Span
+    let last = self.tokens.len() - 1
+    let at = if self.pos < last then self.pos else last
+    let end = self.tokens[if at > 0 then at - 1 else 0].span.end
+    return diag.span(start, if end > start then end else start)
+
+task advance(change self: Parser) -> diag.Span
+    let span = self.token().span
+    let last = self.tokens.len() - 1
+    self.pos = if self.pos + 1 < last then self.pos + 1 else last
+    return span
+
+task skip(change self: Parser)
+    let span = self.advance()
+
+task eat(change self: Parser, sym: text) -> bool
+    let found = self.at(sym)
+    if found
+        self.skip()
+    return found
+
+task fail(change self: Parser, code: text, message: text, span: diag.Span) -> Failure
+    self.diags.push(diag.new(code, message, span))
+    return Failed
+
+task fail_with(change self: Parser, code: text, message: text, span: diag.Span, note: text) -> Failure
+    var d = diag.new(code, message, span)
+    d.notes.push(note)
+    self.diags.push(d)
+    return Failed
+
+task expected(change self: Parser, what: text) -> Failure
+    let token = self.token()
+    return self.fail("E0201", "expected {what}, found {token.kind.describe()}", token.span)
+
+task want(change self: Parser, sym: text) -> none or Failure
+    if not self.eat(sym)
+        return self.expected("`{sym}`")
+
+task expect_tag(change self: Parser, tag: text, what: text) -> none or Failure
+    if not self.at_tag(tag)
+        return self.expected(what)
+    self.skip()
+
+# Ends a parenthesized expression or type, where a `,` means a tuple.
+task close_group(change self: Parser) -> none or Failure
+    if self.at(",")
+        let note = "there are no tuples: use a `type` with named fields"
+        let here = self.token().span
+        return self.fail_with("E0201", "expected `)`, found `,`", here, note)
+    try self.want(")")
+
+task newline(change self: Parser) -> none or Failure
+    try self.expect_tag("Newline", "end of line")
+
+task name(change self: Parser) -> ast.Name or Failure
+    let token = self.token()
+    match token.kind
+        NameToken(text) ->
+            self.skip()
+            return ast.Name(text: text, span: token.span)
+        SymToken(word) ->
+            if is_keyword(word)
+                let message = "expected a name, found `{word}`"
+                let note = "`{word}` is a keyword, so pick another name"
+                return self.fail_with("E0201", message, token.span, note)
+        _ ->
+            return self.expected("a name")
+    return self.expected("a name")
+
+# A keyword is a symbol made of letters. No operator has one.
+task is_keyword(sym: text) -> bool
+    let first = sym.bytes()[0].to_int()
+    return first >= 97 and first <= 122
+
+# Goes one level deeper, and fails past the limit. Every recursive rule goes
+# through here, so that source cannot overflow the stack. `leave` undoes it.
+task enter(change self: Parser) -> none or Failure
+    if self.depth == lexer.max_depth()
+        let here = self.token().span
+        return self.fail("E0205", "nesting is too deep", here)
+    self.depth += 1
+
+task leave(change self: Parser)
+    self.depth -= 1
+
+# Counts one link of a chain such as `a + a + ...`. Chains are loops, not
+# recursion, but they still build a deep tree that later stages recurse over.
+task link(change self: Parser) -> none or Failure
+    self.links += 1
+    if self.links > MAX_LINKS
+        let message = "expression has over {MAX_LINKS} operators"
+        let here = self.token().span
+        return self.fail("E0205", message, here)
+
+# Starts one item that `recovered` can skip past after an error.
+task begin(change self: Parser) -> int
+    self.links = 0
+    return self.pos
+
+# After an error, skips to the next item.
+task recovered(change self: Parser, before: int)
+    self.synchronize()
+    if self.pos == before
+        self.skip()
+
+# Skips the rest of the line, and any block under it.
+task synchronize(change self: Parser)
+    var depth = 0
+    while true
+        let tag = self.kind().tag()
+        if tag == "Eof"
+            return
+        if tag == "Indent"
+            depth += 1
+        else if tag == "Dedent" and depth == 0
+            return
+        else if tag == "Dedent"
+            depth -= 1
+            if depth == 0
+                self.skip()
+                return
+        else if tag == "Newline" and depth == 0
+            self.skip()
+            if not self.at_tag("Indent")
+                return
+            continue
+        self.skip()
+
+# Starts `INDENT { item } DEDENT`.
+task open_block(change self: Parser) -> none or Failure
+    if not self.at_tag("Indent")
+        let failed = self.expected("indentation")
+        let last = self.diags.len() - 1
+        self.diags[last].notes.push("indent the block by 4 spaces")
+        return failed
+    self.skip()
+
+# True while the block has items left.
+task in_block(self: Parser) -> bool
+    let tag = self.kind().tag()
+    return tag != "Dedent" and tag != "Eof"
+
+task close_block(change self: Parser) -> none or Failure
+    try self.expect_tag("Dedent", "end of block")
+
+task block(change self: Parser) -> list[ast.Stmt] or Failure
+    try self.open_block()
+    var items: list[ast.Stmt] = []
+    while self.in_block()
+        let before = self.begin()
+        match self.statement(false)
+            s: ast.Stmt -> items.push(s)
+            _ -> self.recovered(before)
+    try self.close_block()
+    return items
+
+task statement(change self: Parser, top: bool) -> ast.Stmt or Failure
+    try self.enter()
+    let start = self.start()
+    let kind = self.statement_kind(top)
+    self.leave()
+    return match kind
+        k: ast.StmtKind -> ast.Stmt(kind: k, span: self.since(start))
+        f: Failure -> f
+
+task sym(self: Parser) -> text
+    return match self.kind()
+        SymToken(s) -> s
+        _ -> ""
+
+task statement_kind(change self: Parser, top: bool) -> ast.StmtKind or Failure
+    let sym = self.sym()
+    let top_only = sym == "use" or sym == "test" or sym == "public" or sym == "type"
+    if not top and (top_only or sym == "choice" or sym == "trait")
+        let here = self.token().span
+        return self.fail("E0206", "`{sym}` is only allowed at top level", here)
+    if sym == "use"
+        return self.use_decl()
+    if sym == "test"
+        return self.test_def()
+    if sym == "public"
+        self.skip()
+        return self.declaration(true)
+    if sym == "type" or sym == "choice" or sym == "trait" or sym == "task"
+        return self.declaration(false)
+    if sym == "unsafe" and is_sym(self.kind_at(1), "extern")
+        return self.declaration(false)
+    if sym == "unsafe"
+        self.skip()
+        try self.newline()
+        return ast.UnsafeStmt(body: try self.block())
+    if sym == "let" or sym == "var"
+        return self.let_stmt()
+    if sym == "if"
+        return self.if_stmt()
+    if sym == "while"
+        self.skip()
+        let condition = try self.expression()
+        try self.newline()
+        return ast.WhileStmt(condition: condition, body: try self.block())
+    if sym == "for"
+        return self.for_stmt()
+    if sym == "match"
+        return ast.ExprStmt(value: try self.match_expr(false))
+    if sym == "return"
+        return self.return_stmt()
+    if sym == "print"
+        return self.print_stmt()
+    if sym == "expect"
+        self.skip()
+        let value = try self.expression()
+        try self.newline()
+        return ast.ExpectStmt(value: value)
+    if sym == "break" or sym == "continue"
+        self.skip()
+        try self.newline()
+        return if sym == "break" then ast.BreakStmt else ast.ContinueStmt
+    if sym == "..."
+        self.skip()
+        try self.newline()
+        return ast.PlaceholderStmt
+    return self.expr_stmt()
+
+task declaration(change self: Parser, is_public: bool) -> ast.StmtKind or Failure
+    if self.at("type")
+        return self.type_def(is_public)
+    if self.at("choice")
+        return self.choice_def(is_public)
+    if self.at("trait")
+        return self.trait_def(is_public)
+    if self.at("task") or self.at("unsafe")
+        return self.task_def(is_public)
+    return self.expected("a declaration")
+
+task use_decl(change self: Parser) -> ast.StmtKind or Failure
+    self.skip()
+    let relative = self.eat("./")
+    var path = [try self.name()]
+    while self.eat(".")
+        path.push(try self.name())
+    var alias: ast.Name? = none
+    if self.eat("as")
+        alias = try self.name()
+    try self.newline()
+    return ast.UseStmt(relative: relative, path: path, alias: alias)
+
+task test_def(change self: Parser) -> ast.StmtKind or Failure
+    self.skip()
+    if not self.at_tag("Text")
+        return self.expected("text")
+    let name = try self.primary()
+    try self.newline()
+    return ast.TestStmt(name: name, body: try self.block())
+
+task task_def(change self: Parser, is_public: bool) -> ast.StmtKind or Failure
+    if self.eat("unsafe")
+        try self.want("extern")
+        let sig = try self.task_sig()
+        try self.newline()
+        return ast.TaskStmt(def: ast.TaskDef(is_public: is_public, sig: sig, body: none))
+    let sig = try self.task_sig()
+    try self.newline()
+    let body = try self.block()
+    return ast.TaskStmt(def: ast.TaskDef(is_public: is_public, sig: sig, body: body))
+
+task task_sig(change self: Parser) -> ast.TaskSig or Failure
+    try self.want("task")
+    let name = try self.name()
+    let type_params = try self.type_params()
+    try self.want("(")
+    let params = try self.params()
+    try self.want(")")
+    var returns: ast.Type? = none
+    if self.eat("->")
+        returns = try self.ty()
+    return ast.TaskSig(name: name, type_params: type_params, params: params, returns: returns)
+
+task type_params(change self: Parser) -> list[ast.TypeParam] or Failure
+    var params: list[ast.TypeParam] = []
+    if not self.eat("[")
+        return params
+    while true
+        let name = try self.name()
+        var bounds: list[ast.Type] = []
+        if self.eat(":")
+            bounds.push(try self.ty())
+            while self.eat("and")
+                bounds.push(try self.ty())
+        params.push(ast.TypeParam(name: name, bounds: bounds))
+        let more = self.eat(",")
+        if not more or self.at("]")
+            break
+    try self.want("]")
+    return params
+
+# Parses `[ params ]`. The closing `)` stays for the caller.
+task params(change self: Parser) -> list[ast.Param] or Failure
+    var params: list[ast.Param] = []
+    while not self.at(")")
+        params.push(try self.param())
+        if not self.eat(",")
+            break
+    return params
+
+task param(change self: Parser) -> ast.Param or Failure
+    var mode = "Read"
+    if self.eat("change")
+        mode = "Change"
+    else if self.eat("take")
+        mode = "Take"
+    if self.at("self")
+        let span = self.advance()
+        var ty: ast.Type? = none
+        if self.eat(":")
+            ty = try self.ty()
+        let name = ast.Name(text: "self", span: span)
+        return ast.Param(mode: mode, name: name, ty: ty, default: none)
+    let name = try self.name()
+    try self.want(":")
+    let ty = try self.ty()
+    var default: ast.Expr? = none
+    if self.eat("=")
+        default = try self.expression()
+    return ast.Param(mode: mode, name: name, ty: ty, default: default)
+
+task type_def(change self: Parser, is_public: bool) -> ast.StmtKind or Failure
+    self.skip()
+    let name = try self.name()
+    let type_params = try self.type_params()
+    if self.eat("=")
+        let alias = try self.ty()
+        try self.newline()
+        let body = ast.AliasBody(ty: alias)
+        return ast.TypeStmt(def: ast.TypeDef(is_public: is_public, name: name, type_params: type_params, body: body))
+    try self.newline()
+    try self.open_block()
+    var fields: list[ast.Field] = []
+    while self.in_block()
+        let before = self.begin()
+        match self.field()
+            f: ast.Field -> fields.push(f)
+            _ -> self.recovered(before)
+    try self.close_block()
+    let body = ast.FieldsBody(fields: fields)
+    return ast.TypeStmt(def: ast.TypeDef(is_public: is_public, name: name, type_params: type_params, body: body))
+
+task field(change self: Parser) -> ast.Field or Failure
+    let name = try self.name()
+    try self.want(":")
+    let ty = try self.ty()
+    var default: ast.Expr? = none
+    if self.eat("=")
+        default = try self.expression()
+    try self.newline()
+    return ast.Field(name: name, ty: ty, default: default)
+
+task choice_def(change self: Parser, is_public: bool) -> ast.StmtKind or Failure
+    self.skip()
+    let name = try self.name()
+    let type_params = try self.type_params()
+    try self.newline()
+    try self.open_block()
+    var variants: list[ast.Variant] = []
+    while self.in_block()
+        let before = self.begin()
+        match self.variant()
+            v: ast.Variant -> variants.push(v)
+            _ -> self.recovered(before)
+    try self.close_block()
+    let def = ast.ChoiceDef(is_public: is_public, name: name, type_params: type_params, variants: variants)
+    return ast.ChoiceStmt(def: def)
+
+task variant(change self: Parser) -> ast.Variant or Failure
+    let name = try self.name()
+    var params: list[ast.Param] = []
+    if self.eat("(")
+        if self.at(")")
+            return self.expected("a field")
+        params = try self.params()
+        try self.want(")")
+    try self.newline()
+    return ast.Variant(name: name, params: params)
+
+task trait_def(change self: Parser, is_public: bool) -> ast.StmtKind or Failure
+    self.skip()
+    let name = try self.name()
+    let type_params = try self.type_params()
+    try self.newline()
+    try self.open_block()
+    var tasks: list[ast.TaskSig] = []
+    while self.in_block()
+        let before = self.begin()
+        match self.trait_task()
+            sig: ast.TaskSig -> tasks.push(sig)
+            _ -> self.recovered(before)
+    try self.close_block()
+    let def = ast.TraitDef(is_public: is_public, name: name, type_params: type_params, tasks: tasks)
+    return ast.TraitStmt(def: def)
+
+task trait_task(change self: Parser) -> ast.TaskSig or Failure
+    let sig = try self.task_sig()
+    try self.newline()
+    return sig
+
+task ty(change self: Parser) -> ast.Type or Failure
+    try self.enter()
+    let result = self.union_type()
+    self.leave()
+    return result
+
+task union_type(change self: Parser) -> ast.Type or Failure
+    let start = self.start()
+    let first = try self.type_term()
+    if not self.at("or")
+        return first
+    var terms = [first]
+    while self.eat("or")
+        terms.push(try self.type_term())
+    return ast.Type(kind: ast.UnionType(members: terms), span: self.since(start))
+
+task type_term(change self: Parser) -> ast.Type or Failure
+    let start = self.start()
+    let inner = try self.type_prefix()
+    if self.eat("?")
+        return ast.Type(kind: ast.OptionalType(inner: inner), span: self.since(start))
+    return inner
+
+task type_prefix(change self: Parser) -> ast.Type or Failure
+    if not self.at("shared") and not self.at("weak") and not self.at("any")
+        return self.type_atom()
+    try self.enter()
+    let result = self.wrapped_type()
+    self.leave()
+    return result
+
+task wrapped_type(change self: Parser) -> ast.Type or Failure
+    let start = self.start()
+    let word = self.sym()
+    self.skip()
+    let inner = try self.type_prefix()
+    let kind = if word == "shared" then ast.SharedType(inner: inner) else if word == "weak" then ast.WeakType(inner: inner) else ast.AnyType(inner: inner)
+    return ast.Type(kind: kind, span: self.since(start))
+
+task type_atom(change self: Parser) -> ast.Type or Failure
+    let start = self.start()
+    if self.eat("none")
+        return ast.Type(kind: ast.NoneType, span: self.since(start))
+    if self.eat("task")
+        try self.want("(")
+        var params: list[ast.Type] = []
+        if not self.at(")")
+            params.push(try self.ty())
+            while self.eat(",")
+                params.push(try self.ty())
+        try self.want(")")
+        var returns: ast.Type? = none
+        if self.eat("->")
+            returns = try self.ty()
+        let kind = ast.TaskType(params: params, returns: returns)
+        return ast.Type(kind: kind, span: self.since(start))
+    if self.eat("(")
+        let inner = try self.ty()
+        try self.close_group()
+        return inner
+    if not self.at_tag("Name")
+        return self.expected("a type")
+    var path = [try self.name()]
+    while self.eat(".")
+        path.push(try self.name())
+    var args: list[ast.Type] = []
+    if self.eat("[")
+        while true
+            args.push(try self.ty())
+            let more = self.eat(",")
+            if not more or self.at("]")
+                break
+        try self.want("]")
+    return ast.Type(kind: ast.NamedType(path: path, args: args), span: self.since(start))
+
+task let_stmt(change self: Parser) -> ast.StmtKind or Failure
+    let mutable = self.at("var")
+    self.skip()
+    let name = try self.name()
+    var ty: ast.Type? = none
+    if self.eat(":")
+        ty = try self.ty()
+    try self.want("=")
+    let value = try self.value()
+    return ast.LetStmt(mutable: mutable, name: name, ty: ty, value: value)
+
+task value(change self: Parser) -> ast.Expr or Failure
+    if self.at("match")
+        return self.match_expr(true)
+    let value = try self.expression()
+    try self.newline()
+    return value
+
+task if_stmt(change self: Parser) -> ast.StmtKind or Failure
+    self.skip()
+    var branches = [try self.branch()]
+    var otherwise: list[ast.Stmt]? = none
+    while self.eat("else")
+        if self.eat("if")
+            branches.push(try self.branch())
+        else
+            try self.newline()
+            otherwise = try self.block()
+            break
+    return ast.IfStmt(branches: branches, otherwise: otherwise)
+
+task branch(change self: Parser) -> ast.Branch or Failure
+    let condition = try self.expression()
+    try self.newline()
+    return ast.Branch(condition: condition, body: try self.block())
+
+task for_stmt(change self: Parser) -> ast.StmtKind or Failure
+    self.skip()
+    let changes = self.eat("change")
+    let name = try self.name()
+    try self.want("in")
+    let iterable = try self.expression()
+    try self.newline()
+    return ast.ForStmt(changes: changes, name: name, iterable: iterable, body: try self.block())
+
+task match_expr(change self: Parser, as_value: bool) -> ast.Expr or Failure
+    try self.enter()
+    let result = self.match_body(as_value)
+    self.leave()
+    return result
+
+task match_body(change self: Parser, as_value: bool) -> ast.Expr or Failure
+    let start = self.start()
+    self.skip()
+    let subject = try self.expression()
+    try self.newline()
+    try self.open_block()
+    var arms: list[ast.Arm] = []
+    while self.in_block()
+        let before = self.begin()
+        match self.arm(as_value)
+            a: ast.Arm -> arms.push(a)
+            _ -> self.recovered(before)
+    try self.close_block()
+    return ast.Expr(kind: ast.MatchExpr(subject: subject, arms: arms), span: self.since(start))
+
+task arm(change self: Parser, as_value: bool) -> ast.Arm or Failure
+    let pattern = try self.pattern()
+    if not self.at("->")
+        let token = self.token()
+        let message = "expected `->`, found {token.kind.describe()}"
+        let note = "an arm is `pattern -> value`, or `pattern ->` then an indented block"
+        return self.fail_with("E0201", message, token.span, note)
+    self.skip()
+    let start = self.start()
+    if self.at_tag("Newline")
+        if as_value
+            var d = diag.new("E0203", "a `match` used as a value cannot have a block arm", self.token().span)
+            d.notes.push("put the arm in one expression, or assign inside a `match` statement")
+            self.diags.push(d)
+        self.skip()
+        return ast.Arm(pattern: pattern, body: ast.ArmBlock(body: try self.block()))
+    if self.at("print")
+        let kind = try self.print_stmt()
+        let stmt = ast.Stmt(kind: kind, span: self.since(start))
+        return ast.Arm(pattern: pattern, body: ast.ArmStmt(stmt: stmt))
+    if self.at("return")
+        let kind = try self.return_stmt()
+        let stmt = ast.Stmt(kind: kind, span: self.since(start))
+        return ast.Arm(pattern: pattern, body: ast.ArmStmt(stmt: stmt))
+    if self.at("match")
+        let note = "put a nested `match` in an indented block under `pattern ->`"
+        let message = "expected an expression, found `match`"
+        let here = self.token().span
+        return self.fail_with("E0201", message, here, note)
+    let value = try self.expression()
+    try self.newline()
+    return ast.Arm(pattern: pattern, body: ast.ArmExpr(value: value))
+
+task pattern(change self: Parser) -> ast.Pattern or Failure
+    let start = self.start()
+    let kind = try self.pattern_kind(start)
+    return ast.Pattern(kind: kind, span: self.since(start))
+
+task pattern_kind(change self: Parser, start: int) -> ast.PatternKind or Failure
+    let tag = self.kind().tag()
+    if tag == "Name"
+        let name = try self.name()
+        if name.text == "_"
+            return ast.WildcardPattern
+        if self.eat(":")
+            return ast.TypedPattern(name: name, ty: try self.ty())
+        if self.eat("(")
+            var bindings: list[ast.Name] = []
+            if not self.at(")")
+                bindings.push(try self.name())
+                while self.eat(",")
+                    bindings.push(try self.name())
+            try self.want(")")
+            return ast.VariantPattern(name: name, bindings: bindings)
+        return ast.NamePattern(name: name)
+    if tag == "Int" or tag == "Float" or tag == "Text" or self.at("true") or self.at("false")
+        return ast.LiteralPattern(value: try self.primary())
+    if self.at("-")
+        let kind = self.negative_literal()
+        if kind is none
+            return self.expected("a pattern")
+        self.skip()
+        self.skip()
+        return ast.LiteralPattern(value: ast.Expr(kind: kind, span: self.since(start)))
+    if self.eat("none")
+        return ast.NonePattern
+    return self.expected("a pattern")
+
+task return_stmt(change self: Parser) -> ast.StmtKind or Failure
+    self.skip()
+    if self.at_tag("Newline")
+        self.skip()
+        return ast.ReturnStmt(value: none)
+    return ast.ReturnStmt(value: try self.value())
+
+task print_stmt(change self: Parser) -> ast.StmtKind or Failure
+    self.skip()
+    let value = try self.expression()
+    try self.newline()
+    return ast.PrintStmt(value: value)
+
+task assign_op(self: Parser) -> text
+    return match self.sym()
+        "=" -> "Set"
+        "+=" -> "Add"
+        "-=" -> "Sub"
+        "*=" -> "Mul"
+        "/=" -> "Div"
+        _ -> ""
+
+task expr_stmt(change self: Parser) -> ast.StmtKind or Failure
+    let start = self.start()
+    let target = try self.expression()
+    let op = self.assign_op()
+    if op is empty
+        try self.newline()
+        return ast.ExprStmt(value: target)
+    # A parenthesized target has a span that starts after this statement does.
+    let assignable = match target.kind
+        NameExpr(_) -> true
+        SelfExpr -> true
+        FieldExpr(_, _) -> true
+        IndexExpr(_, _) -> true
+        _ -> false
+    if not assignable or target.span.start != start
+        return self.fail("E0202", "can only assign to a name, field, or index", target.span)
+    self.skip()
+    let value = try self.expression()
+    try self.newline()
+    return ast.AssignStmt(target: target, op: op, value: value)
+
+task expression(change self: Parser) -> ast.Expr or Failure
+    try self.enter()
+    let result = self.expression_body()
+    self.leave()
+    return result
+
+task expression_body(change self: Parser) -> ast.Expr or Failure
+    if self.at_lambda()
+        return self.lambda()
+    if self.at("if")
+        return self.if_expr()
+    let start = self.start()
+    let left = try self.logic_or()
+    if self.eat("else")
+        let right = try self.expression()
+        return self.binary("Fallback", left, right, start)
+    return left
+
+task at_lambda(self: Parser) -> bool
+    let kind = self.kind()
+    if kind.tag() == "Name"
+        return is_sym(self.kind_at(1), "=>")
+    if not is_sym(kind, "(")
+        return false
+    var depth = 0
+    for i in 0..self.tokens.len() - self.pos
+        let k = self.tokens[self.pos + i].kind
+        if is_sym(k, "(")
+            depth += 1
+        else if is_sym(k, ")")
+            depth -= 1
+            if depth == 0
+                return is_sym(self.kind_at(i + 1), "=>")
+        else if k.tag() == "Newline"
+            return false
+    return false
+
+task lambda(change self: Parser) -> ast.Expr or Failure
+    let start = self.start()
+    var params: list[ast.Name] = []
+    if self.eat("(")
+        if not self.at(")")
+            params.push(try self.name())
+            while self.eat(",")
+                params.push(try self.name())
+        try self.want(")")
+    else
+        params.push(try self.name())
+    try self.want("=>")
+    let body = try self.expression()
+    return ast.Expr(kind: ast.LambdaExpr(params: params, body: body), span: self.since(start))
+
+task if_expr(change self: Parser) -> ast.Expr or Failure
+    let start = self.start()
+    self.skip()
+    let condition = try self.expression()
+    try self.want("then")
+    let yes = try self.logic_or()
+    try self.want("else")
+    let otherwise = try self.expression()
+    let kind = ast.IfExpr(condition: condition, yes: yes, otherwise: otherwise)
+    return ast.Expr(kind: kind, span: self.since(start))
+
+task binary(self: Parser, op: text, left: ast.Expr, right: ast.Expr, start: int) -> ast.Expr
+    return ast.Expr(kind: ast.BinaryExpr(op: op, left: left, right: right), span: self.since(start))
+
+task logic_or(change self: Parser) -> ast.Expr or Failure
+    let start = self.start()
+    var left = try self.logic_and()
+    while self.eat("or")
+        try self.link()
+        let right = try self.logic_and()
+        left = self.binary("Or", left, right, start)
+    return left
+
+task logic_and(change self: Parser) -> ast.Expr or Failure
+    let start = self.start()
+    var left = try self.logic_not()
+    while self.eat("and")
+        try self.link()
+        let right = try self.logic_not()
+        left = self.binary("And", left, right, start)
+    return left
+
+task logic_not(change self: Parser) -> ast.Expr or Failure
+    let start = self.start()
+    if self.eat("not")
+        try self.enter()
+        let result = self.logic_not()
+        self.leave()
+        let inner = try result
+        return ast.Expr(kind: ast.UnaryExpr(op: "Not", inner: inner), span: self.since(start))
+    return self.comparison()
+
+# The comparison at this token, or empty.
+task compare_op(self: Parser) -> text
+    let sym = self.sym()
+    return match sym
+        "==" -> "Eq"
+        "!=" -> "Ne"
+        "<" -> "Lt"
+        "<=" -> "Le"
+        ">" -> "Gt"
+        ">=" -> "Ge"
+        "in" -> "In"
+        "not" -> if is_sym(self.kind_at(1), "in") then "NotIn" else ""
+        _ -> ""
+
+task comparison(change self: Parser) -> ast.Expr or Failure
+    let start = self.start()
+    let left = try self.range()
+    let op = self.compare_op()
+    var expr = left
+    if op is not empty
+        self.pos += if op == "NotIn" then 2 else 1
+        let right = try self.range()
+        expr = self.binary(op, left, right, start)
+    else if self.eat("is")
+        let negated = self.eat("not")
+        var target = ast.IsNone
+        if self.eat("none")
+            target = ast.IsNone
+        else if self.eat("empty")
+            target = ast.IsEmpty
+        else
+            try self.enter()
+            let result = self.type_term()
+            self.leave()
+            target = ast.IsType(ty: try result)
+        let kind = ast.IsExpr(value: left, negated: negated, target: target)
+        expr = ast.Expr(kind: kind, span: self.since(start))
+    else
+        return left
+    if self.compare_op() is not empty or self.at("is")
+        let here = self.token().span
+        return self.chained(here, "comparisons cannot be chained", "join them with `and`")
+    return expr
+
+task chained(change self: Parser, span: diag.Span, message: text, note: text) -> Failure
+    return self.fail_with("E0204", message, span, note)
+
+task range(change self: Parser) -> ast.Expr or Failure
+    let start = self.start()
+    let left = try self.bit_or()
+    var op = ""
+    if self.eat("..")
+        op = "Range"
+    else if self.eat("..=")
+        op = "RangeInclusive"
+    else
+        return left
+    let right = try self.bit_or()
+    if self.at("..") or self.at("..=")
+        let here = self.token().span
+        return self.chained(here, "ranges cannot be chained", "use one `..` or `..=`")
+    return self.binary(op, left, right, start)
+
+task bit_or(change self: Parser) -> ast.Expr or Failure
+    let start = self.start()
+    var left = try self.bit_xor()
+    while self.at("|")
+        try self.link()
+        self.skip()
+        let right = try self.bit_xor()
+        left = self.binary("BitOr", left, right, start)
+    return left
+
+task bit_xor(change self: Parser) -> ast.Expr or Failure
+    let start = self.start()
+    var left = try self.bit_and()
+    while self.at("^")
+        try self.link()
+        self.skip()
+        let right = try self.bit_and()
+        left = self.binary("BitXor", left, right, start)
+    return left
+
+task bit_and(change self: Parser) -> ast.Expr or Failure
+    let start = self.start()
+    var left = try self.shift()
+    while self.at("&")
+        try self.link()
+        self.skip()
+        let right = try self.shift()
+        left = self.binary("BitAnd", left, right, start)
+    return left
+
+task shift(change self: Parser) -> ast.Expr or Failure
+    let start = self.start()
+    var left = try self.sum()
+    while self.at("<<") or self.at(">>")
+        let op = if self.at("<<") then "Shl" else "Shr"
+        try self.link()
+        self.skip()
+        let right = try self.sum()
+        left = self.binary(op, left, right, start)
+    return left
+
+task sum(change self: Parser) -> ast.Expr or Failure
+    let start = self.start()
+    var left = try self.product()
+    while self.at("+") or self.at("-")
+        let op = if self.at("+") then "Add" else "Sub"
+        try self.link()
+        self.skip()
+        let right = try self.product()
+        left = self.binary(op, left, right, start)
+    return left
+
+task product_op(self: Parser) -> text
+    return match self.sym()
+        "*" -> "Mul"
+        "/" -> "Div"
+        "//" -> "FloorDiv"
+        "%" -> "Rem"
+        _ -> ""
+
+task product(change self: Parser) -> ast.Expr or Failure
+    let start = self.start()
+    var left = try self.typed()
+    while self.product_op() is not empty
+        let op = self.product_op()
+        try self.link()
+        self.skip()
+        let right = try self.typed()
+        left = self.binary(op, left, right, start)
+    return left
+
+task unary_op(self: Parser) -> text
+    return match self.sym()
+        "-" -> "Neg"
+        "~" -> "BitNot"
+        "try" -> "Try"
+        "spawn" -> "Spawn"
+        "shared" -> "Shared"
+        "weak" -> "Weak"
+        _ -> ""
+
+task unary(change self: Parser) -> ast.Expr or Failure
+    let start = self.start()
+    let negative = self.negative_literal()
+    if negative is not none
+        self.skip()
+        self.skip()
+        return ast.Expr(kind: negative, span: self.since(start))
+    let op = self.unary_op()
+    if op is empty
+        return self.postfix()
+    self.skip()
+    try self.enter()
+    let result = self.unary()
+    self.leave()
+    let inner = try result
+    return ast.Expr(kind: ast.UnaryExpr(op: op, inner: inner), span: self.since(start))
+
+# A `-` joins a number with no postfix after it, so that the lowest `int`
+# can be written. With a postfix, `-` applies to the postfix result.
+task negative_literal(self: Parser) -> ast.ExprKind?
+    if not self.at("-")
+        return none
+    let after = self.kind_at(2)
+    if is_sym(after, "(") or is_sym(after, "[") or is_sym(after, ".")
+        return none
+    return match self.kind_at(1)
+        IntToken(digits) -> ast.IntExpr(digits: "-{digits}")
+        FloatToken(digits) -> ast.FloatExpr(digits: "-{digits}")
+        _ -> none
+
+task postfix(change self: Parser) -> ast.Expr or Failure
+    let start = self.start()
+    var expr = try self.primary()
+    while self.at("(") or self.at("[") or self.at(".")
+        try self.link()
+        if self.eat("(")
+            let args = try self.args()
+            try self.want(")")
+            expr = ast.Expr(kind: ast.CallExpr(callee: expr, args: args), span: self.since(start))
+        else if self.eat("[")
+            var indices = [try self.expression()]
+            while self.eat(",")
+                indices.push(try self.expression())
+            try self.want("]")
+            expr = ast.Expr(kind: ast.IndexExpr(base: expr, indices: indices), span: self.since(start))
+        else
+            self.skip()
+            let name = try self.name()
+            expr = ast.Expr(kind: ast.FieldExpr(base: expr, name: name), span: self.since(start))
+    return expr
+
+task args(change self: Parser) -> list[ast.Arg] or Failure
+    var args: list[ast.Arg] = []
+    while not self.at(")")
+        args.push(try self.arg())
+        if not self.eat(",")
+            break
+    return args
+
+task arg(change self: Parser) -> ast.Arg or Failure
+    if self.at_tag("Name") and is_sym(self.kind_at(1), ":")
+        let name = try self.name()
+        self.skip()
+        return ast.Arg(name: name, changes: false, value: try self.expression())
+    let changes = self.eat("change")
+    return ast.Arg(name: none, changes: changes, value: try self.expression())
+
+# Parses `unary [ "?" ]`. See "Type arguments" in docs/grammar.md.
+task typed(change self: Parser) -> ast.Expr or Failure
+    let start = self.start()
+    let value = try self.unary()
+    if not self.eat("?")
+        return value
+    return ast.Expr(kind: ast.OptionalExpr(inner: value), span: self.since(start))
+
+task primary(change self: Parser) -> ast.Expr or Failure
+    let start = self.start()
+    if self.eat("(")
+        let inner = try self.expression()
+        try self.close_group()
+        return inner
+    let kind = try self.primary_kind()
+    return ast.Expr(kind: kind, span: self.since(start))
+
+task primary_kind(change self: Parser) -> ast.ExprKind or Failure
+    let token = self.token()
+    match token.kind
+        NameToken(name) ->
+            self.skip()
+            return ast.NameExpr(name: name)
+        IntToken(digits) ->
+            self.skip()
+            return ast.IntExpr(digits: digits)
+        FloatToken(digits) ->
+            self.skip()
+            return ast.FloatExpr(digits: digits)
+        TextToken(parts) ->
+            self.skip()
+            return ast.TextExpr(parts: try self.text_parts(parts))
+        _ ->
+            return self.primary_sym()
+
+task primary_sym(change self: Parser) -> ast.ExprKind or Failure
+    let sym = self.sym()
+    if sym == "any" or sym == "task"
+        return ast.TypeExpr(ty: try self.type_prefix())
+    if sym == "self" or sym == "none" or sym == "true" or sym == "false"
+        self.skip()
+        return match sym
+            "self" -> ast.SelfExpr
+            "none" -> ast.NoneExpr
+            _ -> ast.BoolExpr(value: sym == "true")
+    if sym == "["
+        self.skip()
+        var items: list[ast.Expr] = []
+        while not self.at("]")
+            items.push(try self.expression())
+            if not self.eat(",")
+                break
+        try self.want("]")
+        return ast.ListExpr(items: items)
+    if sym == "{{"
+        self.skip()
+        var entries: list[ast.Entry] = []
+        while not self.at("}}")
+            let key = try self.expression()
+            try self.want(":")
+            entries.push(ast.Entry(key: key, value: try self.expression()))
+            if not self.eat(",")
+                break
+        try self.want("}}")
+        return ast.MapExpr(entries: entries)
+    return self.expected("an expression")
+
+task text_parts(change self: Parser, parts: list[lexer.RawPart]) -> list[ast.TextPart] or Failure
+    var out: list[ast.TextPart] = []
+    for part in parts
+        match part
+            LiteralPart(value) -> out.push(ast.LiteralText(value: value))
+            ExprPart(tokens) -> out.push(ast.ExprText(value: try self.interpolated(tokens)))
+    return out
+
+# Parses the tokens of one `{expression}` in place of the main stream.
+task interpolated(change self: Parser, tokens: list[lexer.Token]) -> ast.Expr or Failure
+    let outer = self.tokens
+    let pos = self.pos
+    self.tokens = tokens
+    self.pos = 0
+    let before = self.diags.len()
+    let result = self.interpolation()
+    if self.diags.len() > before and self.diags[before].code == "E0201"
+        self.diags[before].notes.push("`{{` in text starts an interpolation; write `{{{{` for a literal brace")
+    self.tokens = outer
+    self.pos = pos
+    return result
+
+task interpolation(change self: Parser) -> ast.Expr or Failure
+    let value = try self.expression()
+    try self.want("}}")
+    return value

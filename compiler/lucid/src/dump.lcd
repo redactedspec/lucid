@@ -1,0 +1,567 @@
+# `LUCID_DUMP`: each stage as text that both compilers write, by decision
+# 215. Ports dump.rs. See "Dumps" in docs/compiler.md for the form.
+
+use ./ast
+use ./diag
+use ./lexer
+
+# One node per line, indented two spaces per level. A line holds a name and
+# atoms, and the node's children follow it, one level deeper.
+type Out
+    lines: list[text]
+    # The indentation of each depth so far.
+    indents: list[text]
+    depth: int
+
+task new_out() -> Out
+    return Out(lines: [], indents: [""], depth: 0)
+
+task line(change self: Out, head: text)
+    while self.indents.len() <= self.depth
+        self.indents.push("{self.indents[self.indents.len() - 1]}  ")
+    self.lines.push("{self.indents[self.depth]}{head}")
+
+task atom(change self: Out, atom: text)
+    let last = self.lines.len() - 1
+    let before = self.lines[last]
+    self.lines[last] = "{before} {atom}"
+
+task count(change self: Out, n: int)
+    self.atom("{n}")
+
+task flag(change self: Out, value: bool)
+    self.atom("{value}")
+
+task text(change self: Out, value: text)
+    self.atom(quote(value))
+
+task span(change self: Out, span: diag.Span)
+    self.atom("{span.start} {span.end}")
+
+task name(change self: Out, name: ast.Name)
+    self.text(name.text)
+    self.span(name.span)
+
+# A child line `-` for a missing child.
+task absent(change self: Out)
+    self.line("-")
+
+# The lines, each but the last ended by a line break, which `print` adds.
+task finish(self: Out) -> text
+    var all = ""
+    for i in 0..self.lines.len()
+        let line = self.lines[i]
+        all = if i == 0 then line else "{all}\n{line}"
+    return all
+
+## A text in double quotes. Only `\`, `"`, and control characters are
+## escaped, so both compilers agree on every byte.
+public task quote(value: text) -> text
+    if not diag.needs_escape(value, true)
+        return "\"{value}\""
+    var out = "\""
+    for c in value
+        if c == "\\"
+            out = "{out}\\\\"
+        else if c == "\""
+            out = "{out}\\\""
+        else if c == "\n"
+            out = "{out}\\n"
+        else if c == "\r"
+            out = "{out}\\r"
+        else if c == "\t"
+            out = "{out}\\t"
+        else if c < " " or c.bytes()[0].to_int() == 127
+            out = "{out}\\u{{{diag.hex(c.bytes()[0].to_int())}}}"
+        else
+            out = "{out}{c}"
+    return "{out}\""
+
+public task tokens(tokens: list[lexer.Token]) -> text
+    var out = new_out()
+    for t in tokens
+        token(change out, t)
+    return out.finish()
+
+task token(change out: Out, item: lexer.Token)
+    let kind = item.kind
+    out.line(kind.tag())
+    out.span(item.span)
+    match kind
+        NameToken(name) -> out.text(name)
+        IntToken(digits) -> out.text(digits)
+        FloatToken(digits) -> out.text(digits)
+        SymToken(sym) -> out.text(sym)
+        TextToken(parts) ->
+            out.count(parts.len())
+            out.depth += 1
+            for part in parts
+                match part
+                    LiteralPart(value) ->
+                        out.line("Literal")
+                        out.text(value)
+                    ExprPart(tokens) ->
+                        out.line("Expr")
+                        out.count(tokens.len())
+                        out.depth += 1
+                        for t in tokens
+                            token(change out, t)
+                        out.depth -= 1
+            out.depth -= 1
+        _ ->
+            return
+
+public task tree(file: ast.File) -> text
+    var out = new_out()
+    out.line("File")
+    out.count(file.stmts.len())
+    out.depth += 1
+    stmts(change out, file.stmts)
+    out.depth -= 1
+    return out.finish()
+
+task stmts(change out: Out, stmts: list[ast.Stmt])
+    for s in stmts
+        stmt(change out, s)
+
+# The length of a list of statements, or `-` when it is absent.
+task maybe_count(change out: Out, body: list[ast.Stmt]?)
+    if body is none
+        out.atom("-")
+    else
+        out.count(body.len())
+
+task stmt(change out: Out, item: ast.Stmt)
+    let span = item.span
+    match item.kind
+        UseStmt(relative, path, alias) ->
+            leaf(change out, "Use", span)
+            out.flag(relative)
+            out.count(path.len())
+            for name in path
+                out.name(name)
+            if alias is none
+                out.atom("-")
+            else
+                out.name(alias)
+        TestStmt(name, body) ->
+            leaf(change out, "Test", span)
+            out.count(body.len())
+            out.depth += 1
+            expr(change out, name)
+            stmts(change out, body)
+            out.depth -= 1
+        TaskStmt(def) ->
+            leaf(change out, "Task", span)
+            out.flag(def.is_public)
+            let body = def.body
+            maybe_count(change out, body)
+            out.depth += 1
+            sig(change out, def.sig)
+            if body is not none
+                stmts(change out, body)
+            out.depth -= 1
+        TypeStmt(def) ->
+            leaf(change out, "Type", span)
+            out.flag(def.is_public)
+            out.name(def.name)
+            out.count(def.type_params.len())
+            out.depth += 1
+            for p in def.type_params
+                type_param(change out, p)
+            type_body(change out, def.body)
+            out.depth -= 1
+        ChoiceStmt(def) ->
+            leaf(change out, "Choice", span)
+            out.flag(def.is_public)
+            out.name(def.name)
+            out.count(def.type_params.len())
+            out.count(def.variants.len())
+            out.depth += 1
+            for p in def.type_params
+                type_param(change out, p)
+            for variant in def.variants
+                out.line("Variant")
+                out.name(variant.name)
+                out.count(variant.params.len())
+                out.depth += 1
+                for p in variant.params
+                    param(change out, p)
+                out.depth -= 1
+            out.depth -= 1
+        TraitStmt(def) ->
+            leaf(change out, "Trait", span)
+            out.flag(def.is_public)
+            out.name(def.name)
+            out.count(def.type_params.len())
+            out.count(def.tasks.len())
+            out.depth += 1
+            for p in def.type_params
+                type_param(change out, p)
+            for task_sig in def.tasks
+                sig(change out, task_sig)
+            out.depth -= 1
+        LetStmt(mutable, name, ty, value) ->
+            leaf(change out, "Let", span)
+            out.flag(mutable)
+            out.name(name)
+            out.depth += 1
+            maybe_ty(change out, ty)
+            expr(change out, value)
+            out.depth -= 1
+        IfStmt(branches, otherwise) ->
+            leaf(change out, "If", span)
+            out.count(branches.len())
+            maybe_count(change out, otherwise)
+            out.depth += 1
+            for branch in branches
+                out.line("Branch")
+                out.count(branch.body.len())
+                out.depth += 1
+                expr(change out, branch.condition)
+                stmts(change out, branch.body)
+                out.depth -= 1
+            if otherwise is not none
+                stmts(change out, otherwise)
+            out.depth -= 1
+        WhileStmt(condition, body) ->
+            leaf(change out, "While", span)
+            out.count(body.len())
+            out.depth += 1
+            expr(change out, condition)
+            stmts(change out, body)
+            out.depth -= 1
+        ForStmt(changes, name, iterable, body) ->
+            leaf(change out, "For", span)
+            out.flag(changes)
+            out.name(name)
+            out.count(body.len())
+            out.depth += 1
+            expr(change out, iterable)
+            stmts(change out, body)
+            out.depth -= 1
+        ReturnStmt(value) ->
+            leaf(change out, "Return", span)
+            out.depth += 1
+            maybe_expr(change out, value)
+            out.depth -= 1
+        PrintStmt(value) -> one_expr(change out, "Print", span, value)
+        ExpectStmt(value) -> one_expr(change out, "Expect", span, value)
+        ExprStmt(value) -> one_expr(change out, "Expr", span, value)
+        UnsafeStmt(body) ->
+            leaf(change out, "Unsafe", span)
+            out.count(body.len())
+            out.depth += 1
+            stmts(change out, body)
+            out.depth -= 1
+        BreakStmt -> leaf(change out, "Break", span)
+        ContinueStmt -> leaf(change out, "Continue", span)
+        PlaceholderStmt -> leaf(change out, "Placeholder", span)
+        AssignStmt(target, op, value) ->
+            leaf(change out, "Assign", span)
+            out.atom(op)
+            out.depth += 1
+            expr(change out, target)
+            expr(change out, value)
+            out.depth -= 1
+
+task type_body(change out: Out, body: ast.TypeBody)
+    match body
+        AliasBody(ty) ->
+            out.line("Alias")
+            out.depth += 1
+            ty_node(change out, ty)
+            out.depth -= 1
+        FieldsBody(fields) ->
+            out.line("Fields")
+            out.count(fields.len())
+            out.depth += 1
+            for field in fields
+                out.line("Field")
+                out.name(field.name)
+                out.depth += 1
+                ty_node(change out, field.ty)
+                maybe_expr(change out, field.default)
+                out.depth -= 1
+            out.depth -= 1
+
+task leaf(change out: Out, head: text, span: diag.Span)
+    out.line(head)
+    out.span(span)
+
+task one_expr(change out: Out, head: text, span: diag.Span, value: ast.Expr)
+    leaf(change out, head, span)
+    out.depth += 1
+    expr(change out, value)
+    out.depth -= 1
+
+task sig(change out: Out, sig: ast.TaskSig)
+    out.line("Sig")
+    out.name(sig.name)
+    out.count(sig.type_params.len())
+    out.count(sig.params.len())
+    out.depth += 1
+    for p in sig.type_params
+        type_param(change out, p)
+    for p in sig.params
+        param(change out, p)
+    maybe_ty(change out, sig.returns)
+    out.depth -= 1
+
+task type_param(change out: Out, item: ast.TypeParam)
+    out.line("TypeParam")
+    out.name(item.name)
+    out.count(item.bounds.len())
+    out.depth += 1
+    for ty in item.bounds
+        ty_node(change out, ty)
+    out.depth -= 1
+
+task param(change out: Out, item: ast.Param)
+    out.line("Param")
+    out.atom(item.mode)
+    out.name(item.name)
+    out.depth += 1
+    maybe_ty(change out, item.ty)
+    maybe_expr(change out, item.default)
+    out.depth -= 1
+
+task maybe_ty(change out: Out, ty: ast.Type?)
+    if ty is none
+        out.absent()
+    else
+        ty_node(change out, ty)
+
+task ty_node(change out: Out, ty: ast.Type)
+    let span = ty.span
+    match ty.kind
+        NamedType(path, args) ->
+            leaf(change out, "Named", span)
+            out.count(path.len())
+            for name in path
+                out.name(name)
+            out.count(args.len())
+            out.depth += 1
+            for arg in args
+                ty_node(change out, arg)
+            out.depth -= 1
+        NoneType -> leaf(change out, "None", span)
+        TaskType(params, returns) ->
+            leaf(change out, "Task", span)
+            out.count(params.len())
+            out.depth += 1
+            for p in params
+                ty_node(change out, p)
+            maybe_ty(change out, returns)
+            out.depth -= 1
+        UnionType(members) ->
+            leaf(change out, "Union", span)
+            out.count(members.len())
+            out.depth += 1
+            for member in members
+                ty_node(change out, member)
+            out.depth -= 1
+        OptionalType(inner) -> wrapped(change out, "Optional", span, inner)
+        SharedType(inner) -> wrapped(change out, "Shared", span, inner)
+        WeakType(inner) -> wrapped(change out, "Weak", span, inner)
+        AnyType(inner) -> wrapped(change out, "Any", span, inner)
+
+task wrapped(change out: Out, head: text, span: diag.Span, inner: ast.Type)
+    leaf(change out, head, span)
+    out.depth += 1
+    ty_node(change out, inner)
+    out.depth -= 1
+
+task maybe_expr(change out: Out, value: ast.Expr?)
+    if value is none
+        out.absent()
+    else
+        expr(change out, value)
+
+task is_kind(target: ast.IsTarget) -> text
+    return match target
+        IsNone -> "None"
+        IsEmpty -> "Empty"
+        IsType(_) -> "Type"
+
+task is_target(change out: Out, target: ast.IsTarget)
+    match target
+        IsType(ty) -> ty_node(change out, ty)
+        _ -> return
+
+task expr(change out: Out, value: ast.Expr)
+    let span = value.span
+    match value.kind
+        NameExpr(name) ->
+            leaf(change out, "Name", span)
+            out.text(name)
+        SelfExpr -> leaf(change out, "SelfValue", span)
+        NoneExpr -> leaf(change out, "None", span)
+        BoolExpr(flag) ->
+            leaf(change out, "Bool", span)
+            out.flag(flag)
+        IntExpr(digits) ->
+            leaf(change out, "Int", span)
+            out.text(digits)
+        FloatExpr(digits) ->
+            leaf(change out, "Float", span)
+            out.text(digits)
+        TextExpr(parts) ->
+            leaf(change out, "Text", span)
+            out.count(parts.len())
+            out.depth += 1
+            for part in parts
+                match part
+                    LiteralText(literal) ->
+                        out.line("Literal")
+                        out.text(literal)
+                    ExprText(inner) -> expr(change out, inner)
+            out.depth -= 1
+        ListExpr(items) ->
+            leaf(change out, "List", span)
+            out.count(items.len())
+            out.depth += 1
+            for item in items
+                expr(change out, item)
+            out.depth -= 1
+        MapExpr(entries) ->
+            leaf(change out, "Map", span)
+            out.count(entries.len())
+            out.depth += 1
+            for entry in entries
+                out.line("Entry")
+                out.depth += 1
+                expr(change out, entry.key)
+                expr(change out, entry.value)
+                out.depth -= 1
+            out.depth -= 1
+        UnaryExpr(op, inner) ->
+            leaf(change out, "Unary", span)
+            out.atom(op)
+            out.depth += 1
+            expr(change out, inner)
+            out.depth -= 1
+        BinaryExpr(op, left, right) ->
+            leaf(change out, "Binary", span)
+            out.atom(op)
+            out.depth += 1
+            expr(change out, left)
+            expr(change out, right)
+            out.depth -= 1
+        IsExpr(inner, negated, target) ->
+            leaf(change out, "Is", span)
+            out.flag(negated)
+            out.atom(is_kind(target))
+            out.depth += 1
+            expr(change out, inner)
+            is_target(change out, target)
+            out.depth -= 1
+        IfExpr(condition, yes, otherwise) ->
+            leaf(change out, "If", span)
+            out.depth += 1
+            expr(change out, condition)
+            expr(change out, yes)
+            expr(change out, otherwise)
+            out.depth -= 1
+        LambdaExpr(params, body) ->
+            leaf(change out, "Lambda", span)
+            out.count(params.len())
+            for name in params
+                out.name(name)
+            out.depth += 1
+            expr(change out, body)
+            out.depth -= 1
+        CallExpr(callee, args) ->
+            leaf(change out, "Call", span)
+            out.count(args.len())
+            out.depth += 1
+            expr(change out, callee)
+            for arg in args
+                call_arg(change out, arg)
+            out.depth -= 1
+        IndexExpr(base, indices) ->
+            leaf(change out, "Index", span)
+            out.count(indices.len())
+            out.depth += 1
+            expr(change out, base)
+            for index in indices
+                expr(change out, index)
+            out.depth -= 1
+        FieldExpr(base, name) ->
+            leaf(change out, "Field", span)
+            out.name(name)
+            out.depth += 1
+            expr(change out, base)
+            out.depth -= 1
+        OptionalExpr(inner) ->
+            leaf(change out, "Optional", span)
+            out.depth += 1
+            expr(change out, inner)
+            out.depth -= 1
+        TypeExpr(ty) ->
+            leaf(change out, "Type", span)
+            out.depth += 1
+            ty_node(change out, ty)
+            out.depth -= 1
+        MatchExpr(subject, arms) ->
+            leaf(change out, "Match", span)
+            out.count(arms.len())
+            out.depth += 1
+            expr(change out, subject)
+            for a in arms
+                arm(change out, a)
+            out.depth -= 1
+
+task call_arg(change out: Out, arg: ast.Arg)
+    out.line("Arg")
+    let name = arg.name
+    if name is none
+        out.atom("-")
+    else
+        out.name(name)
+    out.flag(arg.changes)
+    out.depth += 1
+    expr(change out, arg.value)
+    out.depth -= 1
+
+task arm(change out: Out, item: ast.Arm)
+    out.line("Arm")
+    match item.body
+        ArmExpr(_) -> out.atom("Expr")
+        ArmStmt(_) -> out.atom("Stmt")
+        ArmBlock(body) ->
+            out.atom("Block")
+            out.count(body.len())
+    out.depth += 1
+    pattern(change out, item.pattern)
+    match item.body
+        ArmExpr(value) -> expr(change out, value)
+        ArmStmt(body) -> stmt(change out, body)
+        ArmBlock(body) -> stmts(change out, body)
+    out.depth -= 1
+
+task pattern(change out: Out, item: ast.Pattern)
+    let span = item.span
+    match item.kind
+        WildcardPattern -> leaf(change out, "Wildcard", span)
+        NonePattern -> leaf(change out, "None", span)
+        LiteralPattern(value) ->
+            leaf(change out, "Literal", span)
+            out.depth += 1
+            expr(change out, value)
+            out.depth -= 1
+        NamePattern(name) ->
+            leaf(change out, "Name", span)
+            out.name(name)
+        VariantPattern(name, bindings) ->
+            leaf(change out, "Variant", span)
+            out.name(name)
+            out.count(bindings.len())
+            for binding in bindings
+                out.name(binding)
+        TypedPattern(name, ty) ->
+            leaf(change out, "Typed", span)
+            out.name(name)
+            out.depth += 1
+            ty_node(change out, ty)
+            out.depth -= 1

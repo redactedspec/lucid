@@ -1,0 +1,182 @@
+# Diagnostics, in the shape defined in docs/agents.md. Ports diag.rs.
+
+## Byte range in the source. `end` is exclusive.
+public type Span
+    start: int
+    end: int
+
+## Edits to make together: each replaces a span with text.
+public type Fix
+    description: text
+    edits: list[Edit]
+
+public type Edit
+    span: Span
+    text: text
+
+public type Diagnostic
+    code: text
+    message: text
+    span: Span
+    notes: list[text] = []
+    # Changes that remove the error with near certainty.
+    fixes: list[Fix] = []
+
+public task span(start: int, end: int) -> Span
+    return Span(start: start, end: end)
+
+public task new(code: text, message: text, span: Span) -> Diagnostic
+    return Diagnostic(code: code, message: message, span: span)
+
+## Adds a fix of one edit.
+public task fix(change self: Diagnostic, description: text, span: Span, text: text)
+    self.fixes.push(Fix(description: description, edits: [Edit(span: span, text: text)]))
+
+## One file, as `Source` holds it in diag.rs: its path as given, and its bytes.
+public type Source
+    path: text
+    bytes: list[byte]
+
+## Maps byte offsets to 1-based lines and columns. Columns count characters.
+public type Lines
+    source: Source
+    starts: list[int]
+
+public task lines(source: Source) -> Lines
+    var starts = [0]
+    let bytes = source.bytes
+    for i in 0..bytes.len()
+        if bytes[i].to_int() == 10
+            starts.push(i + 1)
+    return Lines(source: source, starts: starts)
+
+## The line and column of a byte offset, as a type of two numbers.
+public type Place
+    line: int
+    column: int
+
+public task place(self: Lines, offset: int) -> Place
+    # The number of line starts at or before `offset`.
+    var low = 0
+    var high = self.starts.len()
+    while low < high
+        let middle = (low + high) // 2
+        if self.starts[middle] <= offset
+            low = middle + 1
+        else
+            high = middle
+    let line = low
+    let start = self.starts[line - 1]
+    let bytes = self.source.bytes
+    var column = 1
+    for i in start..offset
+        # Each byte that does not continue a character starts one.
+        let b = bytes[i].to_int()
+        if b < 128 or b >= 192
+            column += 1
+    if line == 1 and offset >= 3 and bytes.len() >= 3
+        if bytes[0].to_int() == 239 and bytes[1].to_int() == 187 and bytes[2].to_int() == 191
+            column -= 1
+    return Place(line: line, column: column)
+
+## Merges parser diagnostics into `diags`, except on lines that already have
+## one. The lexer's recovery often causes a second, misleading parse error.
+public task add_unless_same_line(source: Source, change diags: list[Diagnostic], more: list[Diagnostic])
+    let lines = lines(source)
+    var taken: set[int] = set([])
+    for d in diags
+        taken.add(lines.place(d.span.start).line)
+    for d in more
+        if lines.place(d.span.start).line not in taken
+            diags.push(d)
+
+# Diagnostics print in a stable order: by position, then as found.
+task sorted(diags: list[Diagnostic]) -> list[Diagnostic]
+    var out = diags
+    for i in 1..out.len()
+        var j = i
+        while j > 0 and out[j - 1].span.start > out[j].span.start
+            out.swap(j - 1, j)
+            j -= 1
+    return out
+
+public task render_text(source: Source, diags: list[Diagnostic]) -> text
+    let lines = lines(source)
+    var out = ""
+    for d in sorted(diags)
+        let at = lines.place(d.span.start)
+        out = "{out}{source.path}:{at.line}:{at.column}: error {d.code}: {d.message}\n"
+        for note in d.notes
+            out = "{out}  note: {note}\n"
+        for fix in d.fixes
+            out = "{out}  fix: {fix.description}\n"
+    return out
+
+public task render_json(source: Source, diags: list[Diagnostic]) -> text
+    let lines = lines(source)
+    var out = "["
+    var first = true
+    for d in sorted(diags)
+        let at = lines.place(d.span.start)
+        let end = lines.place(d.span.end)
+        var notes = ""
+        for note in d.notes
+            let comma = if notes is empty then "" else ","
+            notes = "{notes}{comma}{json_string(note)}"
+        var fixes = ""
+        for fix in d.fixes
+            let comma = if fixes is empty then "" else ","
+            fixes = "{fixes}{comma}{fix_json(lines, fix)}"
+        let comma = if first then "" else ","
+        first = false
+        out = "{out}{comma}{{\"code\":{json_string(d.code)},\"severity\":\"error\",\"message\":{json_string(d.message)},\"file\":{json_string(source.path)},\"line\":{at.line},\"column\":{at.column},\"end_line\":{end.line},\"end_column\":{end.column},\"notes\":[{notes}],\"fixes\":[{fixes}]}}"
+    return "{out}]\n"
+
+task fix_json(lines: Lines, fix: Fix) -> text
+    var edits = ""
+    for edit in fix.edits
+        let at = lines.place(edit.span.start)
+        let end = lines.place(edit.span.end)
+        let comma = if edits is empty then "" else ","
+        edits = "{edits}{comma}{{\"line\":{at.line},\"column\":{at.column},\"end_line\":{end.line},\"end_column\":{end.column},\"text\":{json_string(edit.text)}}}"
+    return "{{\"description\":{json_string(fix.description)},\"edits\":[{edits}]}}"
+
+## A JSON string, escaped as diag.rs escapes it.
+public task json_string(value: text) -> text
+    if not needs_escape(value, false)
+        return "\"{value}\""
+    var out = "\""
+    for c in value
+        if c == "\""
+            out = "{out}\\\""
+        else if c == "\\"
+            out = "{out}\\\\"
+        else if c == "\n"
+            out = "{out}\\n"
+        else if c == "\r"
+            out = "{out}\\r"
+        else if c == "\t"
+            out = "{out}\\t"
+        else if c < " "
+            let code = hex(c.bytes()[0].to_int())
+            let pad = if code.len() == 1 then "000" else "00"
+            out = "{out}\\u{pad}{code}"
+        else
+            out = "{out}{c}"
+    return "{out}\""
+
+## True if `value` holds `"`, `\`, a control character, or with `delete`, the
+## character 127.
+public task needs_escape(value: text, delete: bool) -> bool
+    for b in value.bytes()
+        let n = b.to_int()
+        if n < 32 or n == 34 or n == 92 or (delete and n == 127)
+            return true
+    return false
+
+## A number in lowercase hexadecimal.
+public task hex(n: int) -> text
+    let digits = "0123456789abcdef"
+    if n < 16
+        return digits[n..n + 1]
+    return "{hex(n // 16)}{digits[n % 16..n % 16 + 1]}"

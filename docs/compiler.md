@@ -108,7 +108,7 @@ Built in M8, by decisions 188 to 213.
 
 ## Self-hosting
 
-Planned for M9, by decisions 214 to 220, in the order of `roadmap.md`. Only the dumps are built.
+Planned for M9, by decisions 214 to 220, in the order of `roadmap.md`. Built: the dumps, and in progress, the lexer and parser in `compiler/lucid/`, whose `check` with `LUCID_DUMP=tokens` or `ast` matches the Rust dumps on every repository file except one E0103 message for invisible non-ASCII characters. The dump test does not run it yet.
 
 - **Shape.** `compiler/lucid/` is a Lucid package that holds the front end, one module per Rust file it ports, and a driver for `check`, `run`, and `build`. The Rust `lucid` stays the shipped program, with its own front end, and keeps every other command, by decision 214.
 - **Dumps.** Built. `LUCID_DUMP=tokens`, `ast`, `mir`, or `owned` makes `lucid check` print that stage on stdout, before any diagnostics, in a text form that both compilers write, by decision 215. `dump.rs` writes it. `tokens` and `ast` cover the named file alone, lexed and parsed with no imports, through `resolve::parse_file`, and print even when that file has errors. `mir` is the program after `mono.rs`, and `owned` after `ownership.rs`, each printed only if the program has no errors. `owned` starts with the `Source` the backend needs: its files, their text, and the grants. The variable is internal.

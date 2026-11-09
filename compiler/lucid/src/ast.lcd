@@ -1,0 +1,188 @@
+# The syntax tree. Ports ast.rs. Only spans and names are kept here: meaning
+# belongs to the resolver and type checker. A variant is named after its
+# Rust variant and its kind, as `LetStmt` for `StmtKind::Let`, since one
+# module cannot use a variant name twice. Operators and parameter modes are
+# texts that hold the Rust variant's name, such as "Add" or "Change".
+
+use ./diag
+
+public type File
+    stmts: list[Stmt]
+
+public type Name
+    text: text
+    span: diag.Span
+
+public type Stmt
+    kind: StmtKind
+    span: diag.Span
+
+public choice StmtKind
+    UseStmt(relative: bool, path: list[Name], alias: Name?)
+    TestStmt(name: Expr, body: list[Stmt])
+    TaskStmt(def: TaskDef)
+    TypeStmt(def: TypeDef)
+    ChoiceStmt(def: ChoiceDef)
+    TraitStmt(def: TraitDef)
+    LetStmt(mutable: bool, name: Name, ty: Type?, value: Expr)
+    IfStmt(branches: list[Branch], otherwise: list[Stmt]?)
+    WhileStmt(condition: Expr, body: list[Stmt])
+    ForStmt(changes: bool, name: Name, iterable: Expr, body: list[Stmt])
+    ReturnStmt(value: Expr?)
+    PrintStmt(value: Expr)
+    ExpectStmt(value: Expr)
+    UnsafeStmt(body: list[Stmt])
+    BreakStmt
+    ContinueStmt
+    # The `...` statement.
+    PlaceholderStmt
+    ExprStmt(value: Expr)
+    # `op` is "Set", "Add", "Sub", "Mul", or "Div".
+    AssignStmt(target: Expr, op: text, value: Expr)
+
+public type Branch
+    condition: Expr
+    body: list[Stmt]
+
+public type TaskSig
+    name: Name
+    type_params: list[TypeParam]
+    params: list[Param]
+    returns: Type?
+
+public type TaskDef
+    is_public: bool
+    sig: TaskSig
+    # `none` for `unsafe extern task`.
+    body: list[Stmt]?
+
+public type TypeParam
+    name: Name
+    bounds: list[Type]
+
+public type Param
+    # "Read", "Change", or "Take".
+    mode: text
+    # The name is `self` for a receiver, whose type may be left out.
+    name: Name
+    ty: Type?
+    default: Expr?
+
+public type TypeDef
+    is_public: bool
+    name: Name
+    type_params: list[TypeParam]
+    body: TypeBody
+
+public choice TypeBody
+    AliasBody(ty: Type)
+    FieldsBody(fields: list[Field])
+
+public type Field
+    name: Name
+    ty: Type
+    default: Expr?
+
+public type ChoiceDef
+    is_public: bool
+    name: Name
+    type_params: list[TypeParam]
+    variants: list[Variant]
+
+public type Variant
+    name: Name
+    params: list[Param]
+
+public type TraitDef
+    is_public: bool
+    name: Name
+    type_params: list[TypeParam]
+    tasks: list[TaskSig]
+
+public type Type
+    kind: TypeKind
+    span: diag.Span
+
+public choice TypeKind
+    NamedType(path: list[Name], args: list[Type])
+    NoneType
+    TaskType(params: list[Type], returns: Type?)
+    UnionType(members: list[Type])
+    OptionalType(inner: Type)
+    SharedType(inner: Type)
+    WeakType(inner: Type)
+    AnyType(inner: Type)
+
+public type Expr
+    kind: ExprKind
+    span: diag.Span
+
+public choice ExprKind
+    NameExpr(name: text)
+    SelfExpr
+    NoneExpr
+    BoolExpr(value: bool)
+    # The lexeme. The type checker reads the value and checks its range.
+    IntExpr(digits: text)
+    FloatExpr(digits: text)
+    TextExpr(parts: list[TextPart])
+    ListExpr(items: list[Expr])
+    MapExpr(entries: list[Entry])
+    # `op` is "Neg", "Not", "Try", "Spawn", "Shared", "Weak", or "BitNot".
+    UnaryExpr(op: text, inner: Expr)
+    # `op` is the name of a `BinaryOp` of ast.rs, such as "Fallback" for
+    # `x else y`.
+    BinaryExpr(op: text, left: Expr, right: Expr)
+    IsExpr(value: Expr, negated: bool, target: IsTarget)
+    IfExpr(condition: Expr, yes: Expr, otherwise: Expr)
+    LambdaExpr(params: list[Name], body: Expr)
+    CallExpr(callee: Expr, args: list[Arg])
+    IndexExpr(base: Expr, indices: list[Expr])
+    FieldExpr(base: Expr, name: Name)
+    # `T?`, which is only a type: the checker rejects it outside type arguments.
+    OptionalExpr(inner: Expr)
+    # `any T` or a `task(...)` type, which the same rule covers.
+    TypeExpr(ty: Type)
+    # Only in value position: after `let`, `var`, and `return`, or as a statement.
+    MatchExpr(subject: Expr, arms: list[Arm])
+
+public choice TextPart
+    LiteralText(value: text)
+    ExprText(value: Expr)
+
+public type Entry
+    key: Expr
+    value: Expr
+
+public choice IsTarget
+    IsNone
+    IsEmpty
+    IsType(ty: Type)
+
+public type Arg
+    name: Name?
+    changes: bool
+    value: Expr
+
+public type Arm
+    pattern: Pattern
+    body: ArmBody
+
+public choice ArmBody
+    ArmExpr(value: Expr)
+    # A `print` or `return` statement.
+    ArmStmt(stmt: Stmt)
+    ArmBlock(body: list[Stmt])
+
+public type Pattern
+    kind: PatternKind
+    span: diag.Span
+
+public choice PatternKind
+    WildcardPattern
+    NonePattern
+    LiteralPattern(value: Expr)
+    # A variant with no parentheses, or a name that binds the value.
+    NamePattern(name: Name)
+    VariantPattern(name: Name, bindings: list[Name])
+    TypedPattern(name: Name, ty: Type)
