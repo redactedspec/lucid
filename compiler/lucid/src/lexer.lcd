@@ -236,8 +236,8 @@ task scan(change self: Lexer, change out: list[Token], interpolation: bool) -> b
             let sym = self.symbol()
             if sym is empty
                 self.pos += width(c)
-                let shown = escape_debug(self.slice(start, self.pos))
-                self.error("E0103", "unexpected character `{shown}`", start)
+                let seen = shown(self.slice(start, self.pos))
+                self.error("E0103", "unexpected character `{seen}`", start)
             else
                 self.pos += sym.len()
                 self.push(change out, SymToken(sym: sym), start)
@@ -262,22 +262,18 @@ task symbol(self: Lexer) -> text
             return self.symbols[i]
     return ""
 
-# As Rust's `char::escape_debug`, for the characters the lexer rejects.
-# ponytail: every character from 128 up shows as itself, where Rust escapes
-# the ones it cannot print; port its tables if a test needs one.
-task escape_debug(c: text) -> text
-    let b = c.bytes()[0].to_int()
-    if b == 0
-        return "\\0"
-    if b == RETURN
-        return "\\r"
-    if b == 39
-        return "\\'"
-    if b == BACKSLASH
-        return "\\\\"
-    if b < 32 or b == 127
-        return "\\u{{{diag.hex(b)}}}"
-    return c
+# How E0103 shows a character: printable ASCII as itself, anything else as
+# `\u{hex}`, so an invisible character is never shown as itself.
+task shown(c: text) -> text
+    let bytes = c.bytes()
+    let b = bytes[0].to_int()
+    if b > 32 and b < 127
+        return c
+    # The lead byte keeps 7, 5, 4, or 3 bits; each later byte gives 6.
+    var code = if b < 128 then b else if b < 224 then b & 31 else if b < 240 then b & 15 else b & 7
+    for i in 1..bytes.len()
+        code = code << 6 | bytes[i].to_int() & 63
+    return "\\u{{{diag.hex(code)}}}"
 
 # Handles the start of a line, and leaves `pos` after the indentation.
 task layout(change self: Lexer, change out: list[Token])

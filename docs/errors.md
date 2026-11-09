@@ -35,7 +35,7 @@ Fix: indent the block by 4 spaces more than its opening line.
 
 ## E0103: Unexpected character
 
-The character starts no token in Lucid.
+The character starts no token in Lucid. The message shows a printable ASCII character as itself, and any other character as `\u{hex}`, its code point in hex, so a character that cannot be seen still shows, by decision 221.
 
 ```lucid
 let a = 1 $ 2

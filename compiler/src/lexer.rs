@@ -156,11 +156,7 @@ impl Lexer<'_> {
                     let rest = self.rest();
                     let Some(sym) = SYMBOLS.iter().copied().find(|s| rest.starts_with(s)) else {
                         self.pos += c.len_utf8();
-                        self.error(
-                            "E0103",
-                            format!("unexpected character `{}`", c.escape_debug()),
-                            start,
-                        );
+                        self.error("E0103", format!("unexpected character `{}`", shown(c)), start);
                         continue;
                     };
                     self.pos += sym.len();
@@ -397,6 +393,12 @@ impl Lexer<'_> {
     }
 }
 
+/// How E0103 shows a character: printable ASCII as itself, anything else as
+/// `\u{hex}`, so an invisible character is never shown as itself.
+fn shown(c: char) -> String {
+    if c.is_ascii_graphic() { c.to_string() } else { format!("\\u{{{:x}}}", c as u32) }
+}
+
 /// Removes the common indentation of a `"""` text. The line of the closing
 /// quotes counts toward it, and that line and its newline are dropped if blank.
 fn dedent(raw: &str) -> String {
@@ -597,6 +599,9 @@ mod tests {
         assert_eq!(codes("!"), ["E0103"]);
         assert_eq!(codes("é"), ["E0103"]);
         assert_eq!(lex("\u{1b}").1[0].message, "unexpected character `\\u{1b}`");
+        assert_eq!(lex("\u{200b}").1[0].message, "unexpected character `\\u{200b}`");
+        assert_eq!(lex("é").1[0].message, "unexpected character `\\u{e9}`");
+        assert_eq!(lex("\\").1[0].message, "unexpected character `\\`");
         assert_eq!(codes("\"a\0\""), ["E0103"]);
         assert_eq!(codes("\"a"), ["E0104"]);
         assert_eq!(codes("\"a\nb"), ["E0104"]);
