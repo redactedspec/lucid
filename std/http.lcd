@@ -340,13 +340,14 @@ task linger(connection: Connection) -> none or NetError
     unsafe
         lucid_net_close_write(connection.socket)
     try connection.set_timeout(time.seconds(2))
-    # A client that keeps sending gets cut off after 1 MiB.
-    var left = 1048576
-    while left > 0
+    # A client that keeps sending is cut off after 16 reads: at most 1 MiB,
+    # and 32 seconds, even if it sends one byte at a time.
+    var reads = 16
+    while reads > 0
         let data = try connection.read(65536)
         if data.is_empty()
             return none
-        left = left - data.len()
+        reads = reads - 1
     return none
 
 # The response of the handler for the request's method and path.
