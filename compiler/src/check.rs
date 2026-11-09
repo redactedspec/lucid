@@ -489,6 +489,24 @@ impl Place {
     }
 }
 
+/// True if `value` is a text whose first part is the field `base.name`, as in
+/// `b.t = "{b.t}x"`. Only names and fields, so reading it twice is the same.
+fn starts_with(value: &ast::Expr, base: &ast::Expr, name: &ast::Name) -> bool {
+    fn same(a: &ast::Expr, b: &ast::Expr) -> bool {
+        match (&a.kind, &b.kind) {
+            (Ast::Name(a), Ast::Name(b)) => a == b,
+            (Ast::SelfValue, Ast::SelfValue) => true,
+            (Ast::Field { base: a, name: x }, Ast::Field { base: b, name: y }) => {
+                x.text == y.text && same(a, b)
+            }
+            _ => false,
+        }
+    }
+    let Ast::Text(parts) = &value.kind else { return false };
+    matches!(parts.first(), Some(ast::TextPart::Expr(first))
+        if matches!(&first.kind, Ast::Field { base: b, name: n } if n.text == name.text && same(b, base)))
+}
+
 /// True if `outer` holds all of `inner`.
 fn contains(outer: Span, inner: Span) -> bool {
     outer.start <= inner.start && inner.end <= outer.end
@@ -3668,7 +3686,8 @@ impl<'a> Checker<'a> {
             self.expected(value, Some(Ty::Error));
             return None;
         };
-        let value = match compound(op) {
+        let appends = matches!(op, ast::AssignOp::Set) && ty == Ty::Text && starts_with(value, base, name);
+        let mut value = match compound(op) {
             Some(op) => {
                 let old = self.slot_of(local, slot, ty, span);
                 let value = self.lower(value, self.number_want(Some(old.ty)));
@@ -3677,8 +3696,26 @@ impl<'a> Checker<'a> {
             None => self.expected(value, Some(ty)),
         };
         self.expect(&value, ty, "this assignment");
-        let value = self.ready(value, &mut place);
         let key = Expr { kind: ExprKind::Int(slot as i64), ty: Ty::Int, span };
+        if appends && let ExprKind::Join(parts) = &mut value.kind {
+            // `b.t = "{b.t}..."` takes the text out of its slot, as a path
+            // does, so the join may grow it in place, by decision 222. The
+            // other parts run first, since nothing may read `b` after `take`.
+            for part in &mut parts[1..] {
+                if !matches!(part.kind, ExprKind::Text(_)) {
+                    let empty = Expr { kind: ExprKind::None, ty: part.ty, span };
+                    let hoisted = std::mem::replace(part, empty);
+                    let hoisted = self.hoist(hoisted, &mut place.setup, &mut place.finish);
+                    *part = self.read(hoisted, span);
+                }
+            }
+            let read = self.slot_of(local, slot, ty, span);
+            let place = self.step(place, key, read);
+            let text = place.local;
+            parts[0] = self.read(text, span);
+            return Some(place.stmts(Stmt::Set(text, value)));
+        }
+        let value = self.ready(value, &mut place);
         let write = self.write(local, key, value, span);
         Some(place.stmts(write))
     }

@@ -1,0 +1,47 @@
+# Appends through a `change` parameter and through fields grow the text in
+# place when it is unique, by decision 222. The results must match a copy.
+
+type Log
+    lines: text
+    count: int
+
+type Outer
+    log: Log
+    name: text
+
+task add(change t: text, word: text)
+    t = "{t}{word},"
+
+task note(change log: Log, word: text)
+    log.lines = "{log.lines}{word};"
+    log.count += 1
+
+var t = "start:"
+for i in 0..5
+    add(change t, "w{i}")
+print t
+
+var log = Log(lines: "", count: 0)
+for i in 0..3
+    note(change log, "n{i}")
+print log.lines
+print log.count
+
+# A copy taken first keeps its old text.
+var outer = Outer(log: Log(lines: "a", count: 0), name: "x")
+let before = outer.log.lines
+outer.log.lines = "{outer.log.lines}b"
+outer.name = "{outer.name}{outer.name}{outer.log.lines}"
+print before
+print outer.log.lines
+print outer.name
+
+# Many appends, past the room of the text many times.
+var big = Log(lines: "", count: 0)
+for i in 0..1000
+    big.lines = "{big.lines}x"
+var many = ""
+for i in 0..1000
+    add(change many, "y")
+print big.lines.len()
+print many.len()

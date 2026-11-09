@@ -578,7 +578,14 @@ impl Owners<'_> {
         match stmt {
             Stmt::Set(local, value) => {
                 self.live.remove(*local);
-                self.give_one(value);
+                let mut reads = Reads::default();
+                reads.expr(value);
+                self.start(reads);
+                if self.rewrite {
+                    self.append(*local, value);
+                    self.give(value);
+                }
+                self.finish();
             }
             Stmt::Bind(local, value) => {
                 self.live.remove(*local);
@@ -714,6 +721,20 @@ impl Owners<'_> {
             && self.reads.get(&local) == Some(&1)
             && !self.live.has(local)
             && self.borrowed.binary_search(&local).is_err()
+    }
+
+    /// `t = "{t}..."` moves `t` into the join, so the text may grow in place,
+    /// by decision 222. The `Set` writes `t` next, and a local that `Set`
+    /// writes holds its own count: a `change` parameter holds the caller's,
+    /// and a local that `Update::Take` filled holds the slot's.
+    fn append(&self, local: Local, value: &mut Expr) {
+        if self.moving
+            && self.reads.get(&local) == Some(&1)
+            && let ExprKind::Join(parts) = &mut value.kind
+            && matches!(parts[0].kind, ExprKind::Local(first) if first == local)
+        {
+            parts[0].kind = ExprKind::Move(local);
+        }
     }
 
     /// Makes `value` give a count to what keeps it.

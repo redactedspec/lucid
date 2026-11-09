@@ -100,7 +100,7 @@ export const milestones: Milestone[] = [
     steps: [
       { text: '`LUCID_DUMP` stage dumps and a test that compares both compilers', done: true },
       { text: 'Lexer and parser in Lucid', done: true },
-      { text: 'Text append in place through a `change` parameter or a field', done: false },
+      { text: 'Text append in place through a `change` parameter or a field', done: true },
       { text: 'Resolver, type checker, and monomorphizer in Lucid', done: false },
       { text: 'Ownership pass, `--costs`, and `--unsafe` in Lucid', done: false },
       { text: 'Rust backend behind a small C ABI: the Lucid compiler runs `check`, `run`, and `build`', done: false },
