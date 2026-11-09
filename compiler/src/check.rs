@@ -592,8 +592,6 @@ fn repeatable(value: &Expr) -> bool {
     }
 }
 
-/// True for a number with no other value in it, which takes its type from the
-/// other side of an operator. So `2 * 3 + x` works for any number type of `x`.
 /// True for a text literal with no interpolation, or `+` of such literals,
 /// which become `sql` next to a query, as in `"a" + "b" + query`.
 fn literal_text(expr: &ast::Expr) -> bool {
@@ -604,6 +602,8 @@ fn literal_text(expr: &ast::Expr) -> bool {
     }
 }
 
+/// True for a number with no other value in it, which takes its type from the
+/// other side of an operator. So `2 * 3 + x` works for any number type of `x`.
 fn literal_math(expr: &ast::Expr) -> bool {
     match &expr.kind {
         Ast::Int(_) | Ast::Float(_) => true,
