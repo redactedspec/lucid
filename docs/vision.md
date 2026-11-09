@@ -4,6 +4,28 @@
 
 Lucid should be easier to write than Python, safe like Rust, and fast enough to replace C++ or Rust in most applications. It should also be the language that AI agents write most reliably.
 
+## Version 1.0 promise
+
+A program that builds under version 1.0 builds and behaves the same under every 1.x release. This holds from the end of M8, by decision 204.
+
+Covered:
+
+- The language, as `language.md` and `grammar.md` define it.
+- The `std` modules and the prelude.
+- `lucid.toml` and `lucid.lock`.
+- The commands and their flags.
+- The meaning of each error code.
+- The fields of `--json` output. New fields may be added.
+
+Not covered:
+
+- The text of messages.
+- The runtime's memory layout, and built files.
+- Speed and size of built programs.
+- Anything marked planned, such as `shared` and `weak`.
+
+A fix to a safety hole may break a program that relied on the hole. There are no editions: a 1.x compiler reads every program one way.
+
 ## Goals
 
 1. **Readable.** A non-expert can guess what a program does.

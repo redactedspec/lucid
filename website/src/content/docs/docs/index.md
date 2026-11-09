@@ -95,6 +95,10 @@ lucid fmt hello.lcd
 
 There is one layout and no settings, so formatting never comes up in review.
 
+## Stability
+
+Lucid keeps a version 1.0 promise: a program that builds under 1.0 builds and behaves the same under every 1.x. It covers the language, the `std` modules, `lucid.toml` and `lucid.lock`, the commands and their flags, the meaning of each error code, and the fields of `--json` output, which may gain fields. It does not cover message text, built files, or speed. A fix to a safety hole may break a program that relied on it.
+
 ## Next
 
 Read the language pages in order, starting with [Syntax](/docs/syntax/). The whole reference is small enough to read in one sitting.

@@ -76,7 +76,7 @@ export const milestones: Milestone[] = [
   {
     id: 'M8',
     title: 'Ecosystem',
-    status: 'active',
+    status: 'done',
     summary: 'Linux, cryptography, SQLite, a package registry, a language server, and the 1.0 stability promise.',
     exit: 'A package that uses a registry package with `std.sql` and `std.crypto` builds and passes `lucid test` on Windows and Linux, and an editor shows its diagnostics through `lucid lsp`.',
     steps: [
@@ -88,15 +88,22 @@ export const milestones: Milestone[] = [
       { text: 'Orphan rule for tasks with `self`', done: true },
       { text: 'Registry, `lucid package`, version selection, and `lucid.lock`', done: true },
       { text: '`lucid lsp`', done: true },
-      { text: 'Spec review, then the version 1.0 promise', done: false },
+      { text: 'Spec review, then the version 1.0 promise', done: true },
     ],
   },
   {
     id: 'M9',
     title: 'Self-hosted front end',
-    status: 'planned',
+    status: 'active',
     summary: 'The lexer, parser, checker, and ownership pass ported to Lucid, one stage at a time. Starts after the 1.0 promise.',
     exit: 'The compiler written in Lucid builds itself, and a second build is byte-identical.',
+    steps: [
+      { text: 'Lexer and parser in Lucid', done: false },
+      { text: 'Resolver, type checker, and monomorphizer in Lucid', done: false },
+      { text: 'MIR and ownership pass in Lucid', done: false },
+      { text: 'Cranelift called through a small C ABI wrapper in Rust', done: false },
+      { text: 'Documented bootstrap path from a pinned release binary', done: false },
+    ],
   },
 ];
 
