@@ -41,7 +41,7 @@ fn build(out: &Path, cargo_args: &[&str], rustc_args: &[&str]) -> String {
         .arg(out.join("runtime"))
         // Data in its own sections, so the linker drops SQLite's tables, and
         // with them its code, from a program that never opens a database.
-        .env("CFLAGS_x86_64_pc_windows_msvc", windows_cflags())
+        .env("CFLAGS_x86_64-pc-windows-msvc", windows_cflags())
         .arg("--")
         .args(rustc_args)
         .output()
@@ -52,7 +52,8 @@ fn build(out: &Path, cargo_args: &[&str], rustc_args: &[&str]) -> String {
 }
 
 /// `/Gw` added to the flags that `cc` would read for the runtime's C, so a
-/// developer's own flags stay. `cc` takes the first of these that is set.
+/// developer's own flags stay. `cc` takes the first of these that is set, so
+/// `build` sets the first.
 fn windows_cflags() -> String {
     let names = [
         "CFLAGS_x86_64-pc-windows-msvc",
