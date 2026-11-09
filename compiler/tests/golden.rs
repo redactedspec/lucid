@@ -360,7 +360,7 @@ fn stage_dumps_are_stable() {
                     jobs.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
                 {
                     let second_exe =
-                        if matches!(stage, "tokens" | "ast") { &ported } else { Path::new(LUCID) };
+                        if matches!(stage, "tokens" | "ast" | "resolved") { &ported } else { Path::new(LUCID) };
                     let (first, second) =
                         (dump(file, stage, Path::new(LUCID)), dump(file, stage, second_exe));
                     let problem = if !matches!(first.status.code(), Some(0 | 1)) {
