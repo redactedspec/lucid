@@ -6,6 +6,7 @@ mod check;
 mod context;
 mod derive;
 mod diag;
+mod dump;
 #[cfg(test)]
 mod fuzz;
 mod lexer;
@@ -98,6 +99,23 @@ fn cli(args: &[String]) -> ExitCode {
         ("check", ["--json", "--costs"]) => (false, true, true),
         _ => return usage(),
     };
+    let dump = match std::env::var("LUCID_DUMP") {
+        Ok(name) if command == "check" && !costs => match dump::Stage::named(&name) {
+            Some(stage) => Some(stage),
+            None => {
+                emit(
+                    std::io::stderr(),
+                    "lucid: LUCID_DUMP must be tokens, ast, mir, or owned
+",
+                );
+                return ExitCode::FAILURE;
+            }
+        },
+        _ => None,
+    };
+    if let Some(stage @ (dump::Stage::Tokens | dump::Stage::Ast)) = dump {
+        return dump_syntax(path, stage, json);
+    }
     let (source, file, mut diags) = load(path, run);
     if diags.is_empty()
         && let Some(file) = &file
@@ -107,8 +125,15 @@ fn cli(args: &[String]) -> ExitCode {
         if diags.is_empty() {
             diags = mono::run(&mut program, !run);
         }
-        if diags.is_empty() && (run || costs) {
+        if diags.is_empty() && dump == Some(dump::Stage::Mir) {
+            emit(std::io::stdout(), &dump::program(&program, None));
+        }
+        let owned = dump == Some(dump::Stage::Owned);
+        if diags.is_empty() && (run || costs || owned) {
             ownership::run(&mut program, std::env::var_os("LUCID_NAIVE").is_none());
+        }
+        if diags.is_empty() && owned {
+            emit(std::io::stdout(), &dump::program(&program, Some(&source)));
         }
         if costs && diags.is_empty() {
             let found = ownership::costs(&mut program);
@@ -144,6 +169,18 @@ fn cli(args: &[String]) -> ExitCode {
             // `--costs` needs compiled code, so there it stays an error.
             diags.retain(|d| d.code != "E0901");
         }
+    }
+    report_errors(&source, &diags, json);
+    if diags.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+}
+
+/// `LUCID_DUMP=tokens` or `ast` under `lucid check`: one file, with no imports.
+fn dump_syntax(path: &str, stage: dump::Stage, json: bool) -> ExitCode {
+    let (source, parsed, diags) = resolve::parse_file(path);
+    if let Some((tokens, file)) = parsed {
+        let text =
+            if stage == dump::Stage::Tokens { dump::tokens(&tokens) } else { dump::ast(&file) };
+        emit(std::io::stdout(), &text);
     }
     report_errors(&source, &diags, json);
     if diags.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }

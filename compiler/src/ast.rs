@@ -72,7 +72,7 @@ pub enum StmtKind {
     },
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum AssignOp {
     Set,
     Add,
@@ -107,7 +107,7 @@ pub struct TypeParam {
     pub bounds: Vec<Type>,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ParamMode {
     Read,
     Change,

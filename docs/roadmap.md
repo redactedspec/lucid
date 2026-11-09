@@ -136,7 +136,7 @@ Designed by decisions 188 to 205, see "Ecosystem" in `compiler.md`. Build in thi
 
 Started after the version 1.0 promise. Designed by decisions 214 to 220, see "Self-hosting" in `compiler.md`. Port one stage at a time, each checked against its Rust stage by dumps. The Rust front end and driver stay, and `lucid` stays the Rust program, by decision 214. Build in this order:
 
-- [ ] `LUCID_DUMP` in the Rust compiler, for `tokens`, `ast`, `mir`, and `owned`, and the golden test that compares dumps, by decision 215
+- [x] `LUCID_DUMP` in the Rust compiler, for `tokens`, `ast`, `mir`, and `owned`, and the golden test that compares dumps, by decision 215
 - [ ] Lexer and parser in Lucid, in `compiler/lucid/`. Token and tree dumps, and their diagnostics, match
 - [ ] Resolver with `lucid.toml` reading, type checker, `derive`, and monomorphizer in Lucid. MIR dumps and diagnostics match
 - [ ] Ownership pass, `--costs`, and `--unsafe` in Lucid. `owned` dumps match

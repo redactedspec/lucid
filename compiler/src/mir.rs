@@ -318,6 +318,11 @@ pub struct Types {
 }
 
 impl Types {
+    /// Every member of a union, in tag order.
+    pub fn all(&self) -> &[Ty] {
+        &self.ids
+    }
+
     /// The tag of a member of a union.
     pub fn id(&self, ty: Ty) -> usize {
         self.ids.iter().position(|&known| known == ty).expect("a union lists its members")
@@ -665,7 +670,7 @@ pub enum Stmt {
 }
 
 /// The arguments that `Stmt::Update` holds for each operation.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Update {
     /// Value.
     ListPush,
@@ -696,7 +701,7 @@ pub enum Update {
 /// the runtime calls. `mono.rs` fills this in. Any other key needs none.
 pub type KeyTasks = Option<(usize, usize)>;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum HashOp {
     /// An `int`-sized value of any type.
     Int,

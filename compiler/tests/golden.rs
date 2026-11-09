@@ -307,6 +307,79 @@ fn examples_parse() {
     }
 }
 
+/// Every `.lcd` file under `dir`, at any depth, as a path from the repository.
+fn all_sources(dir: &str, out: &mut Vec<String>) {
+    let mut entries: Vec<PathBuf> = fs::read_dir(repo().join(dir))
+        .expect("cannot list directory")
+        .map(|entry| entry.expect("cannot read entry").path())
+        .collect();
+    entries.sort();
+    for path in entries {
+        let name = format!("{dir}/{}", file_name(&path));
+        if path.is_dir() {
+            all_sources(&name, out);
+        } else if name.ends_with(".lcd") {
+            out.push(name);
+        }
+    }
+}
+
+/// `LUCID_DUMP` prints each stage of every file in the repository the same way
+/// twice, and never panics, by decision 215. The Lucid compiler is compared
+/// with these dumps as each of its stages lands.
+#[test]
+fn stage_dumps_are_stable() {
+    let mut sources = Vec::new();
+    for dir in ["tests", "examples", "std", "tools"] {
+        all_sources(dir, &mut sources);
+    }
+    let jobs: Vec<(&str, &str)> = sources
+        .iter()
+        .flat_map(|file| ["tokens", "ast", "mir", "owned"].map(|stage| (file.as_str(), stage)))
+        .collect();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let failures = std::sync::Mutex::new(Vec::new());
+    let dump = |file: &str, stage: &str| {
+        let mut command = Command::new(LUCID);
+        command.args(["check", "--json", file]).current_dir(repo()).env("LUCID_DUMP", stage);
+        command.output().expect("cannot start lucid")
+    };
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    std::thread::scope(|scope| {
+        for _ in 0..threads {
+            scope.spawn(|| {
+                while let Some(&(file, stage)) =
+                    jobs.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+                {
+                    let (first, second) = (dump(file, stage), dump(file, stage));
+                    let problem = if !matches!(first.status.code(), Some(0 | 1)) {
+                        Some(format!("exit {:?}: {}", first.status.code(), text(&first.stderr)))
+                    } else if first.stdout.is_empty() {
+                        Some("printed nothing".to_string())
+                    } else if first.stdout != second.stdout {
+                        Some("differs between two runs".to_string())
+                    } else {
+                        None
+                    };
+                    if let Some(problem) = problem {
+                        failures.lock().unwrap().push(format!("{file} {stage}: {problem}"));
+                    }
+                }
+            });
+        }
+    });
+    let failures = failures.into_inner().unwrap();
+    assert!(
+        failures.is_empty(),
+        "
+{}",
+        failures.join(
+            "
+"
+        )
+    );
+}
+
 /// The browser examples build for the web. The build goes to a temporary
 /// directory, so the example directory stays clean.
 #[test]

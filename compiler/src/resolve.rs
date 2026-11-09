@@ -472,6 +472,22 @@ fn load_once(path: &str, run: bool) -> Loaded {
     (source, Some(file), diags, None)
 }
 
+/// The tokens of a file, and its tree.
+pub type Parsed = (Vec<Token>, ast::File);
+
+/// One file, lexed and parsed with no imports, for `LUCID_DUMP=tokens` and
+/// `ast`, so each file can be compared alone.
+pub fn parse_file(path: &str) -> (Source, Option<Parsed>, Vec<Diagnostic>) {
+    let mut loader = Loader::default();
+    let Some((_, text)) = loader.read(path, Span { start: 0, end: 0 }) else {
+        return (loader.source, None, loader.diags);
+    };
+    let (tokens, mut diags) = lexer::lex(&text);
+    let (file, parse_diags) = parser::parse(tokens.clone());
+    diag::add_unless_same_line(&loader.source, &mut diags, parse_diags);
+    (loader.source, Some((tokens, file)), diags)
+}
+
 fn is_std_module(name: &str) -> bool {
     STD_MODULES.iter().any(|(module, _)| *module == name)
 }

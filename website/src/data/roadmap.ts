@@ -98,7 +98,7 @@ export const milestones: Milestone[] = [
     summary: 'The lexer, parser, checker, and ownership pass ported to Lucid, one stage at a time, each checked against the Rust stage. Code generation stays in Rust.',
     exit: 'The compiler written in Lucid builds itself, and a second build is byte-identical.',
     steps: [
-      { text: '`LUCID_DUMP` stage dumps and a test that compares both compilers', done: false },
+      { text: '`LUCID_DUMP` stage dumps and a test that compares both compilers', done: true },
       { text: 'Lexer and parser in Lucid', done: false },
       { text: 'Resolver, type checker, and monomorphizer in Lucid', done: false },
       { text: 'Ownership pass, `--costs`, and `--unsafe` in Lucid', done: false },
