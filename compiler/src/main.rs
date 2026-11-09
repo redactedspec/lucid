@@ -195,6 +195,11 @@ fn link(object: &[u8], exe: &str) -> ExitCode {
         emit(std::io::stderr(), &format!("lucid: {problem}\n"));
         ExitCode::FAILURE
     };
+    // On Linux, `lucid build app` from the parent of `app/` names the
+    // program after the directory it would overwrite.
+    if std::path::Path::new(exe).is_dir() {
+        return fail(format!("cannot write the program to `{exe}`: a directory has that name"));
+    }
     let mut command = match linker() {
         Ok(command) => command,
         Err(problem) => return fail(problem.into()),
@@ -243,9 +248,15 @@ fn linker() -> Result<std::process::Command, &'static str> {
 }
 
 /// The system `cc` finds the C start files and libc, by decision 191.
-#[cfg(not(windows))]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn linker() -> Result<std::process::Command, &'static str> {
     Ok(std::process::Command::new("cc"))
+}
+
+/// Only Windows and Linux on x86-64 are targets, by decision 205.
+#[cfg(not(any(windows, all(target_os = "linux", target_arch = "x86_64"))))]
+fn linker() -> Result<std::process::Command, &'static str> {
+    Err("`lucid build` works only on Windows and Linux x86-64")
 }
 
 /// Makes a new directory with a random name for `link`, that only this user
