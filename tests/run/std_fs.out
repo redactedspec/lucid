@@ -11,6 +11,9 @@ NotText(path: "../../target/std_fs_test/raw")
 ["año.txt", "moved"]
 NotFound(path: "../../target/std_fs_test/raw")
 NotFound(path: "../../target/std_fs_test/none")
+true
+true
+NotFound(path: "../../target/std_fs_test/none")
 file not found: ../../target/std_fs_test/none
 a directory is no file
 false

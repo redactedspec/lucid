@@ -22,6 +22,7 @@ unsafe extern task lucid_fs_list(path: text) -> list[text]
 unsafe extern task lucid_fs_make_dir(path: text)
 unsafe extern task lucid_fs_remove(path: text)
 unsafe extern task lucid_fs_rename(from: text, to: text)
+unsafe extern task lucid_fs_real_path(path: text) -> text
 unsafe extern task lucid_fs_failure() -> int
 unsafe extern task lucid_fs_detail() -> text
 unsafe extern task lucid_bytes_valid(data: list[byte]) -> bool
@@ -85,6 +86,14 @@ public task list_dir(path: text) -> list[text] or FileError
         let names = lucid_fs_list(path)
         try failure(path)
         return names
+
+## The absolute path of what `path` reaches, with no `.`, `..`, or links.
+public task real_path(path: text) -> text or FileError
+    # The runtime only reads `path`, and builds a new text.
+    unsafe
+        let real = lucid_fs_real_path(path)
+        try failure(path)
+        return real
 
 ## Makes a directory, with any parents that it needs.
 public task make_dir(path: text) -> none or FileError

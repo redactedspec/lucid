@@ -287,6 +287,7 @@ fn jit(
     builder.symbol("lucid_fs_list", lucid_rt::lucid_fs_list as *const u8);
     builder.symbol("lucid_fs_make_dir", lucid_rt::lucid_fs_make_dir as *const u8);
     builder.symbol("lucid_fs_remove", lucid_rt::lucid_fs_remove as *const u8);
+    builder.symbol("lucid_fs_real_path", lucid_rt::lucid_fs_real_path as *const u8);
     builder.symbol("lucid_fs_rename", lucid_rt::lucid_fs_rename as *const u8);
     builder.symbol("lucid_fs_failure", lucid_rt::lucid_fs_failure as *const u8);
     builder.symbol("lucid_fs_detail", lucid_rt::lucid_fs_detail as *const u8);

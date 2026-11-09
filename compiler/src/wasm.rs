@@ -127,6 +127,7 @@ const IMPORTS: &[(&str, &[Abi], Option<Abi>)] = &[
     ("lucid_fs_list", &[Ptr], Some(Ptr)),
     ("lucid_fs_make_dir", &[Ptr], None),
     ("lucid_fs_remove", &[Ptr], None),
+    ("lucid_fs_real_path", &[Ptr], Some(Ptr)),
     ("lucid_fs_rename", &[Ptr, Ptr], None),
     ("lucid_fs_failure", &[], Some(I64)),
     ("lucid_fs_detail", &[], Some(Ptr)),

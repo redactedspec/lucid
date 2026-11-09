@@ -43,7 +43,7 @@ print fs.exists("notes.txt")
 copy("notes.txt", "backup.txt") else none   # ignore a missing file, on purpose
 ```
 
-`std.fs` reads and writes whole files: `read_text`, `write_text`, `append_text`, `read_bytes`, `write_bytes`, `list_dir`, `make_dir`, `remove`, and `rename`. Each gives its result or an `fs.FileError`, which is `NotFound`, `Denied`, `NotText`, or `Failed`. `exists` gives a `bool`. `/` works in paths on every system.
+`std.fs` reads and writes whole files: `read_text`, `write_text`, `append_text`, `read_bytes`, `write_bytes`, `list_dir`, `real_path`, `make_dir`, `remove`, and `rename`. Each gives its result or an `fs.FileError`, which is `NotFound`, `Denied`, `NotText`, or `Failed`. `exists` gives a `bool`. `/` works in paths on every system.
 
 ## JSON
 

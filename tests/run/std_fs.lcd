@@ -33,6 +33,11 @@ print fs.list_dir(dir)
 print fs.rename("{dir}/raw", "{dir}/other")
 print fs.list_dir("{dir}/none")
 
+let real = try fs.real_path(dir)
+print real.ends_with("std_fs_test") and not real.contains("..")
+print fs.exists("{real}/moved") and (try fs.real_path("{dir}/./moved")).len() == real.len() + 6
+print fs.real_path("{dir}/none")
+
 match fs.read_text("{dir}/none")
     text_value: text -> print text_value
     e: FileError -> print e.error_message()

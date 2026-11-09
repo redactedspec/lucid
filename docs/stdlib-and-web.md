@@ -37,6 +37,7 @@ Never hand-roll cryptography primitives. Wrap a vetted implementation.
 | `fs.write_bytes(path, data)` | `none or FileError` |
 | `fs.exists(path)` | `bool` |
 | `fs.list_dir(path)` | `list[text] or FileError`: sorted names |
+| `fs.real_path(path)` | `text or FileError`: the absolute path, with no `.`, `..`, or links |
 | `fs.make_dir(path)` | `none or FileError`: with any parents it needs |
 | `fs.remove(path)` | `none or FileError`: a file or an empty directory |
 | `fs.rename(from, to)` | `none or FileError`: replaces what is at `to` |

@@ -2663,6 +2663,28 @@ pub unsafe extern "C" fn lucid_fs_list(path: *const Text) -> *mut List {
     text_list(names.iter().map(String::as_str))
 }
 
+/// The absolute path of `path`, with no `.`, `..`, or links, or an empty
+/// text and the failure kept. Windows gives `\\?\C:\a`, which reads `/`
+/// as a name and not a separator, so the `\\?\` prefix goes, as long as
+/// the rest is a drive path or a share.
+///
+/// # Safety
+///
+/// `path` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_fs_real_path(path: *const Text) -> *mut Text {
+    // SAFETY: the caller guarantees a live text.
+    let path = unsafe { system_text(path) };
+    let real = if file_allowed(path) { file_result(std::fs::canonicalize(path)) } else { None };
+    let real = real.map(|real| real.to_string_lossy().into_owned()).unwrap_or_default();
+    let plain = match real.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => rest.to_string(),
+        Some(rest) if rest.starts_with(r"UNC\") => format!(r"\\{}", &rest[4..]),
+        _ => real,
+    };
+    text_from(plain.as_bytes())
+}
+
 /// Makes a directory and its parents.
 ///
 /// # Safety
