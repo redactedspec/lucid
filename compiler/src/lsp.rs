@@ -368,6 +368,10 @@ fn offset(text: &str, line: usize, column: usize) -> usize {
     let start: usize = text.split_inclusive('\n').take(line).map(str::len).sum();
     let mut units = 0;
     for (i, c) in text[start..].char_indices() {
+        // A byte order mark takes no column, as in `position`.
+        if start == 0 && i == 0 && c == '\u{feff}' {
+            continue;
+        }
         if units >= column || c == '\n' {
             return start + i;
         }
@@ -670,6 +674,7 @@ mod tests {
         assert_eq!(offset(text, 0, 3), "a😀".len());
         assert_eq!(offset(text, 0, 99), "a😀b".len());
         assert_eq!(offset(text, 1, 1), "a😀b\nx".len());
+        assert_eq!(offset("\u{feff}ab", 0, 1), "\u{feff}a".len());
         let mut source = Source::default();
         source.add("f", text);
         let at = |o| {
