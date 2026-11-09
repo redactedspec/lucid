@@ -330,17 +330,25 @@ fn all_sources(dir: &str, out: &mut Vec<String>) {
 #[test]
 fn stage_dumps_are_stable() {
     let mut sources = Vec::new();
-    for dir in ["tests", "examples", "std", "tools"] {
+    for dir in ["tests", "examples", "std", "tools", "compiler/lucid"] {
         all_sources(dir, &mut sources);
     }
+    // The second run of each stage that Lucid has ported uses the Lucid
+    // compiler, so it must print what the Rust one does.
+    let stage_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("lucid-stage");
+    let _ = fs::remove_dir_all(&stage_dir);
+    fs::create_dir_all(&stage_dir).expect("no stage dir");
+    let built = lucid(&stage_dir, &["build", repo().join("compiler/lucid").to_str().unwrap()]);
+    assert!(built.status.success(), "lucid in Lucid: {}", text(&built.stderr));
+    let ported = stage_dir.join(format!("lucid{}", std::env::consts::EXE_SUFFIX));
     let jobs: Vec<(&str, &str)> = sources
         .iter()
         .flat_map(|file| ["tokens", "ast", "mir", "owned"].map(|stage| (file.as_str(), stage)))
         .collect();
     let next = std::sync::atomic::AtomicUsize::new(0);
     let failures = std::sync::Mutex::new(Vec::new());
-    let dump = |file: &str, stage: &str| {
-        let mut command = Command::new(LUCID);
+    let dump = |file: &str, stage: &str, exe: &Path| {
+        let mut command = Command::new(exe);
         command.args(["check", "--json", file]).current_dir(repo()).env("LUCID_DUMP", stage);
         command.output().expect("cannot start lucid")
     };
@@ -351,7 +359,10 @@ fn stage_dumps_are_stable() {
                 while let Some(&(file, stage)) =
                     jobs.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
                 {
-                    let (first, second) = (dump(file, stage), dump(file, stage));
+                    let second_exe =
+                        if matches!(stage, "tokens" | "ast") { &ported } else { Path::new(LUCID) };
+                    let (first, second) =
+                        (dump(file, stage, Path::new(LUCID)), dump(file, stage, second_exe));
                     let problem = if !matches!(first.status.code(), Some(0 | 1)) {
                         Some(format!("exit {:?}: {}", first.status.code(), text(&first.stderr)))
                     } else if first.stdout.is_empty() {
