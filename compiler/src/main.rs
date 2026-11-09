@@ -105,7 +105,7 @@ fn cli(args: &[String]) -> ExitCode {
             None => {
                 emit(
                     std::io::stderr(),
-                    "lucid: LUCID_DUMP must be tokens, ast, mir, or owned
+                    "lucid: LUCID_DUMP must be tokens, ast, resolved, mir, or owned
 ",
                 );
                 return ExitCode::FAILURE;
@@ -117,6 +117,11 @@ fn cli(args: &[String]) -> ExitCode {
         return dump_syntax(path, stage, json);
     }
     let (source, file, mut diags) = load(path, run);
+    if dump == Some(dump::Stage::Resolved) {
+        emit(std::io::stdout(), &dump::resolved(&source, file.as_ref()));
+        report_errors(&source, &diags, json);
+        return if diags.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE };
+    }
     if diags.is_empty()
         && let Some(file) = &file
     {

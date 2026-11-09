@@ -12,6 +12,7 @@ use crate::mir::{self, Ty};
 pub enum Stage {
     Tokens,
     Ast,
+    Resolved,
     Mir,
     Owned,
 }
@@ -21,6 +22,7 @@ impl Stage {
         match name {
             "tokens" => Some(Stage::Tokens),
             "ast" => Some(Stage::Ast),
+            "resolved" => Some(Stage::Resolved),
             "mir" => Some(Stage::Mir),
             "owned" => Some(Stage::Owned),
             _ => None,
@@ -589,33 +591,72 @@ fn pattern(out: &mut Out, pattern: &ast::Pattern) {
     }
 }
 
+/// The line `Source`: its file count and the grants.
+fn source_head(out: &mut Out, source: &Source) {
+    out.line("Source").atom(source.files.len());
+    match &source.grants {
+        Some(grants) => {
+            out.atom(grants.len());
+            for grant in grants {
+                match grant {
+                    Grant::All => _ = out.atom("all"),
+                    Grant::List(items) => {
+                        out.atom("list").atom(items.len());
+                        items.iter().for_each(|item| _ = out.text(item));
+                    }
+                }
+            }
+        }
+        None => _ = out.atom("-"),
+    }
+}
+
+fn files(out: &mut Out, source: &Source) {
+    for file in &source.files {
+        out.line("File").text(file.path).atom(file.start);
+    }
+}
+
+/// What `resolve.rs` gives: the files read, what it records about them, and
+/// the joined tree, if loading got that far. Printed even with errors.
+pub fn resolved(source: &Source, file: Option<&ast::File>) -> String {
+    let mut out = Out::default();
+    source_head(&mut out, source);
+    out.nest(|out| {
+        files(out, source);
+        for (start, manifest) in &source.no_unsafe {
+            out.line("NoUnsafe").atom(start).text(manifest);
+        }
+        for (start, package) in &source.packages {
+            out.line("Package").atom(start).atom(package);
+        }
+        match source.web_only {
+            Some(span) => _ = out.line("WebOnly").span(span),
+            None => out.absent(),
+        }
+        match source.host_only {
+            Some((span, name)) => _ = out.line("HostOnly").span(span).text(name),
+            None => out.absent(),
+        }
+    });
+    match file {
+        Some(file) => {
+            out.line("File").atom(file.stmts.len());
+            out.nest(|out| stmts(out, &file.stmts));
+        }
+        None => out.absent(),
+    }
+    out.finish()
+}
+
 /// The program after `mono.rs`. With `source`, after `ownership.rs`, it is
 /// what a backend reads, so it holds the files, their text, and the grants.
 pub fn program(program: &mir::Program, source: Option<&Source>) -> String {
     let mut out = Out::default();
     if let Some(source) = source {
-        out.line("Source").atom(source.files.len());
-        match &source.grants {
-            Some(grants) => {
-                out.atom(grants.len());
-                for grant in grants {
-                    match grant {
-                        Grant::All => _ = out.atom("all"),
-                        Grant::List(items) => {
-                            out.atom("list").atom(items.len());
-                            items.iter().for_each(|item| _ = out.text(item));
-                        }
-                    }
-                }
-            }
-            None => _ = out.atom("-"),
-        }
+        source_head(&mut out, source);
         out.text(&source.text);
-        out.nest(|out| {
-            for file in &source.files {
-                out.line("File").text(file.path).atom(file.start);
-            }
-        });
+        out.nest(|out| files(out, source));
     }
     out.line("Program")
         .atom(program.datas.len())
