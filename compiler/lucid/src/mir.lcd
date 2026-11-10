@@ -1,0 +1,912 @@
+# MIR: typed, structured, and free of names. Ports mir.rs. A variant is named
+# after its Rust variant and its kind, as `IntTy` for `Ty::Int`, `SetStmt`
+# for `Stmt::Set`, and `LocalExpr` for `ExprKind::Local`, since one module
+# cannot use a variant name twice. Operators and update kinds are texts that
+# hold the Rust variant's name, such as "Add" or "ListPush".
+
+use ./diag
+
+public choice Ty
+    IntTy
+    FloatTy
+    BoolTy
+    ByteTy
+    I8Ty
+    I16Ty
+    I32Ty
+    U16Ty
+    U32Ty
+    U64Ty
+    F32Ty
+    NoneTy
+    PointerTy
+    TextTy
+    ListTy(item: Ty)
+    MapTy(key: Ty, value: Ty)
+    SetTy(item: Ty)
+    DataTy(name: text, id: int, args: list[Ty])
+    UnionTy(members: list[Ty])
+    AnyTy(name: text)
+    TaskTy(params: list[Ty], returns: Ty)
+    SpawnedTy(item: Ty)
+    ChannelTy(item: Ty)
+    LockTy(item: Ty)
+    SocketTy
+    DatabaseTy
+    SqlTy
+    # A type parameter by its name and position. Index -1 is the open
+    # parameter of `partial`, which Rust writes as `usize::MAX`.
+    ParamTy(name: text, index: int)
+    ErrorTy
+
+## See `too_large`.
+public task max_type_parts() -> int
+    return 256
+
+public task join_names(tys: list[Ty]) -> text
+    var out = ""
+    for i in 0..tys.len()
+        out = if i == 0 then tys[i].name() else "{out}, {tys[i].name()}"
+    return out
+
+public task name(self: Ty) -> text
+    return match self
+        IntTy -> "int"
+        FloatTy -> "float"
+        BoolTy -> "bool"
+        ByteTy -> "byte"
+        I8Ty -> "i8"
+        I16Ty -> "i16"
+        I32Ty -> "i32"
+        U16Ty -> "u16"
+        U32Ty -> "u32"
+        U64Ty -> "u64"
+        F32Ty -> "f32"
+        NoneTy -> "none"
+        PointerTy -> "pointer[byte]"
+        TextTy -> "text"
+        ListTy(item) -> "list[{item.name()}]"
+        MapTy(key, value) -> "map[{key.name()}, {value.name()}]"
+        SetTy(item) -> "set[{item.name()}]"
+        SpawnedTy(item) -> "spawned[{item.name()}]"
+        ChannelTy(item) -> "channel[{item.name()}]"
+        LockTy(item) -> "lock[{item.name()}]"
+        SocketTy -> "socket"
+        DatabaseTy -> "database"
+        SqlTy -> "sql"
+        DataTy(name, _, args) -> if args is empty then name else "{name}[{join_names(args)}]"
+        ParamTy(name, _) -> name
+        AnyTy(name) -> "any {name}"
+        TaskTy(params, returns) -> task_name(params, returns)
+        UnionTy(members) -> union_name(members)
+        ErrorTy -> "unknown"
+
+task task_name(params: list[Ty], returns: Ty) -> text
+    if returns == NoneTy
+        return "task({join_names(params)})"
+    return "task({join_names(params)}) -> {returns.name()}"
+
+task union_name(members: list[Ty]) -> text
+    # A task's return type would otherwise take in what follows it.
+    var names: list[text] = []
+    for member in members
+        if member != NoneTy
+            match member
+                TaskTy(_, _) -> names.push("({member.name()})")
+                _ -> names.push(member.name())
+    if names.len() == members.len()
+        return join_texts(names, " or ")
+    if names.len() == 1
+        return "{names[0]}?"
+    names.push("none")
+    return join_texts(names, " or ")
+
+public task join_texts(items: list[text], separator: text) -> text
+    var out = ""
+    for i in 0..items.len()
+        out = if i == 0 then items[i] else "{out}{separator}{items[i]}"
+    return out
+
+## A parameter may turn out to be counted, so the checker keeps a place for
+## it. `mono.rs` drops what the real type does not need.
+public task is_counted(self: Ty) -> bool
+    return match self
+        TextTy -> true
+        SqlTy -> true
+        ParamTy(_, _) -> true
+        TaskTy(_, _) -> true
+        _ -> self.is_compound() or self.is_handle()
+
+## A thread, a channel, a lock, or a socket: a counted handle that only the
+## runtime reads, and that shows as its type.
+public task is_handle(self: Ty) -> bool
+    return match self
+        SpawnedTy(_) -> true
+        ChannelTy(_) -> true
+        LockTy(_) -> true
+        SocketTy -> true
+        DatabaseTy -> true
+        _ -> false
+
+## The type inside a list, set, thread, channel, or lock.
+public task item_of(self: Ty) -> Ty?
+    return match self
+        ListTy(item) -> item
+        SetTy(item) -> item
+        SpawnedTy(item) -> item
+        ChannelTy(item) -> item
+        LockTy(item) -> item
+        _ -> none
+
+## True if `part` appears anywhere in this type.
+public task mentions(self: Ty, part: Ty) -> bool
+    if self == part
+        return true
+    let item = self.item_of()
+    if item is Ty
+        return item.mentions(part)
+    match self
+        MapTy(key, value) ->
+            return key.mentions(part) or value.mentions(part)
+        DataTy(_, _, args) ->
+            return any_mentions(args, part)
+        UnionTy(members) ->
+            return any_mentions(members, part)
+        TaskTy(params, returns) ->
+            return returns.mentions(part) or any_mentions(params, part)
+        _ ->
+            return false
+
+task any_mentions(tys: list[Ty], part: Ty) -> bool
+    for ty in tys
+        if ty.mentions(part)
+            return true
+    return false
+
+## True if a type parameter appears anywhere in this type.
+public task has_param(self: Ty) -> bool
+    let item = self.item_of()
+    if item is Ty
+        return item.has_param()
+    match self
+        ParamTy(_, _) ->
+            return true
+        MapTy(key, value) ->
+            return key.has_param() or value.has_param()
+        DataTy(_, _, args) ->
+            return any_param(args)
+        UnionTy(members) ->
+            return any_param(members)
+        TaskTy(params, returns) ->
+            return returns.has_param() or any_param(params)
+        _ ->
+            return false
+
+public task any_param(tys: list[Ty]) -> bool
+    for ty in tys
+        if ty.has_param()
+            return true
+    return false
+
+## True if this type has over `max_type_parts` parts. Comparing a type walks
+## it as a tree, and `Pair[T, T]` doubles at each level, so a limit on depth
+## alone would let one type take exponential time.
+public task too_large(self: Ty) -> bool
+    var left = max_type_parts()
+    return not spend(self, change left)
+
+task spend(ty: Ty, change left: int) -> bool
+    if left == 0
+        return false
+    left -= 1
+    let item = ty.item_of()
+    if item is Ty
+        return spend(item, change left)
+    match ty
+        MapTy(key, value) ->
+            if not spend(key, change left)
+                return false
+            return spend(value, change left)
+        DataTy(_, _, args) ->
+            return spend_all(args, change left)
+        UnionTy(members) ->
+            return spend_all(members, change left)
+        TaskTy(params, returns) ->
+            if not spend_all(params, change left)
+                return false
+            return spend(returns, change left)
+        _ ->
+            return true
+
+task spend_all(tys: list[Ty], change left: int) -> bool
+    for ty in tys
+        if not spend(ty, change left)
+            return false
+    return true
+
+## True if one value could have both types, with the parameters of each free.
+## It ignores a parameter used twice, so `Pair[T, T]` counts as overlapping
+## `Pair[int, text]`. A false yes only asks for another name.
+public task may_overlap(self: Ty, other: Ty) -> bool
+    if is_param(self) or is_param(other)
+        return true
+    match self
+        UnionTy(a) -> return self.overlap_union(a, other)
+        _ -> return self.overlap_single(other)
+
+task overlap_union(self: Ty, members: list[Ty], other: Ty) -> bool
+    match other
+        UnionTy(_) -> return self == other or self.has_param() or other.has_param()
+        _ -> return union_overlap(members, other)
+
+task overlap_single(self: Ty, other: Ty) -> bool
+    match other
+        UnionTy(b) -> return union_overlap(b, self)
+        _ -> return self.overlap_plain(other)
+
+task overlap_plain(self: Ty, other: Ty) -> bool
+    let a = self.item_of()
+    let b = other.item_of()
+    if a is Ty and b is Ty and same_kind(self, other)
+        return a.may_overlap(b)
+    match self
+        MapTy(a, b) ->
+            match other
+                MapTy(c, d) -> return a.may_overlap(c) and b.may_overlap(d)
+                _ -> return false
+        DataTy(_, a, own) ->
+            match other
+                DataTy(_, b, args) -> return a == b and all_overlap(own, args)
+                _ -> return false
+        TaskTy(a, b) ->
+            match other
+                TaskTy(c, d) -> return a.len() == c.len() and b.may_overlap(d) and all_overlap(a, c)
+                _ -> return false
+        _ -> return self == other
+
+task all_overlap(a: list[Ty], b: list[Ty]) -> bool
+    for i in 0..a.len()
+        if not a[i].may_overlap(b[i])
+            return false
+    return true
+
+# `T?` is not a union for `T = none`.
+task union_overlap(members: list[Ty], single: Ty) -> bool
+    for m in members
+        if is_param(m) and not single.has_param()
+            return true
+    if single.has_param()
+        for m in members
+            if m.may_overlap(single)
+                return true
+    return false
+
+public task is_param(ty: Ty) -> bool
+    return match ty
+        ParamTy(_, _) -> true
+        _ -> false
+
+# The word for a list, set, thread, channel, or lock, or empty text.
+task kind_word(ty: Ty) -> text
+    return match ty
+        ListTy(_) -> "list"
+        SetTy(_) -> "set"
+        SpawnedTy(_) -> "spawned"
+        ChannelTy(_) -> "channel"
+        LockTy(_) -> "lock"
+        _ -> ""
+
+# True if both are lists, sets, threads, channels, or locks alike.
+task same_kind(a: Ty, b: Ty) -> bool
+    let word = kind_word(a)
+    return word is not empty and word == kind_word(b)
+
+## True for a value made of other values, whose comparing, showing, and
+## hashing are derived tasks.
+public task is_compound(self: Ty) -> bool
+    return match self
+        DataTy(_, _, _) -> true
+        UnionTy(_) -> true
+        AnyTy(_) -> true
+        _ -> self.is_collection()
+
+public task is_collection(self: Ty) -> bool
+    return match self
+        ListTy(_) -> true
+        MapTy(_, _) -> true
+        SetTy(_) -> true
+        _ -> false
+
+## The members of a union, or the type itself.
+public task members_of(self: Ty) -> list[Ty]
+    return match self
+        UnionTy(members) -> members
+        _ -> [self]
+
+## True for a value that the runtime can hash and compare as a key.
+public task is_key(self: Ty) -> bool
+    return self.is_integer() or self == BoolTy or self == TextTy
+
+public task is_integer(self: Ty) -> bool
+    return match self
+        IntTy -> true
+        ByteTy -> true
+        I8Ty -> true
+        I16Ty -> true
+        I32Ty -> true
+        U16Ty -> true
+        U32Ty -> true
+        U64Ty -> true
+        _ -> false
+
+public task is_float(self: Ty) -> bool
+    return self == FloatTy or self == F32Ty
+
+public task is_number(self: Ty) -> bool
+    return self.is_integer() or self.is_float()
+
+## The number of bits in an integer type.
+public task bits(self: Ty) -> int
+    return match self
+        ByteTy -> 8
+        I8Ty -> 8
+        I16Ty -> 16
+        U16Ty -> 16
+        I32Ty -> 32
+        U32Ty -> 32
+        _ -> 64
+
+## True if `tys` holds `ty`.
+public task holds(tys: list[Ty], ty: Ty) -> bool
+    for known in tys
+        if known == ty
+            return true
+    return false
+
+## The table of union members, since a union keeps its members flat and in
+## table order. A position in `ids` is the tag of that type.
+public type Types
+    ids: list[Ty]
+
+## The tag of a member of a union.
+public task id(self: Types, ty: Ty) -> int
+    for i in 0..self.ids.len()
+        if self.ids[i] == ty
+            return i
+    return -1
+
+## The tag of a type that an `any` holds, which may be in no union.
+public task tag(change self: Types, ty: Ty) -> int
+    let found = self.id(ty)
+    if found >= 0
+        return found
+    self.ids.push(ty)
+    return self.ids.len() - 1
+
+## Flattens and orders members into one type. One member is that member.
+public task union(change self: Types, members: list[Ty]) -> Ty
+    var flat: list[Ty] = []
+    var ids: list[int] = []
+    for member in members
+        if member == ErrorTy
+            return ErrorTy
+        for ty in member.members_of()
+            if not holds(flat, ty)
+                let tag = self.tag(ty)
+                # Insertion by tag keeps `flat` sorted.
+                var at = flat.len()
+                while at > 0 and ids[at - 1] > tag
+                    at -= 1
+                flat = insert_ty(flat, at, ty)
+                ids = insert_int(ids, at, tag)
+    if flat is empty
+        return ErrorTy
+    if flat.len() == 1
+        return flat[0]
+    return UnionTy(members: flat)
+
+task insert_ty(items: list[Ty], at: int, item: Ty) -> list[Ty]
+    var out: list[Ty] = []
+    for i in 0..items.len()
+        if i == at
+            out.push(item)
+        out.push(items[i])
+    if at == items.len()
+        out.push(item)
+    return out
+
+task insert_int(items: list[int], at: int, item: int) -> list[int]
+    var out: list[int] = []
+    for i in 0..items.len()
+        if i == at
+            out.push(item)
+        out.push(items[i])
+    if at == items.len()
+        out.push(item)
+    return out
+
+## Replaces each `ParamTy(_, i)` with `args[i]`, in one pass, so that a
+## parameter inside an argument stays as it is.
+public task subst(change self: Types, ty: Ty, args: list[Ty]) -> Ty
+    if not ty.has_param()
+        return ty
+    match ty
+        ParamTy(_, index) ->
+            return args[index]
+        ListTy(item) ->
+            return ListTy(item: self.subst(item, args))
+        SetTy(item) ->
+            return SetTy(item: self.subst(item, args))
+        SpawnedTy(item) ->
+            return SpawnedTy(item: self.subst(item, args))
+        ChannelTy(item) ->
+            return ChannelTy(item: self.subst(item, args))
+        LockTy(item) ->
+            return LockTy(item: self.subst(item, args))
+        MapTy(key, value) ->
+            let k = self.subst(key, args)
+            return MapTy(key: k, value: self.subst(value, args))
+        DataTy(name, id, own) ->
+            return DataTy(name: name, id: id, args: self.subst_all(own, args))
+        TaskTy(params, returns) ->
+            let p = self.subst_all(params, args)
+            return TaskTy(params: p, returns: self.subst(returns, args))
+        UnionTy(members) ->
+            let found = self.subst_all(members, args)
+            return self.union(found)
+        _ ->
+            return ty
+
+public task subst_all(change self: Types, tys: list[Ty], args: list[Ty]) -> list[Ty]
+    var out: list[Ty] = []
+    for ty in tys
+        out.push(self.subst(ty, args))
+    return out
+
+## A type with what is known so far of the type parameters in it, or `none`
+## if one is still open.
+public task partial(change self: Types, pattern: Ty, known: list[Ty?]) -> Ty?
+    var all = true
+    var args: list[Ty] = []
+    let open = ParamTy(name: "", index: -1)
+    for found in known
+        match found
+            ty: Ty -> args.push(ty)
+            none ->
+                all = false
+                args.push(open)
+    if all
+        return self.subst(pattern, args)
+    if not pattern.has_param()
+        return pattern
+    let found = self.subst(pattern, args)
+    if found.mentions(open)
+        return none
+    return found
+
+## What `ty` shows about `count` type parameters, if it fits a receiver of
+## type `pattern`. Both stages use this, so they pick the same task.
+public task fit(change self: Types, pattern: Ty, ty: Ty, count: int) -> list[Ty?]?
+    var known: list[Ty?] = []
+    for i in 0..count
+        known.push(none)
+    self.unify(pattern, ty, change known)
+    let found = self.partial(pattern, known)
+    if found is Ty and found == ty
+        return known
+    return none
+
+## Fills `known` with what `ty` shows about the parameters of `pattern`. A
+## parameter keeps its first answer, so a later value that disagrees fails as
+## a plain type error. Only `pattern` holds variables: a parameter in `ty`
+## belongs to the caller, and is a type like any other.
+public task unify(change self: Types, pattern: Ty, ty: Ty, change known: list[Ty?])
+    if ty == ErrorTy
+        return
+    match pattern
+        ParamTy(_, index) ->
+            if known[index] is none
+                known[index] = ty
+        _ ->
+            self.unify_parts(pattern, ty, change known)
+
+task unify_parts(change self: Types, pattern: Ty, ty: Ty, change known: list[Ty?])
+    let a = pattern.item_of()
+    let b = ty.item_of()
+    if a is Ty and b is Ty and same_kind(pattern, ty)
+        self.unify(a, b, change known)
+        return
+    match pattern
+        MapTy(a, b) ->
+            match ty
+                MapTy(c, d) ->
+                    self.unify(a, c, change known)
+                    self.unify(b, d, change known)
+                _ -> return
+        DataTy(_, a, own) ->
+            match ty
+                DataTy(_, b, args) ->
+                    if a == b
+                        for i in 0..own.len()
+                            self.unify(own[i], args[i], change known)
+                _ -> return
+        TaskTy(a, b) ->
+            match ty
+                TaskTy(c, d) ->
+                    if a.len() == c.len()
+                        for i in 0..a.len()
+                            self.unify(a[i], c[i], change known)
+                        self.unify(b, d, change known)
+                _ -> return
+        UnionTy(members) ->
+            self.unify_union(members, ty, change known)
+        _ -> return
+
+task unify_union(change self: Types, members: list[Ty], ty: Ty, change known: list[Ty?])
+    var rest: list[Ty] = []
+    for m in ty.members_of()
+        if not holds(members, m)
+            rest.push(m)
+    var open: list[Ty] = []
+    for m in members
+        if m.has_param()
+            open.push(m)
+    if open.len() == 1 and is_param(open[0])
+        if rest is not empty
+            let joined = self.union(rest)
+            self.unify(open[0], joined, change known)
+    else
+        for member in open
+            for t in rest
+                self.unify(member, t, change known)
+
+## The shape of a `type` or `choice`. Field types use its own parameters.
+public type Shape
+    variants: list[ShapeVariant]
+    is_choice: bool
+
+## A `type` has one, with its own name.
+public type ShapeVariant
+    name: text
+    fields: list[ShapeField]
+    # The default of each field, if it has one. Literals, so no locals.
+    defaults: list[Expr?]
+
+public type ShapeField
+    name: text
+    ty: Ty
+
+## The `type` or `choice` reads from JSON text, for a variant with no fields,
+## and from an object. A `type` is an object, even with no fields.
+public type JsonForms
+    bare: bool
+    full: bool
+
+public task json_forms(self: Shape) -> JsonForms
+    var bare = false
+    var full = false
+    for variant in self.variants
+        if variant.fields is empty
+            bare = true
+        else
+            full = true
+    return JsonForms(bare: self.is_choice and bare, full: not self.is_choice or full)
+
+## The variants of `Value` in `std/json.lcd` that a value of this type reads
+## from, so a union can pick its member with no guessing.
+public task json_tags(ty: Ty, datas: list[Shape]) -> list[int]
+    let null = 0
+    let flag = 1
+    let whole = 2
+    let real = 3
+    let str = 4
+    let items = 5
+    let fields = 6
+    match ty
+        NoneTy ->
+            return [null]
+        BoolTy ->
+            return [flag]
+        TextTy ->
+            return [str]
+        ListTy(_) ->
+            return [items]
+        SetTy(_) ->
+            return [items]
+        MapTy(_, _) ->
+            return [fields]
+        DataTy(_, id, _) ->
+            let forms = datas[id].json_forms()
+            var tags: list[int] = []
+            if forms.bare
+                tags.push(str)
+            if forms.full
+                tags.push(fields)
+            return tags
+        _ ->
+            if ty.is_number()
+                return [whole, real]
+            return []
+
+## The tasks that hash a compound key and compare two, which a map keeps and
+## the runtime calls. `mono.rs` fills this in.
+public type KeyTasks
+    hash: int
+    equal: int
+
+public type Expr
+    kind: ExprKind
+    ty: Ty
+    span: diag.Span
+
+## A slot of a new record or task value, and the value that fills it.
+public type Slot
+    slot: int
+    value: Expr
+
+public type MapEntry
+    key: Expr
+    value: Expr
+
+public choice ExprKind
+    IntExpr(value: int)
+    FloatExpr(value: float)
+    BoolExpr(value: bool)
+    NoneExpr
+    LocalExpr(local: int)
+    ChangeExpr(local: int)
+    CallExpr(id: int, args: list[Ty], values: list[Expr])
+    CallValueExpr(callee: Expr, values: list[Expr])
+    ClosureExpr(id: int, args: list[Ty], counted: int, fields: list[Slot])
+    CaptureExpr(at: int)
+    NegExpr(inner: Expr)
+    SqrtExpr(inner: Expr)
+    NotExpr(inner: Expr)
+    BinaryExpr(op: text, left: Expr, right: Expr)
+    IfExpr(condition: Expr, yes: Expr, otherwise: Expr)
+    ConvertExpr(inner: Expr)
+    WrappingExpr(op: text, left: Expr, right: Expr)
+    TextExpr(value: text)
+    ToTextExpr(inner: Expr)
+    JoinExpr(values: list[Expr])
+    TextQuoteExpr(inner: Expr)
+    TextLenExpr(inner: Expr)
+    ForeignExpr(symbol: text, values: list[Expr])
+    ListPointerExpr(inner: Expr)
+    TextIsEmptyExpr(inner: Expr)
+    TextSliceExpr(value: Expr, start: Expr, end: Expr)
+    TextByteLenExpr(inner: Expr)
+    TextCharAtExpr(value: Expr, at: Expr)
+    TextBytesExpr(inner: Expr)
+    ListOfExpr(values: list[Expr])
+    ListSliceExpr(value: Expr, start: Expr, end: Expr)
+    MapOfExpr(entries: list[MapEntry], keys: KeyTasks?)
+    SetOfExpr(inner: Expr, keys: KeyTasks?)
+    LenExpr(inner: Expr)
+    ListGetExpr(value: Expr, at: Expr)
+    ListHasExpr(item: Expr, value: Expr)
+    MapGetExpr(value: Expr, key: Expr)
+    MapHasExpr(key: Expr, value: Expr)
+    MapNextExpr(value: Expr, at: Expr)
+    MapKeyExpr(value: Expr, at: Expr)
+    MapValueExpr(value: Expr, at: Expr)
+    MapFindExpr(value: Expr, key: Expr)
+    NewExpr(tag: int, counted: int, fields: list[Slot])
+    FieldExpr(inner: Expr, slot: int)
+    TagExpr(inner: Expr)
+    TagInExpr(inner: Expr, tags: list[int])
+    MemberExpr(inner: Expr, variant: int, field: int)
+    WrapExpr(inner: Expr)
+    ViewExpr(inner: Expr)
+    HoldsExpr(inner: Expr, tys: list[Ty])
+    MethodExpr(name: text, values: list[Expr])
+    # `op` is "Int", "Text", or "Sum".
+    HashExpr(op: text, left: Expr, right: Expr)
+    SeqExpr(setup: list[Stmt], inner: Expr)
+    TempExpr(local: int, inner: Expr)
+    MoveExpr(local: int)
+    RetainExpr(inner: Expr)
+
+public type Branch
+    condition: Expr
+    body: list[Stmt]
+
+public choice Stmt
+    SetStmt(local: int, value: Expr)
+    BindStmt(local: int, value: Expr)
+    # `op` is the name of a `Update` of mir.rs, such as "ListPush".
+    UpdateStmt(local: int, op: text, args: list[Expr], span: diag.Span)
+    ClearStmt(local: int)
+    BlockStmt(body: list[Stmt])
+    IfStmt(branches: list[Branch], otherwise: list[Stmt])
+    WhileStmt(condition: Expr, body: list[Stmt])
+    ForStmt(local: int, start: Expr, end: Expr, inclusive: bool, body: list[Stmt])
+    ReturnStmt(value: Expr)
+    ExitStmt(value: Expr)
+    BreakStmt
+    ContinueStmt
+    PrintStmt(value: Expr)
+    PrintTextStmt(value: text)
+    PlaceholderStmt(span: diag.Span)
+    TrapStmt(message: text, span: diag.Span)
+    FailStmt(value: Expr, span: diag.Span)
+    UnreachableStmt
+    ExprStmt(value: Expr)
+
+public type Task
+    # What a stack trace calls it. Empty for a derived task.
+    name: text
+    params: int
+    type_params: int
+    returns: Ty
+    locals: list[Ty]
+    body: list[Stmt]
+    span: diag.Span
+    captures: list[Ty] = []
+    # The parameters passed by `change`, in order.
+    changes: list[int] = []
+    # The `take` parameters whose caller gives a count.
+    takes: list[int] = []
+    # Counted locals that hold no count. Added by the ownership pass.
+    borrowed: list[int] = []
+
+public type TestCase
+    name: text
+    # Its task.
+    id: int
+    span: diag.Span
+
+public type UnsafeSite
+    kind: text
+    span: diag.Span
+
+public type Program
+    tasks: list[Task]
+    tests: list[TestCase]
+    unsafe_sites: list[UnsafeSite]
+    main: Task
+    types: Types
+    datas: list[Shape]
+    # The tasks with a `self` parameter, by name.
+    methods: map[text, list[int]]
+
+## The values that an expression holds, in the order that mir.rs visits
+## them. A `SeqExpr` gives its value only: its statements are the caller's.
+public task parts(self: Expr) -> list[Expr]
+    return match self.kind
+        CallExpr(_, _, values) -> values
+        MethodExpr(_, values) -> values
+        JoinExpr(values) -> values
+        ForeignExpr(_, values) -> values
+        ListOfExpr(values) -> values
+        CallValueExpr(callee, values) -> prepend_expr(callee, values)
+        NewExpr(_, _, fields) -> slot_values(fields)
+        ClosureExpr(_, _, _, fields) -> slot_values(fields)
+        MapOfExpr(entries, _) -> entry_values(entries)
+        NegExpr(a) -> [a]
+        SqrtExpr(a) -> [a]
+        NotExpr(a) -> [a]
+        ConvertExpr(a) -> [a]
+        ToTextExpr(a) -> [a]
+        TextQuoteExpr(a) -> [a]
+        TextLenExpr(a) -> [a]
+        ListPointerExpr(a) -> [a]
+        TextIsEmptyExpr(a) -> [a]
+        TextByteLenExpr(a) -> [a]
+        TextBytesExpr(a) -> [a]
+        SetOfExpr(a, _) -> [a]
+        FieldExpr(a, _) -> [a]
+        TagExpr(a) -> [a]
+        TagInExpr(a, _) -> [a]
+        MemberExpr(a, _, _) -> [a]
+        WrapExpr(a) -> [a]
+        ViewExpr(a) -> [a]
+        HoldsExpr(a, _) -> [a]
+        TempExpr(_, a) -> [a]
+        RetainExpr(a) -> [a]
+        LenExpr(a) -> [a]
+        SeqExpr(_, a) -> [a]
+        BinaryExpr(_, a, b) -> [a, b]
+        WrappingExpr(_, a, b) -> [a, b]
+        HashExpr(_, a, b) -> [a, b]
+        TextCharAtExpr(a, b) -> [a, b]
+        ListGetExpr(a, b) -> [a, b]
+        ListHasExpr(a, b) -> [a, b]
+        MapGetExpr(a, b) -> [a, b]
+        MapHasExpr(a, b) -> [a, b]
+        MapNextExpr(a, b) -> [a, b]
+        MapKeyExpr(a, b) -> [a, b]
+        MapValueExpr(a, b) -> [a, b]
+        MapFindExpr(a, b) -> [a, b]
+        IfExpr(a, b, c) -> [a, b, c]
+        TextSliceExpr(a, b, c) -> [a, b, c]
+        ListSliceExpr(a, b, c) -> [a, b, c]
+        _ -> []
+
+task prepend_expr(first: Expr, rest: list[Expr]) -> list[Expr]
+    var out = [first]
+    for value in rest
+        out.push(value)
+    return out
+
+task slot_values(fields: list[Slot]) -> list[Expr]
+    var out: list[Expr] = []
+    for field in fields
+        out.push(field.value)
+    return out
+
+task entry_values(entries: list[MapEntry]) -> list[Expr]
+    var out: list[Expr] = []
+    for entry in entries
+        out.push(entry.key)
+        out.push(entry.value)
+    return out
+
+task with_slots(fields: list[Slot], values: list[Expr]) -> list[Slot]
+    var out: list[Slot] = []
+    for i in 0..fields.len()
+        out.push(Slot(slot: fields[i].slot, value: values[i]))
+    return out
+
+## The same expression, with `values` in place of what `parts` gave.
+public task with_parts(self: Expr, values: list[Expr]) -> Expr
+    let kind = match self.kind
+        CallExpr(id, args, _) -> CallExpr(id: id, args: args, values: values)
+        MethodExpr(name, _) -> MethodExpr(name: name, values: values)
+        JoinExpr(_) -> JoinExpr(values: values)
+        ForeignExpr(symbol, _) -> ForeignExpr(symbol: symbol, values: values)
+        ListOfExpr(_) -> ListOfExpr(values: values)
+        CallValueExpr(_, _) -> CallValueExpr(callee: values[0], values: values[1..values.len()])
+        NewExpr(tag, counted, fields) -> NewExpr(tag: tag, counted: counted, fields: with_slots(fields, values))
+        ClosureExpr(id, args, counted, fields) -> ClosureExpr(id: id, args: args, counted: counted, fields: with_slots(fields, values))
+        MapOfExpr(entries, keys) -> MapOfExpr(entries: with_entries(values), keys: keys)
+        NegExpr(_) -> NegExpr(inner: values[0])
+        SqrtExpr(_) -> SqrtExpr(inner: values[0])
+        NotExpr(_) -> NotExpr(inner: values[0])
+        ConvertExpr(_) -> ConvertExpr(inner: values[0])
+        ToTextExpr(_) -> ToTextExpr(inner: values[0])
+        TextQuoteExpr(_) -> TextQuoteExpr(inner: values[0])
+        TextLenExpr(_) -> TextLenExpr(inner: values[0])
+        ListPointerExpr(_) -> ListPointerExpr(inner: values[0])
+        TextIsEmptyExpr(_) -> TextIsEmptyExpr(inner: values[0])
+        TextByteLenExpr(_) -> TextByteLenExpr(inner: values[0])
+        TextBytesExpr(_) -> TextBytesExpr(inner: values[0])
+        SetOfExpr(_, keys) -> SetOfExpr(inner: values[0], keys: keys)
+        FieldExpr(_, slot) -> FieldExpr(inner: values[0], slot: slot)
+        TagExpr(_) -> TagExpr(inner: values[0])
+        TagInExpr(_, tags) -> TagInExpr(inner: values[0], tags: tags)
+        MemberExpr(_, variant, field) -> MemberExpr(inner: values[0], variant: variant, field: field)
+        WrapExpr(_) -> WrapExpr(inner: values[0])
+        ViewExpr(_) -> ViewExpr(inner: values[0])
+        HoldsExpr(_, tys) -> HoldsExpr(inner: values[0], tys: tys)
+        TempExpr(local, _) -> TempExpr(local: local, inner: values[0])
+        RetainExpr(_) -> RetainExpr(inner: values[0])
+        LenExpr(_) -> LenExpr(inner: values[0])
+        SeqExpr(setup, _) -> SeqExpr(setup: setup, inner: values[0])
+        BinaryExpr(op, _, _) -> BinaryExpr(op: op, left: values[0], right: values[1])
+        WrappingExpr(op, _, _) -> WrappingExpr(op: op, left: values[0], right: values[1])
+        HashExpr(op, _, _) -> HashExpr(op: op, left: values[0], right: values[1])
+        TextCharAtExpr(_, _) -> TextCharAtExpr(value: values[0], at: values[1])
+        ListGetExpr(_, _) -> ListGetExpr(value: values[0], at: values[1])
+        ListHasExpr(_, _) -> ListHasExpr(item: values[0], value: values[1])
+        MapGetExpr(_, _) -> MapGetExpr(value: values[0], key: values[1])
+        MapHasExpr(_, _) -> MapHasExpr(key: values[0], value: values[1])
+        MapNextExpr(_, _) -> MapNextExpr(value: values[0], at: values[1])
+        MapKeyExpr(_, _) -> MapKeyExpr(value: values[0], at: values[1])
+        MapValueExpr(_, _) -> MapValueExpr(value: values[0], at: values[1])
+        MapFindExpr(_, _) -> MapFindExpr(value: values[0], key: values[1])
+        IfExpr(_, _, _) -> IfExpr(condition: values[0], yes: values[1], otherwise: values[2])
+        TextSliceExpr(_, _, _) -> TextSliceExpr(value: values[0], start: values[1], end: values[2])
+        ListSliceExpr(_, _, _) -> ListSliceExpr(value: values[0], start: values[1], end: values[2])
+        _ -> self.kind
+    var out = self
+    out.kind = kind
+    return out
+
+task with_entries(values: list[Expr]) -> list[MapEntry]
+    var out: list[MapEntry] = []
+    var i = 0
+    while i + 1 < values.len()
+        out.push(MapEntry(key: values[i], value: values[i + 1]))
+        i += 2
+    return out

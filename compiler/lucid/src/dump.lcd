@@ -5,6 +5,7 @@ use ./ast
 use ./diag
 use ./lexer
 use ./manifest
+use ./mir
 use ./resolve
 
 # One node per line, indented two spaces per level. A line holds a name and
@@ -625,3 +626,411 @@ task pattern(change out: Out, item: ast.Pattern)
             out.depth += 1
             ty_node(change out, ty)
             out.depth -= 1
+
+# A type as atoms in prefix form.
+task ty(change self: Out, ty: mir.Ty)
+    match ty
+        ListTy(item) ->
+            self.atom("list")
+            self.ty(item)
+        MapTy(key, value) ->
+            self.atom("map")
+            self.ty(key)
+            self.ty(value)
+        SetTy(item) ->
+            self.atom("set")
+            self.ty(item)
+        SpawnedTy(item) ->
+            self.atom("spawned")
+            self.ty(item)
+        ChannelTy(item) ->
+            self.atom("channel")
+            self.ty(item)
+        LockTy(item) ->
+            self.atom("lock")
+            self.ty(item)
+        DataTy(name, id, args) ->
+            self.atom("data")
+            self.text(name)
+            self.count(id)
+            self.tys(args)
+        UnionTy(members) ->
+            self.atom("union")
+            self.tys(members)
+        AnyTy(name) ->
+            self.atom("any")
+            self.text(name)
+        TaskTy(params, returns) ->
+            self.atom("task")
+            self.tys(params)
+            self.ty(returns)
+        ParamTy(name, at) ->
+            self.atom("param")
+            self.text(name)
+            # The open parameter, which Rust numbers `usize::MAX`.
+            self.atom(if at < 0 then "18446744073709551615" else "{at}")
+        ErrorTy -> self.atom("error")
+        PointerTy -> self.atom("pointer")
+        _ -> self.atom(ty.name())
+
+task tys(change self: Out, tys: list[mir.Ty])
+    self.count(tys.len())
+    for item in tys
+        self.ty(item)
+
+task ints(change self: Out, values: list[int])
+    self.count(values.len())
+    for value in values
+        self.count(value)
+
+## The program that the checker gives, or the monomorphizer.
+public task program(p: mir.Program) -> text
+    var out = new_out()
+    out.line("Program")
+    out.count(p.datas.len())
+    out.count(p.tasks.len())
+    out.count(p.tests.len())
+    out.tys(p.types.ids)
+    out.depth += 1
+    for shape in p.datas
+        out.line("Shape")
+        out.flag(shape.is_choice)
+        out.count(shape.variants.len())
+        out.depth += 1
+        for variant in shape.variants
+            out.line("Variant")
+            out.text(variant.name)
+            out.count(variant.fields.len())
+            for field in variant.fields
+                out.text(field.name)
+                out.ty(field.ty)
+            out.depth += 1
+            for default in variant.defaults
+                out.maybe_value(default)
+            out.depth -= 1
+        out.depth -= 1
+    for t in p.tasks
+        out.mir_task(t)
+    out.mir_task(p.main)
+    for case in p.tests
+        out.line("Test")
+        out.text(case.name)
+        out.count(case.id)
+        out.span(case.span)
+    out.depth -= 1
+    return out.finish()
+
+task mir_task(change self: Out, t: mir.Task)
+    self.line("Task")
+    self.text(t.name)
+    self.span(t.span)
+    self.count(t.params)
+    self.count(t.type_params)
+    self.ty(t.returns)
+    self.tys(t.locals)
+    self.tys(t.captures)
+    self.ints(t.changes)
+    self.ints(t.takes)
+    self.ints(t.borrowed)
+    self.count(t.body.len())
+    self.mir_body(t.body)
+
+# Statements one level deeper.
+task mir_body(change self: Out, body: list[mir.Stmt])
+    self.depth += 1
+    for item in body
+        self.mir_stmt(item)
+    self.depth -= 1
+
+# A value one level deeper.
+task nested(change self: Out, value: mir.Expr)
+    self.depth += 1
+    self.value_node(value)
+    self.depth -= 1
+
+task mir_stmt(change self: Out, item: mir.Stmt)
+    match item
+        SetStmt(local, value) ->
+            self.line("Set")
+            self.count(local)
+            self.nested(value)
+        BindStmt(local, value) ->
+            self.line("Bind")
+            self.count(local)
+            self.nested(value)
+        UpdateStmt(local, op, args, span) ->
+            self.line("Update")
+            self.count(local)
+            self.atom(op)
+            self.span(span)
+            self.count(args.len())
+            self.values(args)
+        ClearStmt(local) ->
+            self.line("Clear")
+            self.count(local)
+        BlockStmt(body) ->
+            self.line("Block")
+            self.count(body.len())
+            self.mir_body(body)
+        IfStmt(branches, otherwise) ->
+            self.line("If")
+            self.count(branches.len())
+            self.count(otherwise.len())
+            self.depth += 1
+            for branch in branches
+                self.line("Branch")
+                self.count(branch.body.len())
+                self.depth += 1
+                self.value_node(branch.condition)
+                for s in branch.body
+                    self.mir_stmt(s)
+                self.depth -= 1
+            for s in otherwise
+                self.mir_stmt(s)
+            self.depth -= 1
+        WhileStmt(condition, body) ->
+            self.line("While")
+            self.count(body.len())
+            self.depth += 1
+            self.value_node(condition)
+            for s in body
+                self.mir_stmt(s)
+            self.depth -= 1
+        ForStmt(local, start, end, inclusive, body) ->
+            self.line("For")
+            self.count(local)
+            self.flag(inclusive)
+            self.count(body.len())
+            self.depth += 1
+            self.value_node(start)
+            self.value_node(end)
+            for s in body
+                self.mir_stmt(s)
+            self.depth -= 1
+        ReturnStmt(value) ->
+            self.line("Return")
+            self.nested(value)
+        ExitStmt(value) ->
+            self.line("Exit")
+            self.nested(value)
+        PrintStmt(value) ->
+            self.line("Print")
+            self.nested(value)
+        ExprStmt(value) ->
+            self.line("Expr")
+            self.nested(value)
+        FailStmt(value, span) ->
+            self.line("Fail")
+            self.span(span)
+            self.nested(value)
+        BreakStmt -> self.line("Break")
+        ContinueStmt -> self.line("Continue")
+        UnreachableStmt -> self.line("Unreachable")
+        PrintTextStmt(value) ->
+            self.line("PrintText")
+            self.text(value)
+        PlaceholderStmt(span) ->
+            self.line("Placeholder")
+            self.span(span)
+        TrapStmt(message, span) ->
+            self.line("Trap")
+            self.text(message)
+            self.span(span)
+
+task maybe_value(change self: Out, value: mir.Expr?)
+    match value
+        found: mir.Expr -> self.value_node(found)
+        none -> self.absent()
+
+task key_tasks(change self: Out, keys: mir.KeyTasks?)
+    match keys
+        found: mir.KeyTasks ->
+            self.count(found.hash)
+            self.count(found.equal)
+        none -> self.atom("-")
+
+task slots(change self: Out, fields: list[mir.Slot])
+    self.depth += 1
+    for field in fields
+        self.line("Slot")
+        self.count(field.slot)
+        self.nested(field.value)
+    self.depth -= 1
+
+task head(change self: Out, name: text, value: mir.Expr)
+    self.line(name)
+    self.ty(value.ty)
+    self.span(value.span)
+
+task values(change self: Out, values: list[mir.Expr])
+    self.depth += 1
+    for value in values
+        self.value_node(value)
+    self.depth -= 1
+
+task one(change self: Out, name: text, value: mir.Expr, a: mir.Expr)
+    self.head(name, value)
+    self.nested(a)
+
+task two(change self: Out, name: text, value: mir.Expr, a: mir.Expr, b: mir.Expr)
+    self.head(name, value)
+    self.values([a, b])
+
+task three(change self: Out, name: text, value: mir.Expr, a: mir.Expr, b: mir.Expr, c: mir.Expr)
+    self.head(name, value)
+    self.values([a, b, c])
+
+task value_node(change self: Out, v: mir.Expr)
+    match v.kind
+        IntExpr(n) ->
+            self.head("Int", v)
+            self.count(n)
+        FloatExpr(x) ->
+            self.head("Float", v)
+            self.atom("{x}")
+        BoolExpr(b) ->
+            self.head("Bool", v)
+            self.flag(b)
+        NoneExpr -> self.head("None", v)
+        LocalExpr(local) ->
+            self.head("Local", v)
+            self.count(local)
+        ChangeExpr(local) ->
+            self.head("Change", v)
+            self.count(local)
+        CaptureExpr(at) ->
+            self.head("Capture", v)
+            self.count(at)
+        MoveExpr(local) ->
+            self.head("Move", v)
+            self.count(local)
+        TextExpr(value) ->
+            self.head("Text", v)
+            self.text(value)
+        CallExpr(id, args, values) ->
+            self.head("Call", v)
+            self.count(id)
+            self.tys(args)
+            self.count(values.len())
+            self.values(values)
+        CallValueExpr(callee, values) ->
+            self.head("CallValue", v)
+            self.count(values.len())
+            self.depth += 1
+            self.value_node(callee)
+            for value in values
+                self.value_node(value)
+            self.depth -= 1
+        ClosureExpr(id, args, counted, fields) ->
+            self.head("Closure", v)
+            self.count(id)
+            self.tys(args)
+            self.count(counted)
+            self.count(fields.len())
+            self.slots(fields)
+        NewExpr(tag, counted, fields) ->
+            self.head("New", v)
+            self.count(tag)
+            self.count(counted)
+            self.count(fields.len())
+            self.slots(fields)
+        JoinExpr(values) ->
+            self.head("Join", v)
+            self.count(values.len())
+            self.values(values)
+        ListOfExpr(values) ->
+            self.head("ListOf", v)
+            self.count(values.len())
+            self.values(values)
+        ForeignExpr(symbol, values) ->
+            self.head("Foreign", v)
+            self.text(symbol)
+            self.count(values.len())
+            self.values(values)
+        MethodExpr(name, values) ->
+            self.head("Method", v)
+            self.text(name)
+            self.count(values.len())
+            self.values(values)
+        MapOfExpr(entries, keys) ->
+            self.head("MapOf", v)
+            self.count(entries.len())
+            self.key_tasks(keys)
+            self.depth += 1
+            for entry in entries
+                self.line("Entry")
+                self.values([entry.key, entry.value])
+            self.depth -= 1
+        SetOfExpr(inner, keys) ->
+            self.head("SetOf", v)
+            self.key_tasks(keys)
+            self.nested(inner)
+        FieldExpr(inner, slot) ->
+            self.head("Field", v)
+            self.count(slot)
+            self.nested(inner)
+        TagInExpr(inner, tags) ->
+            self.head("TagIn", v)
+            self.ints(tags)
+            self.nested(inner)
+        MemberExpr(inner, variant, field) ->
+            self.head("Member", v)
+            self.count(variant)
+            self.count(field)
+            self.nested(inner)
+        HoldsExpr(inner, tys) ->
+            self.head("Holds", v)
+            self.tys(tys)
+            self.nested(inner)
+        TempExpr(local, inner) ->
+            self.head("Temp", v)
+            self.count(local)
+            self.nested(inner)
+        BinaryExpr(op, left, right) ->
+            self.head("Binary", v)
+            self.atom(op)
+            self.values([left, right])
+        WrappingExpr(op, left, right) ->
+            self.head("Wrapping", v)
+            self.atom(op)
+            self.values([left, right])
+        HashExpr(op, left, right) ->
+            self.head("Hash", v)
+            self.atom(op)
+            self.values([left, right])
+        SeqExpr(setup, inner) ->
+            self.head("Seq", v)
+            self.count(setup.len())
+            self.depth += 1
+            for s in setup
+                self.mir_stmt(s)
+            self.value_node(inner)
+            self.depth -= 1
+        NegExpr(a) -> self.one("Neg", v, a)
+        SqrtExpr(a) -> self.one("Sqrt", v, a)
+        NotExpr(a) -> self.one("Not", v, a)
+        ConvertExpr(a) -> self.one("Convert", v, a)
+        ToTextExpr(a) -> self.one("ToText", v, a)
+        TextQuoteExpr(a) -> self.one("TextQuote", v, a)
+        TextLenExpr(a) -> self.one("TextLen", v, a)
+        ListPointerExpr(a) -> self.one("ListPointer", v, a)
+        TextIsEmptyExpr(a) -> self.one("TextIsEmpty", v, a)
+        TextByteLenExpr(a) -> self.one("TextByteLen", v, a)
+        TextBytesExpr(a) -> self.one("TextBytes", v, a)
+        LenExpr(a) -> self.one("Len", v, a)
+        TagExpr(a) -> self.one("Tag", v, a)
+        WrapExpr(a) -> self.one("Wrap", v, a)
+        ViewExpr(a) -> self.one("View", v, a)
+        RetainExpr(a) -> self.one("Retain", v, a)
+        TextCharAtExpr(a, b) -> self.two("TextCharAt", v, a, b)
+        ListGetExpr(a, b) -> self.two("ListGet", v, a, b)
+        ListHasExpr(a, b) -> self.two("ListHas", v, a, b)
+        MapGetExpr(a, b) -> self.two("MapGet", v, a, b)
+        MapHasExpr(a, b) -> self.two("MapHas", v, a, b)
+        MapNextExpr(a, b) -> self.two("MapNext", v, a, b)
+        MapKeyExpr(a, b) -> self.two("MapKey", v, a, b)
+        MapValueExpr(a, b) -> self.two("MapValue", v, a, b)
+        MapFindExpr(a, b) -> self.two("MapFind", v, a, b)
+        IfExpr(a, b, c) -> self.three("If", v, a, b, c)
+        TextSliceExpr(a, b, c) -> self.three("TextSlice", v, a, b, c)
+        ListSliceExpr(a, b, c) -> self.three("ListSlice", v, a, b, c)

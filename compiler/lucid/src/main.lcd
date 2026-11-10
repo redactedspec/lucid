@@ -2,11 +2,14 @@
 # front end one stage at a time, and each stage is checked against the Rust
 # one by its dump, by decision 215. Built so far: `check` with
 # `LUCID_DUMP=tokens` or `ast`, which lexes and parses one file, with no
-# imports. See "Self-hosting" in docs/compiler.md.
+# imports, `resolved`, which loads the whole program, and `checked`, which
+# also type checks it. See "Self-hosting" in docs/compiler.md.
 
 use std.args
 use std.env
 use std.fs
+use ./ast
+use ./check
 use ./diag
 use ./dump
 use ./lexer
@@ -21,7 +24,7 @@ task error_message(self: Stop) -> text
     return self.message
 
 task usage() -> Stop
-    return Stop(message: "usage: lucid check [--json] PATH, with LUCID_DUMP=tokens, ast, or resolved")
+    return Stop(message: "usage: lucid check [--json] PATH, with LUCID_DUMP=tokens, ast, resolved, or checked")
 
 task main() -> none or Stop
     let words = args.all()
@@ -43,6 +46,23 @@ task main() -> none or Stop
         let found = resolve.load(path, false)
         print dump.resolved(found)
         try finish(found.source, found.diags, json)
+    else if stage == "checked"
+        let found = resolve.load(path, false)
+        var diags = found.diags
+        let file = found.file
+        if diags is empty and file is ast.File
+            let checked = check.check(file, found, true)
+            diags = checked.diags
+            if diags is empty
+                print dump.program(checked.program)
+            # `check` reports errors in the program. An unbuilt feature is
+            # not one.
+            var kept: list[diag.Diagnostic] = []
+            for d in diags
+                if d.code != "E0901"
+                    kept.push(d)
+            diags = kept
+        try finish(found.source, diags, json)
     else if stage == "tokens" or stage == "ast"
         try dump_syntax(path, stage, json)
     else

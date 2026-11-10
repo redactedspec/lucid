@@ -186,3 +186,186 @@ public choice PatternKind
     NamePattern(name: Name)
     VariantPattern(name: Name, bindings: list[Name])
     TypedPattern(name: Name, ty: Type)
+
+## A declared name without its module, as the resolver adds it.
+public task short_name(name: text) -> text
+    let parts = name.split(".")
+    return parts[parts.len() - 1]
+
+## True for a task called with a dot, which has `self` first.
+public task is_method(self: TaskSig) -> bool
+    return self.params is not empty and self.params[0].name.text == "self"
+
+## One read or write of a variable, or of a path into one.
+public type Use
+    root: text
+    # The fields after `root`, up to the first index.
+    path: list[text]
+    span: diag.Span
+    # The whole variable is passed as `change`.
+    whole: bool
+
+## True if a change to one path can reach the other.
+public task overlap(a: list[text], b: list[text]) -> bool
+    let n = if a.len() < b.len() then a.len() else b.len()
+    for i in 0..n
+        if a[i] != b[i]
+            return false
+    return true
+
+## A path: the variable it starts from, with its fields up to the first
+## index, and whether an index ended it.
+public type Path
+    root: text
+    fields: list[text]
+    ended: bool
+
+## The variable that this path starts from, with its fields, up to the first
+## index. A slice is a new value, so it is no path.
+public task path(self: Expr) -> Path?
+    match self.kind
+        NameExpr(name) -> return Path(root: name, fields: [], ended: false)
+        SelfExpr -> return Path(root: "self", fields: [], ended: false)
+        FieldExpr(base, name) ->
+            let found = base.path()
+            if found is none
+                return none
+            var out = found
+            if not out.ended
+                out.fields.push(name.text)
+            return out
+        IndexExpr(base, indices) ->
+            for index in indices
+                if is_range(index)
+                    return none
+            let found = base.path()
+            if found is none
+                return none
+            var out = found
+            out.ended = true
+            return out
+        _ -> return none
+
+task is_range(value: Expr) -> bool
+    return match value.kind
+        BinaryExpr(op, _, _) -> op == "Range" or op == "RangeInclusive"
+        _ -> false
+
+## Adds every use of a variable in this expression. A lambda adds none,
+## since it cannot capture a variable that can change.
+public task uses(self: Expr, change out: list[Use])
+    self.uses_as(false, change out)
+
+task uses_as(self: Expr, whole: bool, change out: list[Use])
+    let found = self.path()
+    if found is Path
+        let plain = match self.kind
+            NameExpr(_) -> true
+            SelfExpr -> true
+            _ -> false
+        out.push(Use(root: found.root, path: found.fields, span: self.span, whole: whole and plain))
+        self.index_uses(change out)
+        return
+    match self.kind
+        TextExpr(parts) ->
+            for part in parts
+                part.uses(change out)
+        ListExpr(items) ->
+            for item in items
+                item.uses(change out)
+        MapExpr(entries) ->
+            for entry in entries
+                entry.key.uses(change out)
+                entry.value.uses(change out)
+        UnaryExpr(_, value) -> value.uses(change out)
+        OptionalExpr(value) -> value.uses(change out)
+        IsExpr(value, _, _) -> value.uses(change out)
+        FieldExpr(value, _) -> value.uses(change out)
+        BinaryExpr(_, left, right) ->
+            left.uses(change out)
+            right.uses(change out)
+        IfExpr(condition, yes, otherwise) ->
+            condition.uses(change out)
+            yes.uses(change out)
+            otherwise.uses(change out)
+        CallExpr(callee, args) ->
+            # A method may read all of its receiver, so its name is no field.
+            match callee.kind
+                FieldExpr(base, _) -> base.uses(change out)
+                _ -> callee.uses(change out)
+            for arg in args
+                arg.value.uses_as(arg.changes, change out)
+        IndexExpr(base, indices) ->
+            base.uses(change out)
+            for index in indices
+                index.uses(change out)
+        _ -> return
+
+task uses(self: TextPart, change out: list[Use])
+    match self
+        ExprText(value) -> value.uses(change out)
+        LiteralText(_) -> return
+
+# The uses inside the indexes of a path.
+task index_uses(self: Expr, change out: list[Use])
+    match self.kind
+        FieldExpr(base, _) -> base.index_uses(change out)
+        IndexExpr(base, indices) ->
+            base.index_uses(change out)
+            for index in indices
+                index.uses(change out)
+        _ -> return
+
+# This value, split at a `match`, whose parts run one after another.
+task parts(self: Expr, change out: list[Expr])
+    match self.kind
+        MatchExpr(subject, arms) ->
+            subject.parts(change out)
+            for arm in arms
+                arm.body.parts(change out)
+        _ -> out.push(self)
+
+task parts(self: ArmBody, change out: list[Expr])
+    match self
+        ArmExpr(value) -> value.parts(change out)
+        _ -> return
+
+## What this statement writes to, or calls a task on.
+public task target(self: Stmt) -> Expr?
+    match self.kind
+        AssignStmt(target, _, _) -> return target
+        ExprStmt(value) ->
+            match value.kind
+                CallExpr(callee, _) ->
+                    match callee.kind
+                        FieldExpr(base, _) -> return base
+                        _ -> return none
+                _ -> return none
+        _ -> return none
+
+## The values that this statement itself holds, not those of its blocks.
+## Each group runs to its end before the next one starts.
+public task values(self: Stmt) -> list[list[Expr]]
+    var out: list[Expr] = []
+    match self.kind
+        LetStmt(_, _, _, value) -> value.parts(change out)
+        WhileStmt(value, _) -> value.parts(change out)
+        ForStmt(_, _, value, _) -> value.parts(change out)
+        ReturnStmt(value) ->
+            if value is Expr
+                value.parts(change out)
+        PrintStmt(value) -> value.parts(change out)
+        ExpectStmt(value) -> value.parts(change out)
+        ExprStmt(value) -> value.parts(change out)
+        AssignStmt(target, _, value) ->
+            var group = [target]
+            value.parts(change group)
+            return [group]
+        IfStmt(branches, _) ->
+            for branch in branches
+                branch.condition.parts(change out)
+        _ -> return []
+    var groups: list[list[Expr]] = []
+    for value in out
+        groups.push([value])
+    return groups
