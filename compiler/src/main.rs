@@ -127,8 +127,14 @@ fn cli(args: &[String]) -> ExitCode {
     {
         let (mut program, errors) = check::check(file, &source, !run);
         diags = errors;
-        if diags.is_empty() && dump == Some(dump::Stage::Checked) {
-            emit(std::io::stdout(), &dump::program(&program, None));
+        if dump == Some(dump::Stage::Checked) {
+            // The stage ends with the checker, as `resolved` ends with loading.
+            if diags.is_empty() {
+                emit(std::io::stdout(), &dump::program(&program, None));
+            }
+            diags.retain(|d| d.code != "E0901");
+            report_errors(&source, &diags, json);
+            return if diags.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE };
         }
         if diags.is_empty() {
             diags = mono::run(&mut program, !run);
