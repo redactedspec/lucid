@@ -343,7 +343,7 @@ fn stage_dumps_are_stable() {
     let ported = stage_dir.join(format!("lucid{}", std::env::consts::EXE_SUFFIX));
     let jobs: Vec<(&str, &str)> = sources
         .iter()
-        .flat_map(|file| ["tokens", "ast", "resolved", "mir", "owned"].map(|stage| (file.as_str(), stage)))
+        .flat_map(|file| ["tokens", "ast", "resolved", "checked", "mir", "owned"].map(|stage| (file.as_str(), stage)))
         .collect();
     let next = std::sync::atomic::AtomicUsize::new(0);
     let failures = std::sync::Mutex::new(Vec::new());

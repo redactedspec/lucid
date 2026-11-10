@@ -13,6 +13,7 @@ pub enum Stage {
     Tokens,
     Ast,
     Resolved,
+    Checked,
     Mir,
     Owned,
 }
@@ -23,6 +24,7 @@ impl Stage {
             "tokens" => Some(Stage::Tokens),
             "ast" => Some(Stage::Ast),
             "resolved" => Some(Stage::Resolved),
+            "checked" => Some(Stage::Checked),
             "mir" => Some(Stage::Mir),
             "owned" => Some(Stage::Owned),
             _ => None,

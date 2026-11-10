@@ -105,7 +105,7 @@ fn cli(args: &[String]) -> ExitCode {
             None => {
                 emit(
                     std::io::stderr(),
-                    "lucid: LUCID_DUMP must be tokens, ast, resolved, mir, or owned
+                    "lucid: LUCID_DUMP must be tokens, ast, resolved, checked, mir, or owned
 ",
                 );
                 return ExitCode::FAILURE;
@@ -127,6 +127,9 @@ fn cli(args: &[String]) -> ExitCode {
     {
         let (mut program, errors) = check::check(file, &source, !run);
         diags = errors;
+        if diags.is_empty() && dump == Some(dump::Stage::Checked) {
+            emit(std::io::stdout(), &dump::program(&program, None));
+        }
         if diags.is_empty() {
             diags = mono::run(&mut program, !run);
         }
