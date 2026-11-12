@@ -1,248 +1,1409 @@
 # Decisions
 
-Add new entries at the end of the list. To reverse a decision, add a new entry that supersedes it. Evidence and its strength are in [research.md](research.md).
+Every design decision behind Lucid, in the order it was made, with the
+reason given at the time. An entry is never edited to change its
+meaning: a decision is reversed by a later entry that supersedes it, so
+the log also shows how the design moved. The evidence behind each
+choice, and how strong it is, is in [research.md](research.md).
+
+A new entry goes at the end.
 
 ## Settled
 
-| # | Date | Decision | Reason |
-| --- | --- | --- | --- |
-| 1 | 2026-11-04 | Name: Lucid, extension `.lcd`, CLI `lucid` | Owner's choice. A 1970s dataflow language was also called Lucid, but it is not in common use. |
-| 2 | 2026-11-04 | Memory: inferred ownership with reference-counting fallback | No GC and no lifetime annotations. Best fit for ease plus speed. Hardest compiler work. |
-| 3 | 2026-11-04 | Syntax: clean hybrid with indentation and English keywords | Owner's choice from three samples. Short, and unambiguous for agents. |
-| 4 | 2026-11-04 | Compiler: Rust host, Cranelift native, WebAssembly output | Fast route to real programs. All front-end work is hand-written. |
-| 5 | 2026-11-04 | `task` is the function keyword, and `print` is a statement | Taken from the chosen syntax sample. Concurrency uses `spawn`, so `task` carries no async meaning. |
-| 6 | 2026-11-04 | Values are independent, with no stored references | Removes lifetimes from the language. See `memory-model.md`. |
-| 7 | 2026-11-04 | Errors are union return values with `try` and `else` | No hidden control flow, and failure stays visible in signatures. |
-| 8 | 2026-11-04 | One union form, `A or B`, with `T?` as shorthand | Brings in the TypeScript feel, and needs no `Option` or `Result`. |
-| 9 | 2026-11-04 | Structural traits, no classes or inheritance | Fewer concepts, and code stays local. |
-| 10 | 2026-11-04 | No `async`/`await` | Removes function coloring. The scheduler stays a runtime detail. |
-| 11 | 2026-11-04 | MIR is structured | One input fits both Cranelift and WebAssembly. |
-| 12 | 2026-11-04 | Integer overflow traps in release builds | Safety ranks above speed. Revisit if profiling shows a heavy cost. |
-| 13 | 2026-11-04 | Return types are never inferred. No `->` means `none` | A signature must be complete by itself, for local reasoning. |
-| 14 | 2026-11-04 | `try` and `else` prefer error types over `none` | Otherwise success in a `none or Error` task would count as failure. |
-| 15 | 2026-11-04 | The `Error` trait requires `error_message`, not `message` | Traits are structural, so a common name would turn unrelated types into errors. |
-| 16 | 2026-11-04 | Self-host the compiler in stages after 1.0, starting with `lucid fmt` at M5. Keep Cranelift in Rust behind a C ABI | Tests the language on a large program. Waiting avoids rewrites while the language changes, and the backend rewrite has no user value yet. |
-| 17 | 2026-11-04 | Tasks cannot use a top-level `var` | Swift needs run-time checks for globals. Banning this access keeps exclusivity static. |
-| 18 | 2026-11-04 | Permissions are transitive, and `process` counts as full trust like `unsafe` | Without this, permissions could be bypassed. Deno and Node.js document these escapes. |
-| 19 | 2026-11-04 | Run an agent trial at M3, not M5 | Models have no Lucid training data, so agent-friendliness must be tested before syntax settles. |
-| 20 | 2026-11-05 | `print` takes one value | One way to do it. Interpolation already joins values. Closes the M1 open question with its default. |
-| 21 | 2026-11-05 | Names are ASCII for now | Identifier confusables are a known attack (see `research.md`). Widening later breaks nothing, and narrowing later would. |
-| 22 | 2026-11-05 | Text escapes are `\n`, `\t`, `\r`, `\\`, and `\"` only. `"""` text drops a blank closing line | The spec left both undefined. These escapes are common to Python and TypeScript. Swift has the closing-line rule, so the value has no stray line break. |
-| 23 | 2026-11-05 | `/` yields `float` for `int` operands, and follows IEEE 754 | Closes the M2 open question with its default. It matches Python, and `//` is one character away. The agent trial at M3 tests the surprise. |
-| 24 | 2026-11-05 | `//` rounds down, `%` takes the sign of the divisor, both are `int` only, and a zero divisor traps | The spec named floor division, and this pairing keeps `(a // b) * b + a % b == a`, as in Python. `float` operands stay out until a real need appears, since adding them later breaks nothing. |
-| 25 | 2026-11-05 | Stack overflow is a trap, checked on entry to each task | Recursion arrived at M2, and hitting the guard page ends the process with an operating system error, not the documented exit code 101. A software check gives the source position too. |
-| 26 | 2026-11-05 | Named arguments keep parameter order, defaults come last, and only a parameter with a default can be named | Evaluation order is then the order on the page, with no hidden reordering. Swift has the same order rule. One form for each call. |
-| 27 | 2026-11-05 | A task reads a top-level `let` only if its value is a literal | Top-level statements run in order, so a task called earlier could read an uninitialized value. That would break a guarantee in `security.md`. |
-| 28 | 2026-11-05 | A trap message holds its source position, and each site's text is static data | One runtime entry point, and no cost on the hot path. Research favored a shared cold path. A stack trace comes later. |
-| 29 | 2026-11-05 | Accept the M2 exit with `fib(40)` at 2.02x to 2.09x of Rust release. The 2x target in `vision.md` stays, and M4 judges it on the benchmark suite | Owner's choice. Evidence is in `research.md`: Rust itself pays 1.56x to 1.92x for the same checks, and Lucid is 1.20x to 1.26x of checked Rust on `fib`. This accepts one exit, not a lower target. `collatz` at 2.47x of checked Rust stays an M4 item. |
-| 30 | 2026-11-05 | `-` joins a number with no postfix after it, in the parser. A default must be a literal (E0313) | The checker could not tell `-(x)` from `-x`, which let an out-of-range literal through. A literal default has no evaluation order to explain. Judgment calls with no outside evidence. |
-| 31 | 2026-11-05 | Interpolation is the only way to join text. `+` does not work on `text` | Rules in `AGENTS.md`: a second way needs a strong reason. Adding `+` later breaks nothing. Judgment call, and the M3 agent trial tests whether agents reach for `+`. E0303 points to interpolation. |
-| 32 | 2026-11-05 | `.len()` and `.is_empty()` are the names for text length and emptiness | The spec fixed `x.is_empty()` and left length unnamed. `len` is the short form that Python and Rust share. |
-| 33 | 2026-11-05 | Naive counting uses task-level ownership: an expression borrows, a local or hidden local owns, and a task releases all its locals on return | No block tracking is needed for `break`, `continue`, or `return`, and hidden locals work inside `if` values and `and`. Trade-off: a value can outlive its block until M4. Judgment call. Decision 2 and `memory-model.md` already chose naive counting first. |
-| 34 | 2026-11-05 | The leak and double-free checks are the debug profile of `lucid_rt` | Every golden test gets them with no flag, and a release build pays nothing. |
-| 35 | 2026-11-05 | A text has no single index and no character type. Iteration gives one-character `text`, and `x[i..i + 1]` reads one character | One way to do it. `int` indexing on text would look O(1) and be O(n). Adding a character type or `x[i]` later breaks nothing. Judgment call, no source read. The M3 agent trial tests whether agents reach for `x[0]`, and E0303 points to the slice. |
-| 36 | 2026-11-05 | A character is one code point. Text slices use character positions, and a bad range traps | `docs/language.md` already counts characters for `.len()`. Grapheme rules need Unicode tables in the runtime, and can arrive as a library. A trap matches list indexing and makes a bug visible, where clamping hides it. Judgment call, no source read. |
-| 37 | 2026-11-05 | `.bytes()` waits for `list`, since its result is `list[byte]` | A stand-in type would be a breaking change once `list` arrives. Scope moved inside M3. |
-| 38 | 2026-11-05 | Lists, maps, and sets start with a small built-in set of tasks. Anything needing `T?`, lambdas, or derived traits moves to that roadmap item | A stand-in for `.get` would be a breaking change once `T?` arrives, the reason in decision 37. The prelude moves to Lucid once generics exist. Scope moved inside M3. Judgment call. |
-| 39 | 2026-11-05 | `key in m` is the membership test, and `for` over a map gives keys. There is no `.has` | The grammar already has `in`, and rule 1 of `agents.md` allows one way. Python uses both forms, so agents have strong priors. This settles the open question on `T?` in a map: `.get` flattens, and `in` tells the cases apart. Judgment call. |
-| 40 | 2026-11-05 | A map uses the compact dict layout, hashed with SipHash through `RandomState` | Insertion order is the spec, and the layout gives it with one allocation. Python moved to SipHash to stop hash flooding (PEP 456), and random keys cannot change the output because order ignores the hash. M4 may change the hash if the benchmarks ask for it. Evidence is in `research.md`. |
-| 41 | 2026-11-05 | A list or map write is a statement that hands the local's count to the runtime, which copies only if the value is shared | A write in an expression could free an element that the same statement still borrows, which breaks a guarantee in `security.md`. |
-| 42 | 2026-11-05 | Every collection slot is 8 bytes for now | One code path until monomorphization exists. `list[byte]` pays 8x memory. M4 measures it. |
-| 43 | 2026-11-05 | `byte` arrives with no literals or arithmetic, until sized numbers | `.bytes()` needs a real type, per decision 37, and the rest of `byte` has a roadmap item. |
-| 44 | 2026-11-05 | A key is `int`, `bool`, `byte`, or `text`. `float` never qualifies, and collections wait for `Hash`. `in` on a list takes the same types | NaN does not equal itself, so a `float` key could never be found again. Judgment call. |
-| 45 | 2026-11-05 | A negative list index traps, a missing map key traps on read, and `.remove` of a missing key does nothing | `language.md` already traps out of bounds, and Python's negative index hides off-by-one bugs. After `.remove` the key is gone either way, so there is no bug to report. Judgment call, and the M3 agent trial tests whether agents reach for `x[-1]`. |
-| 46 | 2026-11-05 | `x[i] = f()` runs the index first, then the value, and each index in a path runs once | Decision 26 keeps evaluation in the order on the page. Python runs the value first, so agents may expect that. Judgment call. |
-| 47 | 2026-11-05 | An empty `[]` or `{}` with no type from its context is E0314. Only earlier siblings give a type, so `[[], [1]]` is an error | Inference from later uses would break local reasoning, and types flow one way through the checker. Judgment call, and the M3 agent trial tests the surprise. |
-| 48 | 2026-11-05 | A write through a path takes the element out of its slot, which holds null until the write ends | Review measured `g[k].push(v)` as quadratic, since the slot and a hidden local both held a count. Grouping into a map of lists is too common to wait for M4. Every index and value is read first, so no safe code sees the null. |
-| 49 | 2026-11-05 | Every `type` and `choice` value is a counted heap record for now, with copy-on-write like a list. Inline storage waits for M4 | One path for all fields and all recursion, and `memory-model.md` already puts correctness before speed at M3. M4 measures the cost. Judgment call. |
-| 50 | 2026-11-05 | Variant constructors take named arguments like `type` constructors. Named arguments to a constructor may come in any order, and run in the order written. A variant with no fields has no `()` | One rule for all constructors, and `Circle(2.0)` would be a second form. Decision 26 fixes order for tasks because positional and named arguments mix there. With only names, the order on the page is still the order of evaluation. Judgment call, and the M3 agent trial tests it. |
-| 51 | 2026-11-05 | A variant pattern binds every field by position, and `_` skips one | The form the spec already uses. Names matching field names would stop two nested matches from binding the same field. Risk: swapped names of one type go unnoticed. Judgment call, no source read, and the M3 agent trial tests it. |
-| 52 | 2026-11-05 | On a `choice`, a name alone must be a variant (E0318), never a binding. No pattern can bind a type or variant name, and patterns do not nest | A misspelled variant would otherwise catch everything and hide the bug, while passing the exhaustiveness check. The same holds for `Cons(h, Nil)`, and for `A ->` on a subject of the wrong type. `_` covers the rest, and the subject usually has a name already. Nested patterns can arrive later, since this error keeps that syntax free. Judgment call, no source read. |
-| 53 | 2026-11-05 | Types, choices, variants, and tasks share one namespace | A pattern and a call then read the same, with no qualified form. Adding `Shape.Circle` later breaks nothing. Judgment call, and the M3 agent trial tests whether agents hit the clash. |
-| 54 | 2026-11-05 | `lucid_release` never recurses. Waiting values link through their own count field | Recursive `choice` values have no depth limit from their type, and a stack overflow while releasing would not be the documented trap. The link needs no allocation, so a release cannot run out of memory. |
-| 55 | 2026-11-05 | A type with no finite value is E0315, and a repeated or covered arm is E0317 | Nothing could ever build such a type, so the error belongs at its definition, not at a confusing call. A dead arm also makes the last arm safe to lower with no test. |
-| 56 | 2026-11-05 | A number pattern may have a leading `-` | Sentinels such as `-1` are common, and a default already takes one through the rule in decision 30. |
-| 57 | 2026-11-05 | A union value is a counted record of one slot, whose tag is a type id shared by all unions | One word fits every local, slot, and return, and decision 49 already boxes `type` values. Shared ids make widening and narrowing to a smaller union free, and `lucid_release` needs no new case. Cost: `int?` allocates when it holds anything. M4 measures it, and a niche for `none` is the likely fix. Judgment call. |
-| 58 | 2026-11-05 | A union is never inferred. Unions take their type from the context, and `list[int]` does not convert to `list[int?]` | Inference from siblings fails decision 47 for the same reason, and a conversion would have to rebuild each element, a hidden cost. Risk: `[1, none]` is an error an agent may hit, so the M3 agent trial tests it. Judgment call. |
-| 59 | 2026-11-05 | Narrowing follows control flow: conditions, code after a branch that leaves, and `and`, `or`, `not`, and `then`. Assignment ends it, with no narrowing by assignment. A loop first forgets each name it assigns | TypeScript handles early returns the same way, and agents write them constantly. Kotlin states the rule that makes this sound: no change between the check and the use. TypeScript also narrows on assignment, which Lucid can add later without breaking anything. Evidence is in `research.md`. |
-| 60 | 2026-11-05 | Only a name narrows, never a field or call | A narrowed read has no test at run time, so a wrong type is memory unsafety, which `security.md` rules out. TypeScript narrows property paths, but needs no such proof, since a wrong guess there is not unsafe. Kotlin refuses mutable properties. `let b = a.b` is one line, and the diagnostic says so. The agent trial tests how often agents hit this. |
-| 61 | 2026-11-05 | An `is` test whose answer never depends on the value is E0303 | It is a dead test, like the dead arm in decision 55, and usually a sign that the type is not what the author thinks. Judgment call. |
-| 62 | 2026-11-05 | `.get` gives `T?` on a list or map, and a negative index gives `none`. `.pop` works on lists, gives `T?`, and must be a whole statement or all of the value of `let`, `var`, `return`, or `name =` | Python's `dict.get` gives the same shape, and `T?` makes `.pop` on an empty list a value, not a trap. A `.pop` inside an expression could free an element that the same statement borrows, the reason in decision 41. Judgment call, and the agent trial tests `f(x.pop())`. |
-| 63 | 2026-11-05 | `none` is a literal, so it can be a default | `limit: int? = none` is the usual form of an optional parameter, and it has no evaluation order to explain, as in decision 30. |
-| 64 | 2026-11-05 | On a union, `match` has `none`, typed, name, and `_` arms, and a name binds what earlier arms left. A union takes no literal or variant arm | Patterns do not nest, per decision 52, and a variant arm on a union would be a nested pattern. Binding what is left gives the same result as narrowing after a branch that leaves. Judgment call. |
-| 65 | 2026-11-05 | Type arguments stay in brackets, as in `f[int?](x)`. The parser reads one form for an index and for type arguments, in one pass, and the checker decides which it is from the base. Type-only forms parse as expressions, and the checker rejects them outside type arguments | Rules 2 and 6 in `agents.md`. `[` has no operator to clash with, so Rust's `::` is not needed, and `json.parse[Book](raw)` is already the documented form. Replaces the default, parsing as a type after an expression fails: that needs backtracking, gives two trees for one form, and turns a typo in an index into a type error. Go also reads the bracket without knowing which it holds. Evidence is in `research.md`. |
-| 66 | 2026-11-05 | Claude makes design decisions, on Opus 5.5 at `xhigh`, and the owner can overrule any of them | Owner's choice. Decisions still need a recorded reason and evidence, under the rules in `AGENTS.md`. |
-| 67 | 2026-11-05 | A generic body is checked once at its definition, with parameters as opaque types, and `mono.rs` substitutes into its MIR. Type arguments come from values left to right, then from brackets. A constructor may also take them from its context. A call never does | Rule 3 in `agents.md`: a signature must say all, and an error at a distant instantiation is the failure of C++ templates that C++20 concepts were added to soften. Checking the AST again per instance fails on Lucid's flattening unions: a local inferred as `text` where `T?` was narrowed has no such type for `T = text?`. Types flow one way, as in decision 47. PEP 718 shows that explicit arguments stay necessary. Evidence is in `research.md`. |
-| 68 | 2026-11-05 | Monomorphization stops with E0903 at type arguments nested 32 levels, or 20,000 instances | A program that needs a new type each call has no finite code. Rust's depth limit alone can fire late for growing types, and an open pull request adds a length check for that hang, so Lucid caps both. A program that would stop at run time is still rejected, as in Rust. The numbers are a judgment call. |
-| 69 | 2026-11-05 | Derived `Show`, `Equal`, and `Order` are MIR tasks generated per concrete type, not a runtime walk over values | A record does not know which slots are floats, so a runtime walk would need type descriptions, and it could not call a hand-written override. Generated tasks need no new runtime or backend code. Equal maps and sets ignore order, as in Python. Judgment call. |
-| 70 | 2026-11-05 | Text inside a shown value has quotes and escapes, and `{` is doubled, so the output reads back as a literal. A map shows as `{"a": 1}`, a set as `set([1, 2])`, and a value as `User(name: "Ada", age: 36)`. Alone, or held by a union, text has no quotes | The same rule as a shown `float`, in `language.md`. Python's `repr` gives containers this form, and Rust's `Debug` output is close, so agents have strong priors. Named fields follow the constructor. Judgment call, and the agent trial tests it. |
-| 71 | 2026-11-05 | `<` and the like work on lists and on values whose fields all have an order. A `bool`, map, set, or union has none. An earlier variant comes first | The spec derives `Order` from fields. `bool` already has no order, so it stays out rather than adding `false < true`. A union mixes types with no natural order. Judgment call. |
-| 72 | 2026-11-05 | A task with `self` dispatches on its receiver type, and is called only with a dot. Its name stays out of the shared namespace, receivers cannot overlap, and a bare `T` cannot be one. A dot call does not widen its receiver | Traits need one name on many types, as `error_message` already does in the spec, and decision 53 would forbid that. Dropping `f(x, a)` removes a second form, by rule 1 in `agents.md`. It narrows the earlier spec line that `x.f(a)` means `f(x, a)`. No overlap means no ranking rules, unlike Rust specialization or Swift overloads, so one type always gives one task. Judgment call, and the agent trial tests `f(x)`. |
-| 73 | 2026-11-05 | Hand-written `show`, `equal`, `compare`, `add`, `sub`, `mul`, and `div` replace derived tasks or give operators, and any other form of those names is E0323 | The spec says that hand-written tasks override, and it left the names open. `compare` gives an `int`, as `strcmp` does and as Java's `compareTo` does, so one task covers four operators. Reserving the form stops a task from silently failing to apply, and it costs few names, since only `self` tasks are affected. Judgment call. |
-| 74 | 2026-11-05 | A body needs a bound for everything but storing a `T`, including `print`. `and` joins bounds. `int` lacks `Div` | Rule 3 in `agents.md`: the signature says what a body uses, and Rust works the same way. `and` is already a keyword, and reads like Python. Rust's `+` and Swift's `&` are the same idea. `/` on `int` gives `float`, so `T / T` could not give `T`. The agent trial tests whether agents omit `Show`. |
-| 75 | 2026-11-05 | `any`, traits with type parameters, generic tasks in traits, bounds on aliases, `Hash` on compound values, `Copy`, and `Json` stay E0901 for now | The runtime hashes a key by its kind, so a compound key needs a design of its own. `Json` waits for `std.json` at M5. Nothing at M3 needs the others yet. Scope stays inside M3 or moves to the milestone named here. |
-| 76 | 2026-11-05 | The limit on a type in decision 68 counts parts, 256 of them, not depth, and only generic instances and derived tasks count toward 20,000 | Review found that `Pair[T, T]` doubles each level, so 32 levels could hang the compiler, since hashing a `Ty` walks a tree. Ordinary tasks are not what the limit guards against. A trait check on a type past the limit answers no, so a growing type gets E0320 or E0903, and never a hang. |
-| 77 | 2026-11-05 | `Hash` is derived for lists, maps, sets, unions, `type`, and `choice`, as MIR tasks that a map keeps with `equal` and the runtime calls. A chain of keyed SipHash steps hashes a value, and a map or set adds up its entries. A hand-written `task hash(self: T) -> K` gives any `K` with `Hash`. A written `equal` with no written `hash` gives no `Hash`, nor does a written `hash` whose result leads back to its type. Supersedes the key limit in decision 44 and the `Hash` part of decision 75 | Decision 69 already needs per-type tasks, since a record does not say what its slots hold, and a map outlives the code that made it, so it must carry them. Python removes `__hash__` from a class that defines `__eq__`, and Clippy flags a derived `Hash` with a manual `PartialEq`: both guard the rule that equal values hash equally. Returning a value in place of a mixed number needs no hash tools in the language, and `-> int` still reads as agents expect. Sets and maps ignore order in `==`, so their hash must too, as CPython's `frozenset` does. Evidence is in `research.md`. |
-| 78 | 2026-11-05 | `any Trait` is the record of a union, with the value's type id as its tag. A call, `show`, and `==` are generated tasks that test the tag against every type that reaches that `any` in the whole program. It names one trait, of your own or `Show`. It has `Show`, `Equal`, and its trait, and no `Order`, `Hash`, or way back to the value. Supersedes the `any` part of decision 75 | Decision 57 already gives a record that knows its type, so neither backend changes. A union goes in whole, as one more boxed type, since review found that its trait may be on the union and not on its members. It cannot go in a union with an `any` member, since `is` could then not find what it holds. Rust and Swift use a vtable because they compile in parts, and monomorphization here sees the whole program. Cost: a call tests tags one at a time, so it grows with the types boxed, and M4 can swap in a table. `any Order` needs two values of one type, as with Rust's dyn compatibility. Swift's `any` shows the cost of a box in the type, the reason Lucid keeps the keyword. Leaving out a way back keeps one tool for "which type is this": the union. Judgment call, and the agent trial tests it. Evidence is in `research.md`. |
-| 79 | 2026-11-06 | `u8` is another name for `byte`, and `i64` for `int`, not new types. A literal takes the number type that its context asks for, including the other side of an operator or `in`, and is otherwise `int` or `float`. An integer literal never becomes a `float` type. Conversions are `.to_T()`, one per type, and trap if an integer result cannot hold the value. Every integer lives extended in 64 bits | Go makes `byte` an alias of `uint8` for the same reason, so that one size has one type. With distinct types, `list[u8]` and `.bytes()` would not fit each other. Go also lets a constant take the type around it, which keeps `x + 1` free of a cast, the common case by far. Lucid has no constant evaluation, so a literal has one type at once, and `200 + 100` for `u8` traps at run time rather than failing at compile time. The spec lists a failed conversion as a trap. Evidence is in `research.md`. |
-| 80 | 2026-11-06 | Wrapping math is `wrapping_add`, `wrapping_sub`, and `wrapping_mul`, as tasks, with no operators. Truncating conversions and bit operations are left out for now | Rust uses the same names. Zig's `+%` operators are shorter, but rule 6 in `agents.md` prefers forms that models know, and rule 7 keeps the language small. `x % 256` then `.to_u8()` covers truncation. The spec has no bit operations yet, so that stays an open question. |
-| 81 | 2026-11-06 | A lambda or nested task captures values when it is made. Capturing a `var` is E0325. Each loop pass gives a new capture. A nested task is a value made at its line, so it needs no forward use, and it reads its own name as its own record | Python reads a captured name at call time, and Go had a loop form of the same bug until 1.22, which the Go team found in real tests and in a Let's Encrypt incident. Capturing by value removes the bug, and fits rule 2 of the memory model, no stored references. But a silent copy of a `var` would be the reverse bug, a later change not seen, so it is an error with a one-line fix. Rust has both forms, `move` and borrow, which fails rule 1 in `agents.md`. An immutable capture can form no cycle, so task values need no `weak`. Cost: a counter closure must use `shared` or a parameter. The agent trial tests how often agents hit E0325. Evidence is in `research.md`. |
-| 82 | 2026-11-06 | A task value is a record with its code address as its tag. All task code takes that record first, and a top-level task used as a value gets a small task in front of it. A lambda takes its types from the context, in a generic call too, and has no annotated form | One call form needs one calling convention, so a call site never tests what it holds. The record reuses decision 49, so neither `lucid_release` nor copy-on-write changes. Grammar has no annotated lambda, and rule 3 in `agents.md` puts types in the signature of the task that takes one. E0324 says what to write. Judgment call, with no source read, as `research.md` says. |
-| 83 | 2026-11-06 | A task value shows as its type, and has no `Equal`, `Order`, or `Hash` | Code has no value to compare: two equal lambdas would need proof of equal behavior. Go also allows comparing a function only to `nil`, after an earlier rule surprised users of closures. `Show` stays on every type, so that a `type` with a task field can still print. Evidence is in `research.md`. |
-| 84 | 2026-11-06 | `change` is copy-in copy-out through a stack slot of the caller, and a path argument takes its value out of its slot for the call. A dot call does not mark a `change` receiver, and a `change` receiver must be a `var` or a path into one | Swift defines `inout` this way, and calls a read of the original during the call a violation of exclusivity. The task keeps the value in a register, so a `change` local costs a load and a store per call, not one per use. Rust passes a pointer, which needs an address for every local. The marker choice was an open question with this default, and `self` in a signature already says it. Evidence is in `research.md`. |
-| 85 | 2026-11-06 | `take` is a read parameter plus a local with its own count. Only `change` shows in a task type, so a task with a `change` parameter has no value form, and neither nested tasks nor lambdas take `change`. `any` cannot call a task with a `change` parameter | A caller cannot tell `take` from a read, so it needs no new form. Marking `change` in task types can come later without breaking anything, and the only cost now is a task that must be called by name. A `change` on what an `any` holds would have to write back through a tag test in every derived task. Judgment call. |
-| 86 | 2026-11-06 | In one statement, a variable that goes to `change` may not be used elsewhere, except by other `change` arguments of the call that can be told apart, and by arguments of the call that give a plain number or `bool`. Field paths are compared, and stop at the first index. A statement passes a variable to one `change` call, and cannot also write to it | Counted reads stay borrowed to the end of a statement, so this is what keeps them valid. Rust added two-phase borrows to accept `vec.push(vec.len())`, so the plain-value exception goes in from the start. Swift allows more, and Lucid can loosen this later without breaking a program. The agent trial tests how often it fires. Evidence is in `research.md`. |
-| 87 | 2026-11-06 | A `for` body cannot change what the loop visits, except text, which only gets replaced. M3 kept a copy and let the body change the variable, and this replaces that | `memory-model.md` planned this error. Keeping a copy was always safe, but that loop rarely means what it says: Java only detects it as a bug at run time, on a best-effort basis, and Rust rejects it. The fix is one line. Cost: a loop that wants the old value must name it. |
-| 88 | 2026-11-06 | `for change` takes the list out of its place for the loop and each element out of the list for the body, so the loop name is a plain local. Every way out of the body puts it back. The body cannot use the list, or anything under the first field of its path | A view into the list would need a second kind of local. This form gets narrowing, writes, and `change` on the loop name for free, with no bounds check per use. The rule on the first field is stricter than the law, because each step of a path is out of its slot during the loop. It leaves `self.total += x` working in `for change x in self.items`, the common case. Judgment call. |
-| 89 | 2026-11-06 | `self = value` is allowed, in a task with `change self` or `take self` | Replacing a whole value is the only way to move a `choice` to another variant from inside a method. The parser used to reject it. |
-| 90 | 2026-11-06 | M3 ends on the trial's 10 of 10. No syntax changes from it, and each judgment call that named the trial stays open until the M5 benchmark, which gains an arm with the guide's warnings removed | The exit asks that failures be recorded, and there were none. But the guide warned of each trap, so the trial cannot show that agents avoid `x[0]` or `+` on text unaided, and changing syntax with no failure has no basis. An arm with no warnings measures what this could not. Evidence is in `research.md`. |
-| 91 | 2026-11-06 | `x.sqrt()` is a built-in task on `float` and `f32` | The n-body benchmark needs it, and one Cranelift instruction does it. A Newton loop in Lucid would measure the wrong thing. The rest of the math prelude waits for a program that needs it. |
-| 92 | 2026-11-06 | Every count is explicit in MIR after `ownership.rs`, through `Move` and `Retain`, and a place that keeps a value receives a count. A local moves only if it is not a parameter, nothing reads it after the statement, and the statement reads it once | Perceus also makes every count an explicit instruction, which leaves backends with no ownership rules of their own. The rule on one read is what makes a move safe: a second read in the statement may be a borrow that must outlive the move. It is stricter than it must be, and loosening it breaks nothing. The test suite runs with moves on and off. Evidence is in `research.md`. |
-| 93 | 2026-11-06 | A top-level task's `take` parameter arrives with a count. A lifted task and a written `equal` keep the borrowed form | Without this, `take` could never reach a unique value, and `add_all(numbers, 4)` in `memory-model.md` would always copy. Task values show only `change`, per decision 85, so a call through one cannot pass a count, and the runtime calls a written `equal` with borrowed keys. Judgment call. |
-| 94 | 2026-11-06 | A name lets go of its value at the end of its block, not at its last use | `Close` arrives at M5, and a file that closes at a block end can be read off the page. Rust and C++ do the same. Perceus and Swift release at last use, which frees memory sooner, and Swift then needs `withExtendedLifetime` for code that relies on a lifetime. Rust's scope rule sets the memory target, so this costs nothing against `vision.md`. Judgment call. |
-| 95 | 2026-11-06 | A text literal and a variant with no fields are static data, with a count too large to reach zero | No allocation, and no case in `lucid_release`, since a count of `1 << 62` cannot run out. Counts still write to it, so static data stays writable. M7 must look again: a shared non-atomic count is a data race, though not one that can free anything. Judgment call. Replaced by 170, where static data has a count of 0. |
-| 96 | 2026-11-06 | A text holds a capacity, and `s = "{s}x"` grows `s` in place when the join is its last use | `+` is left out on purpose by decision 31, so interpolation is the only way to build text, and a language with one way must make that way linear. Moves prove that nothing else reads the text, and a count of one rules out other holders. This costs 8 bytes per text. CPython has a similar fast path for `s += x`, from memory, not read for this entry. Measured: 45 s to 0.22 s. |
-| 97 | 2026-11-06 | A text finds out whether it is all ASCII on first need, and keeps that in its header. Text slices and `.len()` are then O(1) to locate on ASCII text | Decision 36 made positions character positions, so each slice scanned from the start, and a parser that slices was quadratic: `json` did not finish in 280 s. The flag fits in the header's padding. Swift keeps a similar flag, from memory, not read for this entry. Text with other characters still scans. Measured: `json` 0.37 s. |
-| 98 | 2026-11-06 | A local that only ever holds a path into a read parameter holds no count | Racordon et al. put most of the loss in Swiftlet on "unnecessary reference counter checks", and `research.md` already points this item at them. A read parameter is the one value that needs no proof about moves, since its caller holds it for the call. So this needs one fixed-point walk, and no alias analysis. Measured: `trees` 2.2 s to 1.9 s, `json` 0.37 s to 0.29 s. Paths into a `let` of the same task could join later, once moves know about them. |
-| 99 | 2026-11-06 | A `list[byte]` has slots of one byte. Every other list keeps slots of 8 bytes. Supersedes decision 42 | Measured as decision 42 asked: `.bytes()` was the only way to read text by position, and 8 bytes per byte put `json` at 1.79x of Rust's memory, against a limit of 1.2x. Bytes are the one element type where the waste is 8x and which files and sockets will use at M5. Other small types can follow if a program needs them. |
-| 100 | 2026-11-06 | Reuse analysis is not built | The roadmap builds it only if measurements justify it, and they do not. `trees`, the program it exists for, runs at 0.62x of Rust and 0.92x of its memory. It stays possible, since nothing in MIR rules it out. |
-| 101 | 2026-11-06 | M4 ends on the suite as measured: five of five on memory, four of five on time, and `nbody` at 3.38x. Keep the model, and add no LLVM backend now. The 2x target stays. Storing plain types inline leaves M4, and has no milestone | The roadmap asks for this decision when the suite misses. Evidence is in `research.md`. Vectorizing is worth 1.5x on `nbody`, and Rust itself loses 1.34x to boxing, so neither the model nor layout explains the gap alone. A second backend is a large cost for one tight float loop among five programs, and M5 needs `lucid build` next. As in decision 29, this accepts one exit, not a lower target. The owner can overrule it. |
-| 102 | 2026-11-06 | `Error` is a real trait in a small Lucid prelude, so `any Error` works, and `any` allows it alongside `Show` | The spec defined an error type as one that satisfies a trait, and a generic body needs to call `error_message`. A written trait needs no special case in the checker. The cost is that the name `Error` is taken for types too. This follows from existing rules, so it needed no new evidence. |
-| 103 | 2026-11-06 | E0328 covers a statement that drops an error, and a `let` or `var` name that is never read | The spec says an unused error is a compile error and left the scope open. Rust's `must_use` covers only an expression statement, per its reference, so a name would be a gap here. A pattern name in a `match` arm is exempt, since reaching the arm already handled the error. One read of the name counts, as does a `change` argument, and the check does not follow it further. See "Error handling" in `research.md`. |
-| 104 | 2026-11-06 | A task that gives only `none` or error types returns `none` at its end | `examples/todo.lcd` already relied on it, and `return none` after a last `try` is noise. A plain `T?` still needs its `return`, since there a missing one is likely a bug. |
-| 105 | 2026-11-06 | `try` at top level prints `error_message()` alone to stderr, and `none` as `none` | A failed run is a result for the user, not a bug, so it has no source position, unlike a trap. Exit code 1 was in the spec. Evidence is weak: see `research.md`. |
-| 106 | 2026-11-06 | `else` takes the type of its value, or of the context if that accepts the value. The two sides do not join | One rule, like `if a then b else c`. `f() else none` on `int or E` with no annotation is an error, and an annotation fixes it. |
-| 107 | 2026-11-06 | `try` may sit anywhere in an expression, and `ownership.rs` moves what is in flight to locals only when a part can return | The grammar already allowed this, and banning it would break `(try f()).x`. Turning off moves for such a statement would not help, since a `Retain` in flight leaks as well. Only such a statement pays. |
-| 108 | 2026-11-06 | A stack trace walks frame pointers, with a table from return address to source position, and no unwinding tables | It costs one small table per program, and no measured time, see "Stack traces" in `research.md`. It shows at most 16 calls, since a stack overflow has millions. |
-| 109 | 2026-11-06 | `expect` shows both sides of a comparison, each run once, and shows only `expect failed` otherwise. A pass narrows like an `if` that ends | The spec promised both values. One form means no `expect_eq`, by rule 1 in `agents.md`. See "`expect`" in `research.md`. A generic with no `Show` bound must still compile, so a side with no `Show` drops the values. |
-| 110 | 2026-11-06 | `lucid test` runs tests in one child process, and starts a new child after each failure. A test is a task, and a failed `try` ends it as at top level | A trap must stay uncatchable, so only a process boundary contains it. See "Test isolation" in `research.md`. A test that sees top-level values would need top-level statements to run, and decision 27 rules that out. |
-| 111 | 2026-11-06 | An `unsafe` block without a `#` comment is error E0332, and `lucid check --unsafe` lists sites | `security.md` already required both. Rust leaves this to an off-by-default Clippy lint, but Lucid has one tool and no lint levels. See "Unsafe code" in `research.md`. |
-| 112 | 2026-11-06 | `pointer[byte]` is the only pointer, from `.pointer()` on a named `list[byte]`. Text has no pointer, and there is no pointer math, read, or write for now | A list slot is 8 bytes except for bytes, so other element types would expose layout. A C string needs its zero byte pushed by hand, so text layout stays free. C can fill a list directly, which covers calls such as `strlen` and `memset`. Add more when `std` needs it. Weak evidence, see `research.md`. |
-| 113 | 2026-11-06 | An `extern` task is a normal task whose body is one foreign call. Symbols come from `ucrtbase` and `kernel32`, and a missing one is E0904 | Calls, arguments, and errors reuse one path. No linking of other libraries until a real need appears. |
-| 114 | 2026-11-06 | An `extern` task is not a value | A value could carry it out of an `unsafe` block, and safe code could then call C, which `security.md` rules out. Marking task types would add a second kind of task for no known need. |
-| 115 | 2026-11-06 | `resolve.rs` joins all modules into one tree before `check.rs`, and gives each top-level name of an imported module the form `module.name`. All files sit in one `Source` | The checker, MIR, and backends need no idea of a module, and a span needs no file id. Teaching each lookup in `check.rs` about modules would touch more code, and a lazily read alias or literal would need its home module. |
-| 116 | 2026-11-06 | `use ./a.b` means the file `a/b.lcd` first, then the name `b` in `a.lcd`. A module is reached by its last name, and an import works only in its file | Go uses a qualified name and scopes an import to one file, see `research.md`. The grammar keeps one form for both, so the file system decides, and a file wins so that the rule needs no second lookup. |
-| 117 | 2026-11-06 | `public` marks a task, `type`, `choice`, or `trait`. Fields and variants follow their type, and there is no `public let` | Go marks each name by case, and fields too. Lucid has no private field syntax, and adding one has no known need yet. Private fields wait for a real one. |
-| 118 | 2026-11-06 | A private task with `self` cannot be called from another module, but counts for traits and derived tasks. One receiver type has one task of each name in the program | Rust's coherence rules exist so one type has one meaning. Here, a value that prints one way in one module and another way elsewhere would be worse than a private task that shows through a trait. Go does the reverse for unexported methods, so this is a judgment call. See `research.md`. |
-| 119 | 2026-11-06 | A pattern finds a variant from its subject's type, with no prefix or import. A binding in a pattern cannot reuse a type or variant name of any module | Grammar stays as it is, and Swift infers a case from the subject the same way. Without the wide check, a variant name on a union subject would bind and catch everything, the bug that decision 52 rules out. |
-| 120 | 2026-11-06 | An imported module runs no code | Go runs package initializers, and imports for that effect exist there. Lucid has no need, and this keeps decision 27: no initialization order to define. |
-| 121 | 2026-11-06 | `lucid.toml` is read by a small hand-written parser for a subset of TOML 1.0: tables, bare keys, strings, booleans, arrays, inline tables. Other forms are E0338, not a guess | `compiler.md` lists allowed dependencies and a TOML crate is not one. Every subset file is valid TOML, so tools still read it. See "Packages" in `research.md`. |
-| 122 | 2026-11-06 | Until the registry at M8, a dependency needs `path`. `version` is allowed beside it and ignored | Cargo and Go both let a local path stand for a dependency. Each package is one copy, so no version solving exists yet, and `lucid.lock` waits for M8 with the registry. |
-| 123 | 2026-11-06 | A package is a program with `src/main.lcd` or a library with `src/lib.lcd`, never both | Names follow Cargo, so agents already know them. One entry per package gives `lucid run`, `check`, and `test` one meaning. Cargo allows both, and this rule can loosen later with no program breaking. |
-| 124 | 2026-11-06 | `use name` needs `name` in the file's own manifest, whose key must equal the package's name. Renaming uses `as` in the file, and two packages with one name are E0339 | Rust and Go also make each dependency explicit. This leaves one way to rename, which `agents.md` asks for. Two versions of a package in one program waits for the registry. |
-| 125 | 2026-11-06 | A package module's internal name starts with `@`, and all of a package's files can be imported, limited by `public` | Keeps decision 115: no written name can clash. A module passes nothing on from its imports, so a library has no other way to show a part of its files. |
-| 126 | 2026-11-06 | No orphan rule yet. Two packages that add one task to one receiver type stop with E0304 in the program that uses both | It is a compile error, not a change in behavior, so no guarantee is at risk. A rule needs real packages to judge. Decide before the registry. |
-| 127 | 2026-11-06 | A directory on the command line, or none, means the nearest package at or above it. `lucid test` on a package runs every file in `src`, in one report | Agents run commands from any directory, and Cargo finds its manifest the same way. Imported modules drop their tests, so only a walk of `src` reaches them all. |
-| 128 | 2026-11-06 | `std` is Lucid source held inside the compiler, one copy per compiler. Only `std` may declare a `lucid_` runtime task, and pass it counted values. System calls are Rust's, in `lucid_rt` | `lucid build` must make a standalone `.exe`, and a program must not need files beside it. Rust's `std` already handles UTF-16 paths on Windows, and it brings Linux and macOS at M8. Calling `kernel32` from Lucid would need text from bytes, pointer reads, and one copy per system. Go and Rust also ship their standard library with the toolchain. See "Standard library" in `research.md`. |
-| 129 | 2026-11-06 | What follows the path in `lucid run` goes to the program, with no `--` | `examples/todo.lcd` already shows this form, and `go run` and `python` work the same way. `cargo run` needs `--` only because its flags can follow the path, and Lucid's come first. |
-| 130 | 2026-11-06 | `--unsafe` and `--costs` leave out `std` | They answer "what must I audit or fix", and a program's author can change neither. `std` ships with the compiler, and has no permission to grant. |
-| 131 | 2026-11-06 | `std.fs` reads and writes whole files, with no open-file value. `Close` waits for the first value that holds a resource, at M7. Narrows decision 94, which expected it at M5 | The M5 exit needs whole files only, and an open file brings `Close`, seek rules, and buffering with no program to judge them. Python's `Path.read_text` and Go's `os.ReadFile` show that the whole-file form is the common case. A file too large for memory waits for a real need. See "Standard library" in `research.md`. |
-| 132 | 2026-11-06 | `FileError` has three kinds that a program acts on, and `Failed` for the rest with the system's words | Rust's `ErrorKind` has dozens of kinds. A `match` must cover every variant, so each one here is a cost, and adding one later breaks programs. Missing and denied are the two a program usually treats differently, and `NotText` comes from `read_text` itself. Judgment call. |
-| 133 | 2026-11-06 | `std.time` has a wall `Time` and a forward `Instant`, each one `int` of nanoseconds, and a `Duration` of the same. `Date` is UTC only, with no zones or parsing | Two clocks follow Rust's `SystemTime` and `Instant`, and Go keeps both readings in one `Time` for the same reason: a wall clock can jump, so it cannot measure. One `int` gives order and `==` by derivation, at the cost of the range 1678 to 2262, which Go's `UnixNano` shares. Zone tables are large data with no program to justify them. The date math is Hinnant's, checked against Python's `datetime` in `tests/run/std_time.lcd`. See "Standard library" in `research.md`. |
-| 134 | 2026-11-06 | `Json` is a built-in trait with no tasks. `mono.rs` swaps calls to two `...` tasks of `std/json.lcd` for tasks made per type, in MIR for a `type`, `choice`, or union, and Lucid for the rest. Text goes through a private tree. No hand-written form yet. Supersedes the `Json` part of decision 75 | Decision 69 already derives per concrete type in MIR, and only the compiler sees a type's fields. Most of the work has no need of them, so it stays in Lucid, as `stdlib-and-web.md` asks. The tree lets a field be found in any order, and a task that writes MIR stays short. Cost: memory for the tree. Measured: 3 MB reads in 0.27 s. |
-| 135 | 2026-11-06 | A `choice` is external tags: `"Red"` and `{"Circle": {...}}`. A `type` skips unknown names. A repeated name keeps the last | External tagging is serde's default, and names no field, so it clashes with none, unlike a `"type"` key. Skipping names lets a reader survive a newer writer, and serde does the same by default. RFC 8259 says many implementations keep the last repeated name. See "Standard library" in `research.md`. |
-| 136 | 2026-11-06 | A union has `Json` only if each member reads from its own kind of JSON value. There is no trying of members | serde's `untagged` form depends on order, and a failed member's work is lost at each level, so nested unions can take exponential time on crafted input. Dispatch on the kind is linear, and it rejects `int or float` at compile time, where the fix is to write `float`. A mix that appears only through type parameters takes the first member, in type order, whose kind fits, and tries no other. `JsonError` has no `Json`, since a read could not tell it from a failure, which review found unsafe. Judgment call. |
-| 137 | 2026-11-06 | Input nested over 128 levels is a `JsonError` | A stack overflow is a trap, and a trap on input would let any sender end a program. RFC 8259 allows a limit, and serde_json's default is 128. |
-| 138 | 2026-11-06 | `json.write` gives `null` for a NaN or infinity, and reading a number too large for `float` is an error | JSON has no form for these, and RFC 8259 leaves range to the implementation. serde_json and JavaScript's `JSON.stringify` write `null`, from memory, not read for this entry. Python writes `NaN`, which is not JSON. |
-| 139 | 2026-11-07 | `lucid build` links a Cranelift object file with `lucid_rt`, built as a release static library that has a C `main`. The compiler embeds that library, and runs the MSVC `link.exe`, found by the `find-msvc-tools` crate | Decision 128 asks for one compiler file and a standalone program. A `main` in Rust needs no start code from the backend. Finding `link.exe` is the easy part: the linker also needs the paths of the Windows SDK and the C runtime libraries, which come from the Visual Studio setup data and the registry. `find-msvc-tools` is the part of the `cc` crate that does this, and it has no dependencies. `rust-lld` would still need the same paths. See "Executables" in `research.md`. |
-| 140 | 2026-11-07 | A built program reserves a 256 MiB main stack, and its tasks load the stack limit from a global. It targets baseline x86-64, and is named after its file or package directory, in the current directory | The same stack as `lucid run` gives the same programs the same traps. The load and the baseline target cost nothing measurable on three benchmarks, see "Executables" in `research.md`. A program built on one machine must run on another. Go also writes the program to the current directory, from memory. |
-| 141 | 2026-11-07 | `docs/errors.md` is the one list of error codes, an entry per code with cause, example, and fix. The compiler holds it through `include_str!` for `lucid explain`, and a golden test checks that each example gives its code | One copy cannot drift from the compiler, and a checked example cannot go stale. rustc keeps its `--explain` text the same way, as Markdown inside the compiler. See "Error explanations" in `research.md`. |
-| 142 | 2026-11-07 | `lucid context` prints each `public` header from the tokens of a file, with its `##` comments, and the members of a type, choice, or trait. It takes a file, a package directory, or `std.NAME`. A dependency by name waits for a real need | An agent needs the shape of an API, not its code, and a body costs tokens. Reading tokens keeps the output to what the author wrote, and works on a file that does not check. Go's `go doc` also prints declarations and doc comments without bodies, from memory. |
-| 143 | 2026-11-07 | A fix goes in a diagnostic only when it is near certain, and `lucid fix` makes every such fix with no prompt. A name fix needs one candidate within a third of the length, and no tie | A wrong fix that applies itself costs more than no fix, since an agent may not read the change. rustc's suggestions mark how sure they are for `cargo fix` in the same way, and use the same distance limit. Two equal candidates mean a guess, so none is made. See "Fixes" in `research.md`. |
-| 144 | 2026-11-07 | `lucid fmt` is a Lucid program inside the compiler that changes only space and line breaks, from tokens, with no parse. It has no options and no line limit. `lucid` re-lexes each file after it, and puts the old text back if the tokens differ | A token pass is enough for one canonical layout here, because the grammar already fixes indentation and line breaks. It needs no parser in Lucid before the self-hosted front end of M9, and is still a real program to test the language on, as decision 16 wants. gofmt also has no options and no line limit. The re-lex check turns a formatter bug into an error instead of a changed program. See "Formatting" in `research.md`. |
-| 145 | 2026-11-07 | Built `lucid fmt`, with two changes to the spec of decision 144. A line inside brackets is indented 4 past the line that opened the innermost open bracket, and a line that starts with closing brackets lines up with the line that opened the first of them. No space goes before `(` or `[` after `}`. The formatter runs in a child process | The first rule counted lines with open brackets, which put `], c)` 8 spaces in when `call(a, [` opened both brackets on one line. Lining up a closing line with its opening line is what gofmt and Black do, and the rule is shorter. After `}` a `[` or `(` can only index or call that value, as after `)`. A child process lets the re-lex check run even when the formatter traps, which in one process would end `lucid` before the check. |
-| 146 | 2026-11-07 | Permission checks: names at compile time per package, the root package too, and paths and names at run time against the root's lists for the whole program. `files` and `env` also take `true`. Outside the list, `std.fs` returns `Failed` and `env.get` traps. A program with no `lucid.toml` has full trust. Spec in `security.md` | Per-package run-time lists need a copy of each `std` task per package with shared types, which the resolver cannot do today. Deno checks paths for the whole process too. The compile-time rules still make the root list every path a dependency asks for. A command-line tool that takes paths as arguments needs `files = true`. See "Security" in `research.md` |
-| 147 | 2026-11-07 | A `use ./` cannot reach a file under another `lucid.toml` (E0339), and a listed path or name cannot be empty (E0338) | Permissions follow the nearest `lucid.toml`, so a nested manifest would let a package grant itself `unsafe`. An empty path would mean the whole working directory by accident. Found while building decision 146 |
-| 148 | 2026-11-07 | The M5 agent benchmark has four arms: Lucid, Lucid with the bare guide, Python, and TypeScript. Each arm does the 50 tasks in 5 blocks of 10, one new subagent per block, with at most 5 attempts per task. Tasks 01 to 10 are the M3 trial's. A task passes when its output matches a Python reference exactly. An attempt compiles when the language's own check passes: `lucid check`, `py_compile`, or `tsc --strict` | Reusing the trial's tasks lets the two runs be compared. Blocks of 10 keep each subject's context small, and spend 20 subagents in all, against 2 for the trial. Each check is the one a user of that language would run, so Python's is the weakest, which counts against Lucid and TypeScript in compile rate, not in pass rate. Judgment call, following the trial's method. No source on benchmark design was read. |
-| 149 | 2026-11-07 | A parameter or field default may be an empty `[]` or `{}`, as well as a literal. Each use makes a new collection | Both Lucid arms of the agent benchmark pilot wrote `balances: map[text, int] = {}` and hit E0313. Python's shared mutable default does not arise, since values copy and each use builds its own. A signature still tells everything. Evidence is the pilot in `research.md`. |
-| 150 | 2026-11-07 | Fuzzing is a hand-written mutation fuzzer, run as a unit test of the compiler, with no new dependency. It mutates the golden tests and other Lucid files, and checks that the front end through the ownership pass never panics. Code generation is not fuzzed | `cargo-fuzz` needs nightly Rust and libFuzzer, and `docs/compiler.md` allows no new crate without a reason. A unit test runs in every `cargo test`, so a regression shows at once. Mutating real programs reaches the checker often enough: about 14% of inputs. It finds panics, not wrong answers, and is weaker than coverage-guided fuzzing. Judgment call; no source was read. Look again if a panic is found in the field that it missed. |
-| 151 | 2026-11-07 | Decision 27 stays: a task reads a top-level `let` only if its value is a literal. No initialization order is defined | Go orders package variables by their dependencies, and Swift makes each global lazy behind a one-time check. Both add rules or run-time cost. Rust allows only constant initializers in a `static`, which is close to Lucid's rule. In the M5 agent benchmark, no Lucid solution of 100 hit the limit, and the only top-level values subjects wanted were literals. See "M5 open questions" in `research.md`. |
-| 152 | 2026-11-07 | No literal types, such as `"open" or "closed"`, in version 1. A `choice` covers the job | A second way to name a fixed set of cases breaks rule 1 in `agents.md`. TypeScript needs them because JavaScript passes such values as plain strings. Lucid has `choice`. Across 50 TypeScript solutions in the M5 benchmark, subjects wrote no literal union. See "M5 open questions" in `research.md`. |
-| 153 | 2026-11-07 | Bit operations are operators, `&` `\|` `^` `~` `<<` `>>`, on integer types, with Python's precedence: all bind tighter than comparisons and looser than `+`. A shift count below 0 or not less than the width traps. `>>` keeps the sign of a signed type | Python, TypeScript, Rust, Go, and C all spell them this way, so rule 6 in `agents.md` wins over rule 7. Tasks would be a form no model has seen, unlike `wrapping_add` in decision 80, which follows Rust. Python and TypeScript subjects of the M5 benchmark reached for `&`, `>>`, and `>>>` in hashing and checksum tasks. Python's precedence avoids C's trap, where `x & 1 == 0` means `x & (1 == 0)`. Rust traps on an oversized shift in debug builds, and Lucid traps in all builds, as with overflow. |
-| 154 | 2026-11-07 | Lucid is GPL-3.0-or-later. `runtime/` and `std/` add the Classpath exception, which `LICENSE-EXCEPTION` extends to compiling `std` into a program and to code the compiler writes into it | The owner chose GPL version 3, the runtime exception, and "or later". Every built program holds `lucid_rt`, `std`, and generated code, so without an exception each one would be covered by the GPL. GCC solves this with its Runtime Library Exception, but that text defines GCC by name and may not be changed. The Classpath exception is generic, and has an SPDX identifier. OpenJDK uses it with GPL version 2. See "License" in `research.md`. |
-| 155 | 2026-11-07 | Text split, integer parsing, case change, and list sort go in the prelude at M6. Their names and forms are settled when they are built | In the M5 agent benchmark, subjects with the bare guide wrote each of these by hand, so programs need them. They are not M5 items, and M5 met its exit criterion without them. M6 is next, and its browser programs will parse and show text too. Python, TypeScript, Go, and Rust all have all four. Evidence is "M5 agent benchmark" in `research.md`. |
-| 156 | 2026-11-07 | The header fields that compiled code reads are fixed width on every target: a count, a text's or list's length and room, a map's length, and a record's tag are `u64`, not `usize` | Then each offset, and each image of static data that `lucid_rt` builds, is the same on x86-64 and `wasm32`, so the WebAssembly backend reuses the host constants and needs no second copy of the layout. On x86-64 nothing changes size. Built at M6. See "WebAssembly" in `research.md`. |
-| 157 | 2026-11-07 | A web program is two WebAssembly modules: `lucid_rt` built for `wasm32-unknown-unknown`, which exports its memory and a growable function table, and the program, which imports them, two base offsets, and the runtime tasks it calls. Its data and table entries go at those offsets. Planned for M6 | This is the dynamic-linking convention of the WebAssembly tool conventions, with `__memory_base` and `__table_base`. The runtime can then call a compiled key task or task value through the shared table, and no linker or object format is needed. A relocatable object for `wasm-ld` needs much more encoder work, and merging modules in the compiler means rewriting runtime code. See "WebAssembly" in `research.md`. |
-| 158 | 2026-11-07 | In WebAssembly, every value is an `i64`, as on native, with addresses zero-extended. A `change` argument lives on a shadow stack in linear memory. Replaced by 167 | Slots, keys, and MIR already assume 64-bit values, so one rule serves both backends. A WebAssembly local has no address, so a slot that a callee writes must be in memory. |
-| 159 | 2026-11-07 | On `wasm32`, the runtime prints, traps, and exits through JavaScript imports. `time.now` and `time.clock` use `Date.now` and `performance.now`, and `time.sleep` traps. Hash keys come from `crypto.getRandomValues`. `std.fs`, `std.env`, and `std.args` stay unchanged, so a file task gives `Failed`, `env.get` gives none, and `args.all()` gives `[]`. Built at M6 | Rust's standard library on that target imports nothing and returns errors from `std::fs`, so only what it cannot do needs code. A browser cannot block, so a sleep would freeze the page. JSPI may change that at M7. `SipHasher::new_with_keys` is deprecated but stable, and takes keys where `RandomState` cannot. |
-| 160 | 2026-11-07 | `lucid build --target web app.lcd` writes one file, `app.js`: the loader, with both modules inside it as base64. A page loads it with a classic `<script src>`. The same file runs under `node` | Module scripts and `fetch` fail from `file://`, since module requests use CORS, so one classic script is the only form that opens straight from disk. One file is also one thing to ship. Base64 costs a third more bytes, which waits for a real page that minds. Node runs the golden tests. |
-| 161 | 2026-11-07 | A trap in WebAssembly prints the same message and trace as native. The compiler writes a table from code offset to task, line, and column, and the loader reads the frames of the JavaScript stack through it. An engine stack overflow prints the stack overflow trap. Planned for M6 | WebAssembly has no frame pointers to walk, but engines put each frame's function and code offset in `Error.stack`. One output for both targets keeps one set of golden files, and agents read the same trace. |
-| 162 | 2026-11-07 | Under `--target web`, a user `extern` and `.pointer()` are a compile error, and `use std.dom` without it is another, each with its own code: E0905 and E0906. Built at M6 | Neither can run there, and an error at compile time costs an agent one turn, where a missing import fails only when the page loads. |
-| 163 | 2026-11-07 | The browser UI shape is the Elm architecture: a model, `view(model)` giving a tree of nodes whose handlers name messages, and `update(change model, message)`, run by `dom.app`. `std.dom` diffs each new tree against the page, matching by tag and position. Names are settled by writing the example page first. Built at M6, refined by 168 | A capture cannot change (E0325) and there is no mutable global, so state cannot live in an event handler. A model that one task changes in reply to messages fits value semantics exactly. Elm splits every program into these three parts, and Redux and iced use the same split. Matching by position keeps an `<input>` and its focus. A keyed diff waits for a list that reorders. See "WebAssembly" in `research.md`. |
-| 164 | 2026-11-07 | `cargo test` builds every run and trap test with `--target web`, runs it under Node, and compares with the same golden files. `std.dom` tests use a small fake `document`. A missing `node` fails these tests. Built at M6 | The same files hold both backends to one behavior. Skipping when `node` is missing would let a broken backend pass. Leak checks stay native only, since the web runtime is a release build. |
-| 165 | 2026-11-07 | The prelude tasks of decision 155 are `x.split(separator)`, `x.upper()`, `x.lower()`, and `x.to_int()` on text, and `x.sort()` on a list. An empty separator traps. `to_int` gives `int?`, and takes only an optional sign and ASCII digits. Case follows Unicode's default rules. `sort` is a stable merge sort, written in Lucid in the prelude | Each name is the one Python uses, or the one Lucid already uses: `to_int` is the number conversion, and `int?` follows `.get`. A trap on an empty separator follows Python, and `for` already visits characters. A strict `to_int` follows Rust and Go, so `" 4"` is not a number by accident. Python, JavaScript, and Rust sort stably by default, and stable is never wrong where unstable is fine. A sort in Lucid calls a hand-written `compare`, which the runtime cannot. See "Prelude tasks" in `research.md`. |
-| 166 | 2026-11-07 | Refines 157 and 158. A WebAssembly local has the type of the Cranelift value on native: `i64` for an integer or an address, `f64` or `f32` for a float, and `i32` for a `bool` or `none`, since WebAssembly has no `i8`. The loader makes room for static data by growing memory itself, not through a runtime task | Decision 158 says "every value is an `i64`, as on native", but native keeps a float in float registers and a `bool` in a byte. A float moved through an integer local would cost a reinterpret at each operation. The runtime's allocator, dlmalloc, takes each new region from `memory.grow` and uses only what that call returned, so pages that the loader grew first are never handed out, and the runtime needs no new task. See "WebAssembly" in `research.md`. |
-| 167 | 2026-11-07 | Replaces the shadow stack of decision 158. In WebAssembly, a task with `change` parameters returns several values: its result, then the value of each `change` parameter when it ends. The caller sets its locals from them. Built at M6 | Native passes the address of a stack slot, which the callee loads when it starts and stores when it ends. Returning the values does the same with no memory, no global, and no allocation. Multi-value returns are in WebAssembly 2.0, and Chrome 86, Firefox 78, and Safari 13.1 support them. A task value has no `change` parameter, so `call_indirect` keeps one result. See "WebAssembly" in `research.md`. |
-| 168 | 2026-11-07 | Refines 163. `update` is a `task(M, Msg) -> M` that gives the new model, and `dom.app(init, view, update)` runs the page. A page is a `dom.Node[Msg]`, built only by the constructors `dom.Element`, `dom.Text`, `dom.Attribute`, and `dom.On`. `dom.On(event, message)` gives a `Msg` from the event's key, or else the element's value. Each render numbers its handlers, and the runtime keeps one task value, which runs a handler by its number and then keeps the next one. `std.dom` traps on a `script` element, on an attribute that starts with `on`, on `formaction` and `srcdoc`, and on a `javascript:` or `data:text/html` value. Built at M6 | A task with a `change` parameter has no value form, so `update(change model, message)` could not be passed. Elm's `update` gives the new model too, and copy on write makes `var next = model` cheap. A generic call takes no type arguments from its context, so `dom.text("a")` could not know `Msg`, where a constructor can. The state lives in the task value that the runtime holds, since there is no mutable global. Elm's virtual DOM rewrites the same tags, attribute names, and values, so that a page runs no code that it did not write. Lucid traps instead, since a silent change hides a bug. See "Browser pages" in `research.md`. |
-| 169 | 2026-11-07 | Each `spawn` runs on an OS thread of its own. There is no scheduler of lightweight tasks. Planned for M7 | Java's virtual threads cannot unmount while native frames are on the stack, and JEP 491 still pins a thread that blocks under a foreign call. Lucid calls foreign code from any task, so a scheduler would pin often. Rust removed green threads before 1.0, partly for their stack cost. With no `async`, by decision 10, a scheduler can replace threads later and no program changes. The ceiling is one thread for each open connection, so a server caps them, by decision 178. See "Concurrency" in `research.md`. |
-| 170 | 2026-11-07 | Counts are safe across threads by the sign of the count, as in Lean 4. A positive count belongs to one thread and changes with plain instructions. A negative count is shared by threads and changes atomically. A count of 0 marks static data, which nothing changes, in place of `1 << 62`. A value that crosses to another thread, through `spawn`, `send`, or a lock, is marked, with all it reaches. Marking stops at a value already marked, so a marked value reaches only marked values. A write to a marked value with one count first makes it positive again, after an acquire load, as Rust's `Arc::get_mut` does. The result of `wait` is not marked. Built at M7, within 2% on the M4 benchmarks, see "Signed counts (M7)" in `research.md`. Nothing marks until `spawn` | Values in one thread pay one compare more on retain, and nothing more on release, since compiled code already tests the count there. Marking costs the size of a value once, and a value sent again costs nothing. Lean 4 never writes in place to a marked value, so a list in a lock would copy on each write. Taking back a marked value with one count is sound: no other thread holds it, so no other thread can add a count. The thread of `spawn` has ended when `wait` returns, so its own values are reachable only from the result. Static data had a count that every thread wrote, which would be a data race. |
-| 171 | 2026-11-07 | `spawn f(x)` takes a call, runs it on a new thread, and gives a `spawned[T]`. `.wait()` blocks until the thread ends, and gives its result. Every spawn ends before the task, lambda, or top level that ran it returns, which waits for it. This replaces "the enclosing block" in `language.md`. A thread whose handle no value holds is forgotten when it ends. `shared` values cannot cross, with an error code when `shared` is built. Planned for M7 | A block per loop pass would wait at the end of each pass, so `for` could never start many tasks at once. Waiting at the end of the task keeps the guarantee that nothing outlives its parent, as Rust's `thread::scope` and Java's `StructuredTaskScope` do. A server's loop never returns, so it must not keep a record of every thread it ran. `spawned` is lowercase like `list`, since the prelude defines it. |
-| 172 | 2026-11-07 | A trap in any thread ends the process, with code 101 and its trace. No trap is contained. A server runs under a process supervisor, which restarts it. Planned for M7 | Go's `net/http` recovers a panic in a handler, and the Go team calls that a historical mistake. A trap can stop a task in the middle of a write through a lock, so the state that other threads see would be broken. Unwinding Cranelift frames would also need unwind tables and a release of every count on the way. This settles the open question. |
-| 173 | 2026-11-07 | `channel[T](capacity)` and `lock(value)` are prelude types, not `std.task`, which `task` cannot name, since it is a keyword. Copying either one shares it, like a file. A channel has `send(value)`, which blocks when full, `receive()`, which gives `T?` and gives `none` once it is closed and empty, and `close()`. `send` after `close` traps. `receive` must be a whole statement, as `pop` must. A lock has `read()`, which gives a copy, and `update(f)`, which runs a `task(T) -> T` while it holds the lock, and keeps the result. A thread that takes a lock it holds traps. Planned for M7 | Go's channels have the same operations, and Go panics on a send after close. A `change` parameter has no task type, so `update` takes the value and gives it back, as `dom.app` does by decision 168. `read` copies, so no thread holds a view into the lock. A lock taken twice by one thread would wait forever. |
-| 174 | 2026-11-07 | When every thread of a program waits in `wait`, `send`, `receive`, or a lock, the program traps with "deadlock". A thread in a system call, such as `accept`, does not count as waiting. Planned for M7 | Go reports "all goroutines are asleep" the same way. A count of threads and of waiting threads finds it, with no scan of the graph. A thread in a system call may still wake. |
-| 175 | 2026-11-07 | Every task takes a hidden first parameter: the stack limit of its thread. The runtime keeps it in a Rust thread local, for calls from the runtime into compiled code. A spawned thread gets a 64 MiB stack, reserved, not committed. Built at M7, except the spawned thread: within 2% on the M4 benchmarks, and up to 10% on `fib`, see "Stack limit parameter (M7)" in `research.md`. Replaces the global of decision 140 | `cranelift-jit` 0.137 does not support thread locals ("JIT doesn't yet support TLS"), so `lucid run` could not read a per-thread limit. Wasmtime passes a context to every function, and reads the stack limit from it. If the benchmarks of "M4 benchmarks" slow by more than 2%, try Cranelift's pinned register. |
-| 176 | 2026-11-07 | Under `--target web`, `spawn`, `std.net`, and `std.http` are error E0907. `channel` and `lock` work there, with one thread. Planned for M7 | WebAssembly threads need shared memory, which browsers allow only on pages with cross-origin isolation headers. A channel and a lock are still useful as a queue and a cell with one thread. An error at compile time costs an agent one turn, as with E0905. |
-| 177 | 2026-11-07 | `std.net` gives `net.listen(port)`, a `Listener` with `accept()`, and `net.connect(host, port)`, which each give a `Connection` with `read(max)`, `write(bytes)`, and `set_timeout(length)`. Each one fails with a `NetError`. A listener or connection is a runtime value that closes when its last count goes. A `Close` trait for user types still waits. Planned for M7 | The runtime already frees a value at its last count, so a socket closes with no new language feature. Timeouts are needed so a slow client cannot hold a thread forever. |
-| 178 | 2026-11-07 | `std.http` is written in Lucid on `std.net`. The server speaks HTTP/1.1 with keep-alive, and runs each connection on a spawned thread, with at most 256 at once. It rejects a request with both `Content-Length` and `Transfer-Encoding`, with two `Content-Length` values, with a coding other than `chunked`, or with a folded header line, and closes the connection. It limits a request head to 16 KiB and a body to 1 MiB, and times out a silent connection after 30 seconds. Every response has a `Content-Length`. `http.App` routes by method and exact path. Planned for M7 | RFC 9112 lets a server reject a message with both framing headers, and smuggling bugs in Crystal and http4s came from accepting one. Writing the parser in Lucid needs no new dependency, and tests the language on real input. The limits and timeout bound what one client can hold. |
-| 179 | 2026-11-07 | TLS is for the client only, through `rustls` with the `ring` provider, and `webpki-roots` for trusted roots. The runtime holds them on native targets only. A server with TLS waits for a program that needs it: run it behind a proxy. Planned for M7 | Never hand-roll cryptography. `rustls` defaults to `aws-lc-rs`, which needs `cmake`, and NASM on Windows, while `ring` needs only a C compiler, which `lucid build` already finds. Roots built into the program act the same on every system, and update with each Lucid release. |
-| 180 | 2026-11-07 | `std.html` builds a tree with `html.Element`, `html.Text`, and `html.Attribute`, and a task for each common tag, such as `html.h1(text)`. `html.render` escapes all text and attribute values. It traps on what `std.dom` traps on, by decision 168. Planned for M7 | The same tree shape as `std.dom` gives one way to write a page. Escaping by default is a rule in `security.md`. A `javascript:` link from user input would run code even when escaped, so the guards apply on the server too. |
-| 181 | 2026-11-07 | Bit operator details beyond decision 153. The levels follow Python from loose to tight: `\|`, `^`, `&`, then shifts, all between `..` and `+`. A shift count has the type of the value, as both sides of every other operator do. `<<` drops the bits shifted out instead of trapping, and `~` flips the bits of the type's width only | Rust traps on a count of the width or more, or below zero, but lists no overflow for bits shifted out of `<<`, and Go discards them. Hashes such as FNV-1a and checksums shift bits out on purpose, and the M5 subjects wrote them that way. One type on both sides keeps rule 6 of `agents.md`: no new conversion rule. Built in M7. See "Bit operators" in `research.md` |
-| 182 | 2026-11-07 | How `spawn` is built, beyond decisions 171 and 175. `spawn f(x)` lowers to a task value with no parameters, whose captures are the arguments, and whose code returns a list of one item, the result. A hidden counted local holds the join handles of each task's threads, and its last count, which the exit block gives up, joins them. Once that local holds 16 threads, and then twice what was kept, the runtime joins and drops each thread that ended and that no handle reaches. A `spawned[T]` shows its type, as a task value does, and has no other trait. A `spawn` not given a call of a task, or given a `change` argument, is E0341. Built in M7 | Captures already run in the thread that makes a task value, which is what decision 171 asks of arguments, so `spawn` needs no new lowering. One result shape lets the runtime call any spawn through one signature: a float would otherwise come back in a float register. The exit block already releases every counted local once, on every path, so a join there needs no new exit code. Joining only at the end of a task would keep every thread of a server loop, which never returns, so ended threads that no handle reaches are dropped as they pile up, which costs a scan each time the count doubles. A thread handle has no sensible order or equality, as Rust's `JoinHandle` and Go's goroutines have none. A `change` argument would let the thread write a variable of this one. |
-| 183 | 2026-11-07 | Refines 93. A task value owns its arguments: a call through one gives a count of each counted argument, and its code moves each to a local of its own when it starts. So a lambda, a nested task, and the small task in front of a top-level task used as a value all list their counted parameters in `Task::take`, in both stages of the ownership pass. A top-level task and a written `equal` keep the borrowed form. Built in M7 | `lock.update(f)` must write in place when the lock's value has one count, by decision 173, and a borrowed parameter cannot reach one: the caller still holds its count. Decision 93 said a call through a value cannot pass a count, but that holds only if the convention depends on the callee. One convention for every task value needs no test at the call. Lean 4 uses owned parameters for code it reaches through a closure for the same reason, see "Counting Immutable Beans" in `research.md`. The cost is a retain at a call that reads its argument again, which `lucid check --costs` shows, in place of a retain inside a task that keeps it. |
-| 184 | 2026-11-07 | How `channel` and `lock` are built, beyond decisions 173 and 174. Each value in a channel or a lock is a list of one item. `send`, `close`, and `update` are statements, and `receive` is the whole value of one. `update(f)` takes the value out of the lock, so it has one count, and passes it to `f`, which owns it by decision 183. `close` on a closed channel traps. One 64-bit word counts threads and waiting threads, and a thread that wakes others stops counting them before it notifies. A runtime task that fails records why, and the compiled code traps right after the call. The type of a channel comes from `channel[T](n)` or from the context, and that of a lock from its value or the context. Built in M7 | A list of one item lets one runtime type hold any value, as the result of `spawn` does by decision 182. A statement keeps the moves of the ownership pass, which an expression's own statements do not get, so `update` can write in place. Go panics on a second `close` too: it is a bug in who owns the channel. Counts in one word change together, so no thread sees a deadlock between two updates. The trap after the call shows the place of the call on native and web alike, which a trap inside the runtime cannot, since a Rust frame ends the walk of frame pointers. |
-| 185 | 2026-11-08 | How `std.net` is built, beyond decision 177. `Listener` and `Connection` are `type`s in `std/net.lcd` whose field has the built-in type `socket`, which only `std` can name. `net.listen(port, host = "127.0.0.1")` takes port 0 for a free one, and `Listener.port` tells which. `NetError` is `Refused`, `TimedOut`, `InUse`, `Closed`, or `Failed(detail)`. `read(max)` gives an empty list when the other end has closed, and takes at most 64 KiB at once. A timeout must be longer than 0. `use std.net` under `--target web` is E0907, at the `use`. Built in M7 | A field of a hidden type lets each kind be its own type with tasks written in Lucid, and adds one counted handle type, not two. Listening on this machine only, until a program asks for `"0.0.0.0"`, keeps a program under development off the network. Flask does the same, though its stated reason is its debugger, so the evidence is weak and this is a judgment call. Rust's `set_read_timeout` rejects a zero length, and reports a timeout as `WouldBlock` on Unix and `TimedOut` on Windows, so both read as `TimedOut`. An error at the `use` points at the user's line, not inside `std`. See "Sockets (M7)" in `research.md`. |
-| 186 | 2026-11-08 | How `std.html` and the `std.http` server are built, beyond decisions 178 and 180. `html.render` checks each tag and attribute name, which must be ASCII letters, digits, and `-`, and for an attribute `_` and `:`, and traps through `expect` with the reason as the text compared. `app.serve(port, host = "127.0.0.1")` gives a value only if it cannot listen, and `app.answer(connection)` serves one connection, which `serve` runs on a thread for each, holding one of 256 slots of a channel. A request needs exactly one `Host` in HTTP/1.1, no space before a colon, and a target that starts with `/`. A refusal answers 400, 413, 431, or 501 for an unknown coding, then closes. HTTP/1.0 closes after each response. `HEAD` runs the `GET` handler and drops the body. A path with routes for other methods gives 405 with `Allow`. A handler cannot set `Content-Length`, `Transfer-Encoding`, or `Connection`, nor a header with a line break, nor a status below 200, nor a body on 204 or 304, which get no length. `request.body_text()` gives the body as text. Built in M7 | Each rule is a MUST or SHOULD of RFC 9112 or RFC 9110, see "HTTP server (M7)" in `research.md`. A name check is needed since escaping covers values only: a tag of `a onclick=x` would add an attribute. A header from a handler with a line break, or a second length, would let it write two responses where a proxy reads one. `expect` already traps with a position and a trace, so the reason needs no new built-in. `answer` lets a test, or a program, serve a connection it accepted itself. A program has no other way to turn bytes into text, and a POST handler needs one. |
-| 187 | 2026-11-08 | How the `std.http` client is built, beyond decision 179. `http.get(url)` and `http.post(url, kind, body)` give a `Response or NetError`, in Lucid on `std.net`, whose new `connection.secure(host)` starts TLS as a client and checks the certificate within that call. Each request opens its own connection, and sends `Host`, `User-Agent: lucid`, and `Connection: close`, and for a `POST`, `Content-Type` and `Content-Length`. A URL is printable ASCII, starts with `http://` or `https://`, and has a host of letters, digits, `-`, and `.`, and a port from 1 to 65535. Its fragment is not sent. A response is read strictly: a 1xx response is skipped, 204 and 304 have no body, and two lengths, a length with chunks, or a coding other than `chunked` fail. With no length, the body ends where the server closes. The head may hold 16 KiB, and the body 16 MiB, and a silent server fails after 30 seconds. No redirect is followed. A failure is `Failed(detail)`. Built in M7 | One connection per request needs no pool, and RFC 9112 makes a client that sends `close` close after the response, so a body with no length ends safely at the close. RFC 9112 calls two different lengths an unrecoverable error, and a length with `Transfer-Encoding` a message that "ought to be handled as an error". Lucid rejects these as its server does, and also a coding other than `chunked`, where the RFC reads to the close, since the client asks for no coding. Printable ASCII keeps a URL from adding a line to the request. A redirect followed with no sign could send a `POST` body to a new host, or move from `https` to `http`, so the program sees the 3xx and decides. `NetError` keeps one error type, and its detail tells what failed. A handshake inside `secure` makes a bad certificate fail there, and not at the first read. See "HTTP client (M7)" in `research.md`. |
-| 188 | 2026-11-08 | M8 builds in this order: prelude text tasks, dead-task elimination, Linux, macOS, `std.crypto`, `std.sql`, the orphan rule, the registry and `lucid.lock`, `lucid lsp`, then the spec review and the 1.0 promise. Planned for M8 | Each later step must pass its tests on all three systems, so the systems come first. The registry hashes archives through `std.crypto`. Dead-task elimination comes before `std.sql`, so a program that does not use SQLite does not link it. The spec review comes last, since every other step changes the spec. |
-| 189 | 2026-11-08 | Text gets `starts_with`, `ends_with`, `contains`, `find`, and `trim` in the prelude. `x.find(part)` gives the `int?` character index of the first match. `trim` removes Unicode white space at both ends. `std.http` and `std.html` drop their own copies, except that `std.http` keeps a trim of spaces and tabs alone, the optional white space of RFC 9110: a wider trim would accept header values that another server reads differently. `contains` is `find` with a test, so the runtime has one search | The M7 audit found `std/http.lcd` and `std/html.lcd` each writing these by hand, and any user program would too. The names and forms follow Python's `startswith`, `in`, `find`, and `strip`, with Rust's names and `none` in place of Python's -1, as decision 165 did for `to_int`. |
-| 190 | 2026-11-08 | Only tasks that the top level, a `test` block, or an export for the web loader can reach are compiled. `lucid check` and `lucid fix` still build every task with no type parameters, so each one shows its errors and costs. Built at M8: `examples/website.lcd` went from 2,067,968 to 933,888 bytes | Every non-generic task compiles today, so each program that uses `std.net` links `rustls`, about 1.5 MB, and SQLite would add more. A linker drops only what nothing names, and a compiled task names its callees. Reachability from the entry points is the standard fix, and the monomorphizer already walks calls. |
-| 191 | 2026-11-08 | `lucid run`, `test`, `check`, and `build` work on `x86_64-unknown-linux-gnu` and `aarch64-apple-darwin`, for the machine they run on only. `lucid build` links through the system `cc`, which finds the C start files and libc. On both, a built program runs `lucid_main` on a thread with an `EXE_STACK_BYTES` stack, since the linker does not set the main thread's stack there. Foreign tasks resolve through `dlsym`. `lucid build` stages files in a new directory with a random name, made with `create_dir` and mode `0700`, that must not exist yet. Built at M8 for Linux, where a built program also ignores SIGPIPE, as a Rust `main` does, and `find_symbol` also looks in libm | `cranelift-object` 0.137.1 writes ELF and Mach-O, read in its source. `cc` is how rustc links on both systems, and macOS needs the Xcode command line tools for the SDK. Linux takes the main thread's stack from `ulimit`, often 8 MiB, not from the file. The fresh private directory closes the gap found in M5 review: `/tmp` is shared, so a reused directory name could let another user plant files. Cross-compiling waits for a need. Intel Macs are left out, since Apple no longer sells them. |
-| 192 | 2026-11-08 | Linux is checked on the owner's machine in WSL. macOS is checked by a GitHub Actions job on `macos-latest` that runs `cargo test` on each push to the private repository. The account keeps a spending limit of $0, so a job past the free minutes stops instead of costing money. Planned for M8 | No Mac is at hand. GitHub's docs say a macOS minute counts as 10 Linux minutes, and the Free plan has 2,000 a month for private repositories, so about 200 macOS minutes. That is enough only if each run stays short, so the job runs the tests, not the benchmarks. |
-| 193 | 2026-11-08 | `std.crypto` wraps `ring` for `sha256`, `sha512`, `hmac_sha256`, `hmac_check`, `same` (a constant-time compare), and `random_bytes`, and the `argon2` crate for `hash_password` and `check_password`. Passwords use Argon2id with OWASP's first setting, m=19456, t=2, p=1, in a PHC string, so the setting can rise later and old hashes still check. `crypto.hex(bytes)` writes lowercase hex. It needs no permission, and is E0907 under `--target web`. Built at M8, and amended by decision 208 | `stdlib-and-web.md` forbids hand-rolled primitives. `ring` is already in `lucid_rt`, through `rustls`, and holds digests, HMAC, and a constant-time check. OWASP's cheat sheet puts Argon2id first, and PBKDF2 only where FIPS-140 is required. `ring` has no Argon2, so one new crate is needed. The web waits for a need, since `ring` builds C for each target. |
-| 194 | 2026-11-08 | `std.sql` is SQLite, through `libsqlite3-sys` with its `bundled` feature, in `lucid_rt` on native targets only. `sql.open(path)` needs the `files` permission for the path, checked as `std.fs` checks it, and `":memory:"` needs none. `db.run(query, values)` and `db.query(query, values)` take a `sql` query and a `list[sql.Value]` for its `?` marks, and a `Row` has `columns` and `values`. Each call can fail with `SqlError`. A `Db` is a counted handle, closed on its last release. It may go to another thread, since the bundled build is serialized. E0907 under `--target web`. Built at M8, and amended by decision 209 | SQLite needs no server, so a program and its tests stay one process. The bundled build pins one SQLite version on every system. `rusqlite` is a safe wrapper for Rust callers, which the runtime does not need: its own small layer calls the C API. Typed decoding of rows, as `Json` does, waits for real programs. |
-| 195 | 2026-11-08 | `sql` is a built-in type. A text literal with no interpolation has type `sql` where the context expects `sql`, and `sql + sql` is `sql`. There is no conversion from `text`. So a query is built only from text that the program's author wrote, and every value goes through a `?` mark. Built at M8, and amended by decision 209 | Kern's "Safe Coding" report and Google's compile-time constant strings make an injection a type error, not a review item. A number literal already takes its type from the context, so this adds no new kind of rule. `+` lets a program write a list of `?` marks of any length for `IN`. A name chosen at run time, such as a table, has no way in. That is the price, and it waits for a need. |
-| 196 | 2026-11-08 | Orphan rule, settling the open question. In a package, a task with `self` needs its receiver's type, or a trait that names the task, declared in the same package. Built-in types belong to `std`. A file with no `lucid.toml` is exempt, since nothing can depend on it. A breach gets a new error code. Built in M8, see decision 210 | With a registry, two authors who never met can each add one task to `text`, and a program that uses both has no fix but to drop one. Rust's orphan rule exists for the same reason. A package can still write a task that takes the value as a plain argument, or a type of its own that holds it. Scripts and tests keep the freedom they use today. |
-| 197 | 2026-11-08 | A registry is a tree of static files: `index/NAME`, with one JSON line per version that holds the version, its dependencies, and the SHA-256 of its archive, and `files/NAME/VERSION.lpk`. The root manifest names it with `[registry] url`, an `https://` URL or a local directory. There is no default registry until a public release, which is the owner's choice. `lucid package` writes the archive and the index line, and the author uploads both. Built in M8, see decision 211 | Cargo's sparse index, by RFC 2789 and the default for crates.io since Rust 1.68, is also plain files over HTTP, and the Go module proxy is the same idea. Static files need no server code and run on any static host, and a local directory makes the tests work offline. |
-| 198 | 2026-11-08 | A dependency with `version = "1.2.0"` and no `path` comes from the registry. Versions are chosen by minimal version selection: each requirement is a floor, and the program gets the highest floor of each package. A floor reaches up to the next major version, or the next minor while the major is 0. A program holds one version of each package, so two majors of one package in one program are an error. Built in M8, see decision 211 | Russ Cox's MVS gives the same build from the same manifests, with no solver, and needs no lock file to pick versions. An upgrade happens only when a manifest asks for it. One version per name is already the rule, by decision 124, and keeps types from two copies of a package apart. |
-| 199 | 2026-11-08 | `lucid.lock`, beside the root manifest, lists each registry package with its version and the SHA-256 of its archive. Commands write it, and the author checks it in. An archive whose hash differs from the lock or the index is an error, and is never fetched again in silence. `lucid run`, `test`, `check`, and `build` fetch missing archives into a cache owned by the user, and say so on stderr. Built in M8, see decision 211 | MVS already fixes versions, so the lock pins contents, as `go.sum` does. A changed archive is an attack or a broken registry, and both need a person. Cargo also fetches on build, which keeps one step for agents. Compiling never runs a dependency's code, so a fetch cannot run it either. Go's checksum database also guards the first download. Lucid has none at 1.0, which `security.md` states. |
-| 200 | 2026-11-08 | An archive, `.lpk`, is one JSON object from each path to its text: `lucid.toml`, every `.lcd` file under `src`, and `README.md` and `LICENSE` if present. A path holds only lowercase ASCII letters, digits, `_`, `-`, `.`, and `/`, with no empty part, `.`, or `..`. A registry package may not have a `path` dependency, settling the open question. Built in M8, see decision 211 | Packages are text, so JSON through `std.json` needs no zip or tar code. The strict path rule stops an archive from writing outside its cache directory, the "zip slip" attack. crates.io also refuses a package that reaches outside itself. |
-| 201 | 2026-11-08 | The registry client is a Lucid program inside the compiler, as `lucid fmt` is, on `std.http`, `std.crypto`, `std.json`, and `std.fs`. The compiler runs it before it loads the program, when the lock and the cache do not cover the manifest. Built in M8, see decision 211 | Decision 16 wants real programs in Lucid. Everything the client needs exists by then, and the compiler already holds the runtime and its TLS. |
-| 202 | 2026-11-08 | `lucid lsp` is a language server on stdin and stdout, in Rust inside the compiler, with no new dependency. It syncs whole documents, and gives diagnostics, formatting through `lucid fmt`, go to definition, and hover with the type and `##` comment of a name. Positions are in UTF-16, the one encoding the protocol requires. Completion waits until the checker can work past an error. No editor extension ships yet: `docs/agents.md` will show how to point an editor at the command. Built in M8, by decision 212 | LSP 3.17 makes UTF-16 mandatory, and full sync is its simplest mode. The compiler already writes JSON for `--json`, so it needs only a small reader. Diagnostics, formatting, definition, and hover reuse what `check`, `fmt`, and the resolver give now. An editor extension needs packaging and a store, which waits for a public release. |
-| 203 | 2026-11-08 | No LLVM backend for 1.0, settling the open question. Decision 101 stands | No real program has shown tight numeric loops as a problem. The cost of an LLVM dependency is known, and the gain for Lucid programs is not. Look again with evidence. |
-| 204 | 2026-11-08 | Version 1.0 promises, as Go 1 does, that a program that builds under 1.0 builds and behaves the same under every 1.x. It covers `docs/language.md`, `docs/grammar.md`, the `std` modules, `lucid.toml` and `lucid.lock`, the commands and their flags, the meaning of each error code, and the fields of `--json` output, which may gain fields. It does not cover message text, the runtime's layout, built files, or speed. A fix to a safety hole may break a program. There are no editions. In force from the end of M8, see "Version 1.0 promise" in `vision.md` | Go's promise has held since 2012 with the same limits: source, not binary, and security fixes excepted. Editions, as in Rust, are a second way to read a program, and `vision.md` puts simplicity first. The promise needs a full spec review first, against the code, by the `spec-reviewer` agent and the planned `/code-review ultra`. |
-| 205 | 2026-11-08 | Supersedes the macOS part of decision 191, and decision 192. M8 supports Windows and Linux only. macOS waits, with no milestone, and there is no GitHub Actions job. Code for Linux keeps to what POSIX gives, such as `dlsym` and `cc`, so macOS stays a small step later. Planned for M8 | The owner has no Mac, and the GitHub Free plan. A port that no one can run is not checked, and an unchecked port breaks the rule that every feature has a passing test. CI on macOS would spend free minutes at 10 times the Linux rate. |
-| 206 | 2026-11-08 | The public website, lucidlang.dev, lives in `website/`: a static Astro site with Starlight for the docs, deployed by Cloudflare Pages from this repository. It needs no Rust toolchain to build. Its docs are curated by hand, and every `lucid` block in them must pass `lucid check`, by `npm run check:examples`. Only `docs/errors.md`, `docs/agent-guide.md`, and `examples/` are read straight from the repository. No Tailwind, no analytics, no external fonts or scripts. Installers at `/install.sh` and `/install.ps1` are reserved, and fail with a message until a release exists | Starlight gives a sidebar, a table of contents, copy buttons, and Pagefind search with no paid service. A static site fits the free Pages plan. Those two files are written for users, so reading them keeps one source. The rest of `docs/` holds internal research and decisions, which stay private. Plain CSS covers six pages, so Tailwind would add a dependency for nothing. An installer that pretends to work is worse than none. Sources: the Astro, Starlight, and Cloudflare Pages docs, read 2026-11-08. |
-| 207 | 2026-11-08 | When the `std.http` server refuses a request, it closes in stages: it sends the answer, closes its write half through the runtime's `lucid_net_close_write`, then reads and drops input until the client closes, 2 seconds pass with no bytes, or 16 reads have come, so at most 1 MiB and 32 seconds. Only `std/http.lcd` calls it, so `std.net` gains no public task | RFC 9112 §9.6: a close with input unread can reset the connection, so the client may never read the answer. On Linux, in WSL, the 431 check of `tests/run/std_http.lcd` lost its answer this way in every full test run. The time and byte limits keep a client from holding the thread, as the 30-second timeout does. See "Ecosystem (M8)" in research.md. |
-| 208 | 2026-11-08 | Amends decision 193. `crypto.same` compares through `subtle`'s `ConstantTimeEq`, not `ring`. `crypto.hex` is in the runtime. `random_bytes` traps on a negative count. `check_password` gives false for a hash that is not an Argon2 PHC string. `argon2` 0.6 has only `alloc` and `password-hash`, and the 16-byte salt comes from `ring`'s `SystemRandom`. `argon2` and `blake2` are optimized in dev builds | `ring` 0.17.14 marks its `constant_time` module deprecated, "with no promises regarding side channels", in `src/lib.rs`. `subtle` 2.6.1 is already built for `rustls`, so no new crate compiles. `argon2`'s default `getrandom` feature would add a second random source. Its check reads the algorithm, version, and setting from the PHC string, in `password-hash` 0.6.1, so a later rise in the setting still checks old hashes. Unoptimized, the golden test took 2.2 s, and 0.7 s optimized. See "Ecosystem (M8)" in `research.md` |
-| 209 | 2026-11-08 | Amends decisions 194 and 195. A `Value` is `Null`, `Int`, `Float`, `Text`, or `Bytes`, each with one field `value`. A `SqlError` is `Constraint`, `Busy`, which also covers SQLite's `LOCKED`, or `Failed`, each with `detail`. `db.run` gives the rows that the statement changed, from the change in `sqlite3_total_changes64` with the connection's mutex held, so triggers and foreign keys count. A query holds exactly one statement, and SQLite's parser decides that what follows holds none, so a comment may follow. A count of values other than the count of `?` marks traps. An authorizer refuses `ATTACH`, except the literal empty name that `VACUUM` attaches, and so a null name, which SQLite gives for a `?` mark or any name that is not a literal. It also refuses the pragmas `temp_store_directory` and `data_store_directory`. A connection waits up to 5 seconds for another one's lock before `Busy`. `sql.open` gives a path that starts with `file:` a `./`. `sql` has `Show` and `Equal`, as every type has `Show` in `language.md`, and is a built-in type name. On Windows the runtime's C builds with `/Gw`, and on Linux `lucid build` links with `--gc-sections`, so a program that never opens a database does not carry SQLite | SQLite reads a missing value as null, and `sqlite3_prepare_v2` skips what follows the first statement, so both would hide a bug. `sqlite3_changes` keeps the count of the last `INSERT`, `UPDATE`, or `DELETE`, so after `VACUUM` it gave 1. The bundled build sets `SQLITE_USE_URI`, so a `file:` name is a URI that can name any file, and `ATTACH` or `VACUUM INTO` could open a file that `files` does not list. `VACUUM` runs `ATTACH` through the same parser, so the authorizer sees it. A hello program grew from 449,536 to 2,112,000 bytes on Windows, since the runtime's code that every program needs shares an object with `sql.rs`, and SQLite's tables are not in their own sections. With both flags it is 266,240 bytes, and 363,183 bytes of code on Linux, down from 3,364,014. See "Ecosystem (M8)" in `research.md` |
-| 210 | 2026-11-08 | Amends decision 196. A receiver's type is in a package when it is a `type` or `choice` declared in one of the package's files, or an `any` of a trait declared there. `list`, `map`, `set`, unions, task types, and the other built-in types belong to `std`, whatever they hold, so `self: list[User]` and `self: User?` are outside every package. A trait names the task when one of its tasks has that name and the trait is declared in the package. A breach is E0342. A task that already gives E0304 does not also give E0342. Built in M8 | Rust allows an inherent `impl` only in the crate that defines the type, and `Vec<Local>` is not local there, by the Rust Reference. A wider rule, with a package owning `list[User]` because it owns `User`, needs the overlap check to reason across packages: two packages could each own a part of `map[A, B]`. The narrow rule needs one lookup per task, and a package that wants a dot call on a list can hold the list in a type of its own. |
-| 211 | 2026-11-08 | Amends decisions 197 to 201, as built. `lucid.lock` is a `#` line, then one line `NAME VERSION SHA256` per package, sorted by name, so the Rust loader and the Lucid client each read it with a split. A cached package lives in `CACHE/NAME-VERSION-SHA256/`, named by the whole hash, and is unpacked into a `.part-` directory and renamed, so a directory in the cache is whole. The compiler runs the client only when a registry dependency of a loaded package has no lock line in its floor's range, at or above the floor, or no cache directory, so a lowered floor keeps the locked version until the client next runs. The client takes the floors of the packages outside the cache, and follows the dependencies of every version it reads, as MVS does, so the lock can list a package that only a passed-over version wanted. Two majors are E0344 only when a chosen version, or a package outside the cache, wants them, so the order of the walk cannot change the result. It prints `note TEXT` and `error CODE NAME TEXT` lines, which the compiler turns into stderr notes and diagnostics: E0343 for what a registry cannot give, E0344 for two majors, and E0345 for a hash that differs from the index or the lock. A cached package must hold the locked version, and its `lucid.toml` must name no dependency that the index left out. An index line is `{"version", "dependencies", "sha256"}`, with `dependencies` an object of name to floor. `lucid package` checks the library, writes `NAME-VERSION.lpk` to the current directory, and prints the index line. Under `src`, an archive holds only `.lcd` files, and no part may be a Windows device name, `con`, `prn`, `aux`, `nul`, or `com` or `lpt` with a digit. `README.md` and `LICENSE` keep their capitals. `[registry] url` refuses any scheme but a lowercase `https://` | Plain lines need no TOML or JSON reader on either side. A directory named by name and version alone would let two registries' packages meet, and a 64-bit prefix of the hash can be matched by a birthday search, so the whole hash names it. The client is the one place that reads an index, so the compiler only checks that what it loads is covered. Go's MVS keeps every reachable version's requirements, by "Minimal Version Selection", and a lock that lists one extra package costs only a download. Writing `con.lcd` on Windows reaches a device, not a file, so an archive could block or write to it. The device names are from memory of Microsoft's "Naming Files, Paths, and Namespaces", not read for this entry, and `com0` and `lpt0` are refused for margin. See "Ecosystem (M8)" in `research.md` |
-| 212 | 2026-11-08 | Amends decision 202, as built. `lucid lsp` checks each open document as the entry of `lucid check`, and checks every open document again after any open, change, or close. A file's diagnostics go to its own URI, and one in a `std` file goes to the start of the document, named. Go to definition and hover come from the checker, which records each written name it resolves, and the span of its declaration: a binding, a task, a method, or a type or constructor. Only the server records them, so other commands pay nothing. Fields and module names are not recorded yet. The server never runs the registry client: a dependency missing from `lucid.lock` or the cache is E0343, with a note to run `lucid check`. Hover shows a binding as `name: type`, and a task or type as its declaration's line with its `##` lines. Formatting runs `lucid fmt` in a child on a copy in a new private directory, and gives one edit for the whole text. A panic while checking is caught, and gives that document no results | Checking each document as an entry needs no map from a file to the packages that load it, and a change to a module reaches every open file that uses it. Recording at the checker's own lookups gives the declaration that the checker chose, so shadowing and methods by receiver type come out right with no second resolver. Running `lucid fmt` itself keeps its check that only space changed. A fetch on each keystroke would wait on the network and write the lock while the user types. Checked in Neovim 0.12.4, through `vim.lsp.start` and through `vim.lsp.config`. See "Ecosystem (M8)" in `research.md` |
-| 213 | 2026-11-08 | Outcome of the spec review before version 1.0, by the `spec-reviewer` agent against the lexer, parser, resolver, and checker. Code now follows the spec in four places: a variant with `()` and no fields is E0201, an unknown `std` module is E0334 and only the planned `std.process` gives E0901, an index on a value that takes none is E0303, and a list or `set(...)` literal on the right of `==` or `in` takes its type from the left whatever that type is. The spec now follows the code in five: `shared` and `weak` are planned and outside the 1.0 promise, a tab is an error only in the indentation of a line of code, `_` is always the wildcard in a pattern, a hand-written `show` and the like may be on a union, and a whole module may share its name with a built-in type, as `std.sql` does. `?` gets its row in the precedence table | Each pair was settled by which side was right. A tab where no depth depends on it misleads no tool, and `lucid fmt` already rewrites one on a comment line, so the narrower rule is the true one. `use std.sql` must bind `sql` next to the type, and a module name is always followed by a dot, so the two cannot be confused. `tests/run/review.lcd` relies on `show` for `text?`. An unknown `std` name is a typo, not a missing feature, and E0901 told the user to wait for a milestone. Promising `shared` while it does not run would bind 1.x to a design no program has tested. Both words stay keywords, so adding them later breaks nothing. The review found every error code documented, emitted, and tested. The `/code-review ultra` that decision 204 also needs is the owner's to run. |
-| 214 | 2026-11-08 | The self-hosted compiler is a Lucid package in `compiler/lucid/`. At M9 it holds the whole front end, the lexer, parser, resolver with `lucid.toml` reading, checker, `derive`, monomorphizer, and ownership pass, and the driver for `lucid check`, with `--json`, `--costs`, and `--unsafe`, `lucid run`, and `lucid build`, both targets. Code generation, the runtime, and linking stay in Rust, behind the C ABI of decision 217. `test`, `fmt`, `fix`, `explain`, `context`, `package`, `lsp`, and the registry client stay in the Rust driver. The shipped `lucid` stays the Rust program through M9, and the Rust front end is not deleted. Amends the M9 plan in `roadmap.md`. Planned for M9 | Decision 16 keeps Cranelift in Rust. MIR is the one input of both backends, so the cut at MIR keeps `native.rs` and `wasm.rs` whole, and the C ABI needs a few calls, not one per Cranelift instruction. The exit test needs only `build`. `lucid test` and the registry client start child processes, and `std.process` is only planned, so porting them would first need a new `std` module. The Rust driver still needs a front end for `lsp`, `fix`, and `test`, so deleting the Rust stages waits until the Lucid compiler covers every command. |
-| 215 | 2026-11-08 | Each Lucid stage is checked against its Rust stage by dumps. The internal variable `LUCID_DUMP`, set to `tokens`, `ast`, `mir`, or `owned`, makes `lucid check` print the tokens, the tree, the MIR after `mono.rs`, or the MIR after `ownership.rs`, in one text form that both compilers write. A golden test runs both on every `.lcd` file in `tests/`, `examples/`, `std/`, `tools/`, and `compiler/lucid/`, and compares each dump, and the `--json` diagnostics, byte for byte. Each port copies its Rust file's behavior, message text included, and keeps one Lucid module per Rust file. A Rust bug found while porting is fixed in Rust first. The variable is not under the 1.0 promise, as `LUCID_FMT_CHILD` is not. Built at M9 step 1, in `dump.rs`, with the form in "Self-hosting" in `compiler.md`: one node per line, so a reader can take it as one stream of atoms. Until a Lucid stage exists, the test compares two Rust runs, which proves the dumps deterministic | A differential test needs no hand-written expected output, and finds a fault at the first stage that differs, not in a program's output much later. The golden tests already hold every error code and feature, so they are the spec that both sides must meet. Matching the Rust code line for line makes a diff traceable to one function. Go 1.5 also moved its compiler from C to Go by translation, not redesign, from memory of the Go 1.5 release notes, not read for this entry. Decision 204 covers commands and flags, not internal variables. |
-| 216 | 2026-11-08 | The `owned` dump of decision 215 is also the input of the Rust backends. It holds the files of `Source`, names and text, and the `Program` after `ownership.rs`, in a line-based text form. Rust gains a reader, `dump::read` in `lucid_backend`, beside the writer, which rebuilds `Program` and `Source` with leaked types, as `check.rs` builds them. Built at M9: `stage_dumps_are_stable` reads back every `owned` dump and writes it again | One form for testing and for the backend means the test checks what the backend reads. Text can be diffed and read by an agent. The backends need the source text for diagnostics and the line tables for traces. If the read is slow on the compiler's own MIR, a binary form can replace it later, with the dump kept for tests. The cost is measured at that step. |
-| 217 | 2026-11-08 | A new Rust crate `backend/`, `lucid_backend`, takes `mir.rs`, `native.rs`, `wasm.rs`, `loader.js`, and the linking code of `main.rs`, and `lucid` depends on it. Its C ABI has `lucid_backend_run`, `lucid_backend_build`, and a pair that gives the text of a file held inside, `std` and `tools`, by size and then by copy. Each takes a `.pointer()` and a length of a `list[byte]`, and gives an `int`. The backend prints its own diagnostics, in the form that `--json` asks for. `native.rs` lists these tasks with the runtime's, so the Lucid compiler runs under `lucid run`, and `lucid build` links a program that names one with a library that holds `lucid_backend`, `lucid_rt`, and `exe.rs`, in place of the plain runtime. The Lucid compiler's manifest grants `unsafe`, `files = true`, and the `env` names it reads. Planned for M9 | Plain bytes through `.pointer()` already pass the C ABI from user code, so no new language rule and no new privilege for counted values is needed. Rust cannot link two static libraries that each hold its standard library, so one library holds both. `std` files live inside the compiler through `include_str!`, and Lucid has no such form, so asking the backend keeps one copy. `unsafe` grants full trust by `security.md`, which a compiler that runs native code already has. |
-| 218 | 2026-11-08 | The exit test builds in stages. Stage 0 is the Rust `lucid`, stage 1 is what stage 0 builds from `compiler/lucid/`, stage 2 is what stage 1 builds, and stage 3 is what stage 2 builds. Stage 2 and stage 3 must be byte-identical, and so must stage 1 and stage 2, since both front ends must give the same MIR. On Windows, `lucid build` passes `/Brepro` to `link.exe` for every program. The claim covers one machine and one checkout. A test in `golden.rs` runs the stages on Windows, and the same test runs in WSL. Built 2026-11-12: stage 1 matches only from a release stage 0, since a debug `lucid` does not inline counts | A fixed point is the usual proof that a compiler compiles itself. Measured 2026-11-08: `hello.exe` built twice two seconds apart differed in 2 bytes, at offset 257, which is in the PE header, and `website.exe` built twice in one second matched, so Cranelift's object output is already stable and the PE timestamp is the difference. `/Brepro` is undocumented by Microsoft, and reports say it writes a hash in place of the timestamp, with PDB files still varying. `lucid build` writes no PDB. Go reached reproducible toolchains in 1.21, after removing inputs such as the host C toolchain. Lucid links with the system linker, so a reproducible build across machines is not claimed. See "Self-hosting (M9)" in `research.md` |
-| 219 | 2026-11-08 | Bootstrap path. Until a release exists, stage 0 is the Rust `lucid` from `cargo build --release` in the same checkout. When the owner makes the first release, `compiler/lucid/stage0.txt` pins its version and the SHA-256 of its Windows and Linux binaries, and the bootstrap steps in `compiler.md` start from that binary. Deleting the Rust front end waits for both that pin and the full command set of decision 214. Built 2026-11-12, with the steps in `compiler.md` | Rust bootstraps from a pinned beta compiler named in a file in its repository, and Go from a named older release. A pin with no release behind it would point at nothing, and releases are the owner's choice. Zig avoids a binary by keeping a WebAssembly build of its compiler, which Lucid cannot copy while code generation is Cranelift in Rust. |
-| 220 | 2026-11-08 | The port adds no feature for the compiler alone. A gap in Lucid or `std` found while porting goes through the usual rules, with a decision entry, and is planned on its own. The time of `lucid check` on `compiler/lucid/` is measured for both compilers at each step and recorded in `research.md`. No speed target is set. Planned for M9 | Decision 16 self-hosts to test the language on a large program. A private feature would hide the gap that the port should find. No evidence gives a fair target for a first port that counts references, so the numbers come first. |
-| 221 | 2026-11-08 | E0103 shows a printable ASCII character as itself, and any other character as `\u{hex}` of its code point. Amends the message, not the code | The Rust lexer used `char::escape_debug`, which escapes control characters, grapheme extenders, and the characters its Unicode tables mark as not printable, and shows every other character as itself. The Lucid lexer would need those tables to match it. A zero-width space or a non-breaking space shown as itself tells the reader nothing, and a code point always names the character. One rule in both lexers is shorter than either table. |
-| 222 | 2026-11-08 | An assignment whose value is a text join that starts with the place being assigned, such as `t = "{t}x"` on a `change` parameter or `b.t = "{b.t}x"`, takes the text out of that place for the join, as a `change` argument that is a path does, so the append is in place when the text is unique. Built in M9: in `check.rs` for a field, which takes the text out of its slot after the other parts run, and in stage 2 of `ownership.rs` for a parameter | Measured in `research.md`, "Self-hosting (M9)": 800,000 appends take 70 ms on a local and over 7 s on a `change` parameter or a field, since stage 2 moves only a local that is not a parameter. The port builds diagnostics and dumps through `change self`, so the checker port would hit it. By decision 220 it is a general fix, not one for the compiler alone. |
-| 223 | 2026-11-09 | A fifth dump stage, `LUCID_DUMP=resolved`, prints what `resolve.rs` gives: the files of `Source` with their starts, the grants, `no_unsafe`, `packages`, `web_only`, and `host_only`, then the joined tree in the `ast` form. It prints even with errors. The roadmap's checker step splits in two: the resolver first, checked by this dump, then the checker, `derive`, and the monomorphizer. Amends decision 215 | The resolver is 1,500 lines of Rust plus 700 of manifest reading, and its only other check would be the MIR dump, after 7,000 more lines of checker. A bug found then could sit in any of them. The tree after joining already has a dump form, so the new stage costs about 50 lines of Rust. |
-| 224 | 2026-11-09 | `std.fs` gains `real_path(path) -> text or FileError`: the absolute path, with no `.`, `..`, or links, through Rust's `fs::canonicalize`. On Windows the `\\?\` prefix is dropped from a drive path or a share, so the result takes `/` like any other path. Found by the resolver port, under decision 220 | The resolver finds a package by walking up from a file's real directory, and keeps one copy of a package reached by two spellings, so the Lucid port needs real paths, and `std.fs` had none. Rust has `fs::canonicalize`, Go `filepath.EvalSymlinks` with `filepath.Abs`, and Python `os.path.realpath`, so the task is common. A verbatim `\\?\` path turns off parsing of `/`, so keeping the prefix would make a joined path wrong. See "Self-hosting (M9)" in `research.md`. |
-| 225 | 2026-11-10 | A sixth dump stage, `LUCID_DUMP=checked`, prints the program that `check.rs` gives, before `mono.rs` and `derive.rs` run, in the `mir` form, when the checker reports no errors. The stage ends with the checker, as `resolved` ends with loading, so only the checker's diagnostics print. The roadmap's checker step splits in two: the type checker first, checked by this dump and its diagnostics, then `derive` and the monomorphizer, checked by the `mir` dump. Amends decision 215 | `check.rs` is 6,000 lines of Rust, and `derive.rs` and `mono.rs` 1,350 more. With only the `mir` dump, a mismatch could sit in any of the three. The checker's output is already a `mir::Program`, so the stage costs a few lines, as decision 223 did for the resolver. |
-| 226 | 2026-11-12 | The backend's C ABI names its tasks `backend_run`, `backend_build`, and `backend_has_symbol`, since a name that starts with `lucid_` is kept for the runtime, and only `std` may declare one. `backend_has_symbol` looks a name up as `native::find_symbol` does, so the Lucid checker reports E0904. The pair that gives the files held inside waits: Lucid has no way to make text from bytes outside `std.fs`, so the Lucid resolver reads `std` from the directory in the internal variable `LUCID_STD`, or else `std/` under the current directory, until `std` gains text from a `list[byte]`, which is planned on its own. A program that the Lucid compiler runs in its own process replaces the runtime's arguments, grants, and call sites, which were set once per process. `lucid build` reads the library for a program that calls the backend from where the build left it, with its system libraries and their directories in `libs.txt` beside it. Amends decision 217 | Another name keeps one rule for every user `extern`, where an exception for the compiler would be a private feature, against decision 220. Text from bytes is a common need: Go converts with `string(b)`, Rust with `String::from_utf8`, and Python with `bytes.decode`, all from memory, not read for this entry. A static library cannot hold its own bytes, so a path is the shortest way, and it ties the build of the compiler to one checkout, which decision 218 already assumes. `--print native-static-libs` names `windows.0.52.0.lib`, from `windows-targets` under `cranelift-jit`, with no directory, which only the build scripts' messages give. |
-| 227 | 2026-11-12 | M10 readies the first release: the owner's ultra review and its fixes, version 1.0.0, Linux programs without debug sections, a Firefox check of the web loader, written release steps, a license review, and the push. Every crate moves from 0.1.0 to 1.0.0 together, since they ship as one program. `lucid --version` prints `lucid 1.0.0` and a line feed, and with `--json` prints `{"version":"1.0.0"}`, so the site's claim that every command speaks JSON stays true. The text comes from `CARGO_PKG_VERSION`, so the manifest is the one place it is written | The 1.0 promise of decision 204 is in `vision.md`, but nothing reports which version a user has, so a bug report cannot name one. `rustc --version`, `cargo --version`, `node --version`, and `python --version` all print the version on one line, and `go version` is a subcommand: from memory, not read for this entry. A flag keeps the command list unchanged. See "Release (M10)" in `research.md` |
-| 228 | 2026-11-12 | On Linux, `lucid build` passes `-Wl,--strip-debug` to `cc`, so a program carries no DWARF. Symbols stay, so `nm` and `perf` still name tasks. Windows needs no change, since `link.exe` writes debug data only with `/DEBUG`, which `lucid build` does not pass | A Linux program is about 6 MB where its code is 363 KB, measured at M8 step 5, and the rest is debug sections from the Rust standard library and the runtime. A Lucid trace comes from the program's own call-site tables, not from DWARF, so nothing reads them. GNU `ld` documents `--strip-debug`, or `-S`, as dropping debug symbols only: checked at the build step: `hello` fell to 564 KB with its symbols kept, and `tests/trap` passes |
-| 229 | 2026-11-12 | Amends decision 219. The `stage0.txt` pin waits until the Rust front end is deleted. A release records the SHA-256 of each binary in its notes, by the release steps in `compiler.md` | A released `lucid` cannot be stage 0 today. It reads the 77 MB backend library and `libs.txt` from the `target/` directory of the checkout that built it, by decision 226, and `libs.txt` names a library inside cargo's registry. The backend is Rust, so a bootstrap needs cargo and the checkout anyway, and the Rust front end in that checkout is a stage 0 that needs no pin. A pin pays only when no Rust front end is left to build from |
-| 230 | 2026-11-12 | The web loader is checked in Firefox, by running the web examples and a trap with a trace in it, as was done in Chrome for M6. If Firefox writes WebAssembly frames in another form, the loader's pattern widens to read it, and `web_programs_match_run` keeps V8. Safari stays unchecked, like macOS by decision 205 | The loader finds a trace's tasks with the pattern `wasm-function[i]:0xOFF`, which was checked only in V8. From memory, Firefox writes frames as `name@url:line:col`, and a WebAssembly frame as `wasm-function[i]:0xOFF` after the URL, so the pattern may already match, which the check settles. Checked 2026-11-12 in Firefox 160: the pattern matches, and a stack overflow is an `InternalError`, which the loader now reads too, as in `docs/research.md` "Firefox frames". Safari needs a Mac, which the owner does not have |
-| 231 | 2026-11-12 | Any edit under `backend/src` reruns `backend/build.rs`, which rebuilds the release `lucid_backend` library in its own target directory, even for a build that never links a program through it. Kept, answering an M9 ultra review finding | The library must match the backend source, or programs that the Lucid compiler builds get stale code, as the `Cargo.lock` finding showed. Building it only on demand needs a second build path and a staleness check of its own. The cost lands only on backend edits, which are rare in M10. Revisit if the edit loop on the backend gets slow. Judgment call, not measured. |
-| 232 | 2026-11-12 | Supersedes decision 154. All of Lucid, the compiler, backend, runtime, and `std`, is licensed under MIT or Apache-2.0, at the user's option, with `LICENSE-MIT` and `LICENSE-APACHE` at the root and `license = "MIT OR Apache-2.0"` in every crate. `LICENSE` and `LICENSE-EXCEPTION` are gone. A contribution is dual licensed the same way unless its author states otherwise | The owner chose it. Every built program holds `lucid_rt`, `std`, and generated code, and permissive licenses let it use any license with no exception text, where decision 154 needed a Classpath exception extended by a notice that had no legal review. Apache-2.0 adds a patent grant, and the pair is the form Rust and most of its crates use. See "License" in `research.md` |
+### Decision 1, 2026-11-04
+
+Name: Lucid, extension `.lcd`, CLI `lucid`
+
+**Why:** Owner's choice. A 1970s dataflow language was also called Lucid, but it is not in common use.
+
+### Decision 2, 2026-11-04
+
+Memory: inferred ownership with reference-counting fallback
+
+**Why:** No GC and no lifetime annotations. Best fit for ease plus speed. Hardest compiler work.
+
+### Decision 3, 2026-11-04
+
+Syntax: clean hybrid with indentation and English keywords
+
+**Why:** Owner's choice from three samples. Short, and unambiguous for agents.
+
+### Decision 4, 2026-11-04
+
+Compiler: Rust host, Cranelift native, WebAssembly output
+
+**Why:** Fast route to real programs. All front-end work is hand-written.
+
+### Decision 5, 2026-11-04
+
+`task` is the function keyword, and `print` is a statement
+
+**Why:** Taken from the chosen syntax sample. Concurrency uses `spawn`, so `task` carries no async meaning.
+
+### Decision 6, 2026-11-04
+
+Values are independent, with no stored references
+
+**Why:** Removes lifetimes from the language. See `memory-model.md`.
+
+### Decision 7, 2026-11-04
+
+Errors are union return values with `try` and `else`
+
+**Why:** No hidden control flow, and failure stays visible in signatures.
+
+### Decision 8, 2026-11-04
+
+One union form, `A or B`, with `T?` as shorthand
+
+**Why:** Brings in the TypeScript feel, and needs no `Option` or `Result`.
+
+### Decision 9, 2026-11-04
+
+Structural traits, no classes or inheritance
+
+**Why:** Fewer concepts, and code stays local.
+
+### Decision 10, 2026-11-04
+
+No `async`/`await`
+
+**Why:** Removes function coloring. The scheduler stays a runtime detail.
+
+### Decision 11, 2026-11-04
+
+MIR is structured
+
+**Why:** One input fits both Cranelift and WebAssembly.
+
+### Decision 12, 2026-11-04
+
+Integer overflow traps in release builds
+
+**Why:** Safety ranks above speed. Revisit if profiling shows a heavy cost.
+
+### Decision 13, 2026-11-04
+
+Return types are never inferred. No `->` means `none`
+
+**Why:** A signature must be complete by itself, for local reasoning.
+
+### Decision 14, 2026-11-04
+
+`try` and `else` prefer error types over `none`
+
+**Why:** Otherwise success in a `none or Error` task would count as failure.
+
+### Decision 15, 2026-11-04
+
+The `Error` trait requires `error_message`, not `message`
+
+**Why:** Traits are structural, so a common name would turn unrelated types into errors.
+
+### Decision 16, 2026-11-04
+
+Self-host the compiler in stages after 1.0, starting with `lucid fmt` at M5. Keep Cranelift in Rust behind a C ABI
+
+**Why:** Tests the language on a large program. Waiting avoids rewrites while the language changes, and the backend rewrite has no user value yet.
+
+### Decision 17, 2026-11-04
+
+Tasks cannot use a top-level `var`
+
+**Why:** Swift needs run-time checks for globals. Banning this access keeps exclusivity static.
+
+### Decision 18, 2026-11-04
+
+Permissions are transitive, and `process` counts as full trust like `unsafe`
+
+**Why:** Without this, permissions could be bypassed. Deno and Node.js document these escapes.
+
+### Decision 19, 2026-11-04
+
+Run an agent trial at M3, not M5
+
+**Why:** Models have no Lucid training data, so agent-friendliness must be tested before syntax settles.
+
+### Decision 20, 2026-11-05
+
+`print` takes one value
+
+**Why:** One way to do it. Interpolation already joins values. Closes the M1 open question with its default.
+
+### Decision 21, 2026-11-05
+
+Names are ASCII for now
+
+**Why:** Identifier confusables are a known attack (see `research.md`). Widening later breaks nothing, and narrowing later would.
+
+### Decision 22, 2026-11-05
+
+Text escapes are `\n`, `\t`, `\r`, `\\`, and `\"` only. `"""` text drops a blank closing line
+
+**Why:** The spec left both undefined. These escapes are common to Python and TypeScript. Swift has the closing-line rule, so the value has no stray line break.
+
+### Decision 23, 2026-11-05
+
+`/` yields `float` for `int` operands, and follows IEEE 754
+
+**Why:** Closes the M2 open question with its default. It matches Python, and `//` is one character away. The agent trial at M3 tests the surprise.
+
+### Decision 24, 2026-11-05
+
+`//` rounds down, `%` takes the sign of the divisor, both are `int` only, and a zero divisor traps
+
+**Why:** The spec named floor division, and this pairing keeps `(a // b) * b + a % b == a`, as in Python. `float` operands stay out until a real need appears, since adding them later breaks nothing.
+
+### Decision 25, 2026-11-05
+
+Stack overflow is a trap, checked on entry to each task
+
+**Why:** Recursion arrived at M2, and hitting the guard page ends the process with an operating system error, not the documented exit code 101. A software check gives the source position too.
+
+### Decision 26, 2026-11-05
+
+Named arguments keep parameter order, defaults come last, and only a parameter with a default can be named
+
+**Why:** Evaluation order is then the order on the page, with no hidden reordering. Swift has the same order rule. One form for each call.
+
+### Decision 27, 2026-11-05
+
+A task reads a top-level `let` only if its value is a literal
+
+**Why:** Top-level statements run in order, so a task called earlier could read an uninitialized value. That would break a guarantee in `security.md`.
+
+### Decision 28, 2026-11-05
+
+A trap message holds its source position, and each site's text is static data
+
+**Why:** One runtime entry point, and no cost on the hot path. Research favored a shared cold path. A stack trace comes later.
+
+### Decision 29, 2026-11-05
+
+Accept the M2 exit with `fib(40)` at 2.02x to 2.09x of Rust release. The 2x target in `vision.md` stays, and M4 judges it on the benchmark suite
+
+**Why:** Owner's choice. Evidence is in `research.md`: Rust itself pays 1.56x to 1.92x for the same checks, and Lucid is 1.20x to 1.26x of checked Rust on `fib`. This accepts one exit, not a lower target. `collatz` at 2.47x of checked Rust stays an M4 item.
+
+### Decision 30, 2026-11-05
+
+`-` joins a number with no postfix after it, in the parser. A default must be a literal (E0313)
+
+**Why:** The checker could not tell `-(x)` from `-x`, which let an out-of-range literal through. A literal default has no evaluation order to explain. Judgment calls with no outside evidence.
+
+### Decision 31, 2026-11-05
+
+Interpolation is the only way to join text. `+` does not work on `text`
+
+**Why:** Rules in `AGENTS.md`: a second way needs a strong reason. Adding `+` later breaks nothing. Judgment call, and the M3 agent trial tests whether agents reach for `+`. E0303 points to interpolation.
+
+### Decision 32, 2026-11-05
+
+`.len()` and `.is_empty()` are the names for text length and emptiness
+
+**Why:** The spec fixed `x.is_empty()` and left length unnamed. `len` is the short form that Python and Rust share.
+
+### Decision 33, 2026-11-05
+
+Naive counting uses task-level ownership: an expression borrows, a local or hidden local owns, and a task releases all its locals on return
+
+**Why:** No block tracking is needed for `break`, `continue`, or `return`, and hidden locals work inside `if` values and `and`. Trade-off: a value can outlive its block until M4. Judgment call. Decision 2 and `memory-model.md` already chose naive counting first.
+
+### Decision 34, 2026-11-05
+
+The leak and double-free checks are the debug profile of `lucid_rt`
+
+**Why:** Every golden test gets them with no flag, and a release build pays nothing.
+
+### Decision 35, 2026-11-05
+
+A text has no single index and no character type. Iteration gives one-character `text`, and `x[i..i + 1]` reads one character
+
+**Why:** One way to do it. `int` indexing on text would look O(1) and be O(n). Adding a character type or `x[i]` later breaks nothing. Judgment call, no source read. The M3 agent trial tests whether agents reach for `x[0]`, and E0303 points to the slice.
+
+### Decision 36, 2026-11-05
+
+A character is one code point. Text slices use character positions, and a bad range traps
+
+**Why:** `docs/language.md` already counts characters for `.len()`. Grapheme rules need Unicode tables in the runtime, and can arrive as a library. A trap matches list indexing and makes a bug visible, where clamping hides it. Judgment call, no source read.
+
+### Decision 37, 2026-11-05
+
+`.bytes()` waits for `list`, since its result is `list[byte]`
+
+**Why:** A stand-in type would be a breaking change once `list` arrives. Scope moved inside M3.
+
+### Decision 38, 2026-11-05
+
+Lists, maps, and sets start with a small built-in set of tasks. Anything needing `T?`, lambdas, or derived traits moves to that roadmap item
+
+**Why:** A stand-in for `.get` would be a breaking change once `T?` arrives, the reason in decision 37. The prelude moves to Lucid once generics exist. Scope moved inside M3. Judgment call.
+
+### Decision 39, 2026-11-05
+
+`key in m` is the membership test, and `for` over a map gives keys. There is no `.has`
+
+**Why:** The grammar already has `in`, and rule 1 of `agents.md` allows one way. Python uses both forms, so agents have strong priors. This settles the open question on `T?` in a map: `.get` flattens, and `in` tells the cases apart. Judgment call.
+
+### Decision 40, 2026-11-05
+
+A map uses the compact dict layout, hashed with SipHash through `RandomState`
+
+**Why:** Insertion order is the spec, and the layout gives it with one allocation. Python moved to SipHash to stop hash flooding (PEP 456), and random keys cannot change the output because order ignores the hash. M4 may change the hash if the benchmarks ask for it. Evidence is in `research.md`.
+
+### Decision 41, 2026-11-05
+
+A list or map write is a statement that hands the local's count to the runtime, which copies only if the value is shared
+
+**Why:** A write in an expression could free an element that the same statement still borrows, which breaks a guarantee in `security.md`.
+
+### Decision 42, 2026-11-05
+
+Every collection slot is 8 bytes for now
+
+**Why:** One code path until monomorphization exists. `list[byte]` pays 8x memory. M4 measures it.
+
+### Decision 43, 2026-11-05
+
+`byte` arrives with no literals or arithmetic, until sized numbers
+
+**Why:** `.bytes()` needs a real type, per decision 37, and the rest of `byte` has a roadmap item.
+
+### Decision 44, 2026-11-05
+
+A key is `int`, `bool`, `byte`, or `text`. `float` never qualifies, and collections wait for `Hash`. `in` on a list takes the same types
+
+**Why:** NaN does not equal itself, so a `float` key could never be found again. Judgment call.
+
+### Decision 45, 2026-11-05
+
+A negative list index traps, a missing map key traps on read, and `.remove` of a missing key does nothing
+
+**Why:** `language.md` already traps out of bounds, and Python's negative index hides off-by-one bugs. After `.remove` the key is gone either way, so there is no bug to report. Judgment call, and the M3 agent trial tests whether agents reach for `x[-1]`.
+
+### Decision 46, 2026-11-05
+
+`x[i] = f()` runs the index first, then the value, and each index in a path runs once
+
+**Why:** Decision 26 keeps evaluation in the order on the page. Python runs the value first, so agents may expect that. Judgment call.
+
+### Decision 47, 2026-11-05
+
+An empty `[]` or `{}` with no type from its context is E0314. Only earlier siblings give a type, so `[[], [1]]` is an error
+
+**Why:** Inference from later uses would break local reasoning, and types flow one way through the checker. Judgment call, and the M3 agent trial tests the surprise.
+
+### Decision 48, 2026-11-05
+
+A write through a path takes the element out of its slot, which holds null until the write ends
+
+**Why:** Review measured `g[k].push(v)` as quadratic, since the slot and a hidden local both held a count. Grouping into a map of lists is too common to wait for M4. Every index and value is read first, so no safe code sees the null.
+
+### Decision 49, 2026-11-05
+
+Every `type` and `choice` value is a counted heap record for now, with copy-on-write like a list. Inline storage waits for M4
+
+**Why:** One path for all fields and all recursion, and `memory-model.md` already puts correctness before speed at M3. M4 measures the cost. Judgment call.
+
+### Decision 50, 2026-11-05
+
+Variant constructors take named arguments like `type` constructors. Named arguments to a constructor may come in any order, and run in the order written. A variant with no fields has no `()`
+
+**Why:** One rule for all constructors, and `Circle(2.0)` would be a second form. Decision 26 fixes order for tasks because positional and named arguments mix there. With only names, the order on the page is still the order of evaluation. Judgment call, and the M3 agent trial tests it.
+
+### Decision 51, 2026-11-05
+
+A variant pattern binds every field by position, and `_` skips one
+
+**Why:** The form the spec already uses. Names matching field names would stop two nested matches from binding the same field. Risk: swapped names of one type go unnoticed. Judgment call, no source read, and the M3 agent trial tests it.
+
+### Decision 52, 2026-11-05
+
+On a `choice`, a name alone must be a variant (E0318), never a binding. No pattern can bind a type or variant name, and patterns do not nest
+
+**Why:** A misspelled variant would otherwise catch everything and hide the bug, while passing the exhaustiveness check. The same holds for `Cons(h, Nil)`, and for `A ->` on a subject of the wrong type. `_` covers the rest, and the subject usually has a name already. Nested patterns can arrive later, since this error keeps that syntax free. Judgment call, no source read.
+
+### Decision 53, 2026-11-05
+
+Types, choices, variants, and tasks share one namespace
+
+**Why:** A pattern and a call then read the same, with no qualified form. Adding `Shape.Circle` later breaks nothing. Judgment call, and the M3 agent trial tests whether agents hit the clash.
+
+### Decision 54, 2026-11-05
+
+`lucid_release` never recurses. Waiting values link through their own count field
+
+**Why:** Recursive `choice` values have no depth limit from their type, and a stack overflow while releasing would not be the documented trap. The link needs no allocation, so a release cannot run out of memory.
+
+### Decision 55, 2026-11-05
+
+A type with no finite value is E0315, and a repeated or covered arm is E0317
+
+**Why:** Nothing could ever build such a type, so the error belongs at its definition, not at a confusing call. A dead arm also makes the last arm safe to lower with no test.
+
+### Decision 56, 2026-11-05
+
+A number pattern may have a leading `-`
+
+**Why:** Sentinels such as `-1` are common, and a default already takes one through the rule in decision 30.
+
+### Decision 57, 2026-11-05
+
+A union value is a counted record of one slot, whose tag is a type id shared by all unions
+
+**Why:** One word fits every local, slot, and return, and decision 49 already boxes `type` values. Shared ids make widening and narrowing to a smaller union free, and `lucid_release` needs no new case. Cost: `int?` allocates when it holds anything. M4 measures it, and a niche for `none` is the likely fix. Judgment call.
+
+### Decision 58, 2026-11-05
+
+A union is never inferred. Unions take their type from the context, and `list[int]` does not convert to `list[int?]`
+
+**Why:** Inference from siblings fails decision 47 for the same reason, and a conversion would have to rebuild each element, a hidden cost. Risk: `[1, none]` is an error an agent may hit, so the M3 agent trial tests it. Judgment call.
+
+### Decision 59, 2026-11-05
+
+Narrowing follows control flow: conditions, code after a branch that leaves, and `and`, `or`, `not`, and `then`. Assignment ends it, with no narrowing by assignment. A loop first forgets each name it assigns
+
+**Why:** TypeScript handles early returns the same way, and agents write them constantly. Kotlin states the rule that makes this sound: no change between the check and the use. TypeScript also narrows on assignment, which Lucid can add later without breaking anything. Evidence is in `research.md`.
+
+### Decision 60, 2026-11-05
+
+Only a name narrows, never a field or call
+
+**Why:** A narrowed read has no test at run time, so a wrong type is memory unsafety, which `security.md` rules out. TypeScript narrows property paths, but needs no such proof, since a wrong guess there is not unsafe. Kotlin refuses mutable properties. `let b = a.b` is one line, and the diagnostic says so. The agent trial tests how often agents hit this.
+
+### Decision 61, 2026-11-05
+
+An `is` test whose answer never depends on the value is E0303
+
+**Why:** It is a dead test, like the dead arm in decision 55, and usually a sign that the type is not what the author thinks. Judgment call.
+
+### Decision 62, 2026-11-05
+
+`.get` gives `T?` on a list or map, and a negative index gives `none`. `.pop` works on lists, gives `T?`, and must be a whole statement or all of the value of `let`, `var`, `return`, or `name =`
+
+**Why:** Python's `dict.get` gives the same shape, and `T?` makes `.pop` on an empty list a value, not a trap. A `.pop` inside an expression could free an element that the same statement borrows, the reason in decision 41. Judgment call, and the agent trial tests `f(x.pop())`.
+
+### Decision 63, 2026-11-05
+
+`none` is a literal, so it can be a default
+
+**Why:** `limit: int? = none` is the usual form of an optional parameter, and it has no evaluation order to explain, as in decision 30.
+
+### Decision 64, 2026-11-05
+
+On a union, `match` has `none`, typed, name, and `_` arms, and a name binds what earlier arms left. A union takes no literal or variant arm
+
+**Why:** Patterns do not nest, per decision 52, and a variant arm on a union would be a nested pattern. Binding what is left gives the same result as narrowing after a branch that leaves. Judgment call.
+
+### Decision 65, 2026-11-05
+
+Type arguments stay in brackets, as in `f[int?](x)`. The parser reads one form for an index and for type arguments, in one pass, and the checker decides which it is from the base. Type-only forms parse as expressions, and the checker rejects them outside type arguments
+
+**Why:** Rules 2 and 6 in `agents.md`. `[` has no operator to clash with, so Rust's `::` is not needed, and `json.parse[Book](raw)` is already the documented form. Replaces the default, parsing as a type after an expression fails: that needs backtracking, gives two trees for one form, and turns a typo in an index into a type error. Go also reads the bracket without knowing which it holds. Evidence is in `research.md`.
+
+### Decision 66, 2026-11-05
+
+Claude makes design decisions, on Opus 5.5 at `xhigh`, and the owner can overrule any of them
+
+**Why:** Owner's choice. Decisions still need a recorded reason and evidence, under the rules in `AGENTS.md`.
+
+### Decision 67, 2026-11-05
+
+A generic body is checked once at its definition, with parameters as opaque types, and `mono.rs` substitutes into its MIR. Type arguments come from values left to right, then from brackets. A constructor may also take them from its context. A call never does
+
+**Why:** Rule 3 in `agents.md`: a signature must say all, and an error at a distant instantiation is the failure of C++ templates that C++20 concepts were added to soften. Checking the AST again per instance fails on Lucid's flattening unions: a local inferred as `text` where `T?` was narrowed has no such type for `T = text?`. Types flow one way, as in decision 47. PEP 718 shows that explicit arguments stay necessary. Evidence is in `research.md`.
+
+### Decision 68, 2026-11-05
+
+Monomorphization stops with E0903 at type arguments nested 32 levels, or 20,000 instances
+
+**Why:** A program that needs a new type each call has no finite code. Rust's depth limit alone can fire late for growing types, and an open pull request adds a length check for that hang, so Lucid caps both. A program that would stop at run time is still rejected, as in Rust. The numbers are a judgment call.
+
+### Decision 69, 2026-11-05
+
+Derived `Show`, `Equal`, and `Order` are MIR tasks generated per concrete type, not a runtime walk over values
+
+**Why:** A record does not know which slots are floats, so a runtime walk would need type descriptions, and it could not call a hand-written override. Generated tasks need no new runtime or backend code. Equal maps and sets ignore order, as in Python. Judgment call.
+
+### Decision 70, 2026-11-05
+
+Text inside a shown value has quotes and escapes, and `{` is doubled, so the output reads back as a literal. A map shows as `{"a": 1}`, a set as `set([1, 2])`, and a value as `User(name: "Ada", age: 36)`. Alone, or held by a union, text has no quotes
+
+**Why:** The same rule as a shown `float`, in `language.md`. Python's `repr` gives containers this form, and Rust's `Debug` output is close, so agents have strong priors. Named fields follow the constructor. Judgment call, and the agent trial tests it.
+
+### Decision 71, 2026-11-05
+
+`<` and the like work on lists and on values whose fields all have an order. A `bool`, map, set, or union has none. An earlier variant comes first
+
+**Why:** The spec derives `Order` from fields. `bool` already has no order, so it stays out rather than adding `false < true`. A union mixes types with no natural order. Judgment call.
+
+### Decision 72, 2026-11-05
+
+A task with `self` dispatches on its receiver type, and is called only with a dot. Its name stays out of the shared namespace, receivers cannot overlap, and a bare `T` cannot be one. A dot call does not widen its receiver
+
+**Why:** Traits need one name on many types, as `error_message` already does in the spec, and decision 53 would forbid that. Dropping `f(x, a)` removes a second form, by rule 1 in `agents.md`. It narrows the earlier spec line that `x.f(a)` means `f(x, a)`. No overlap means no ranking rules, unlike Rust specialization or Swift overloads, so one type always gives one task. Judgment call, and the agent trial tests `f(x)`.
+
+### Decision 73, 2026-11-05
+
+Hand-written `show`, `equal`, `compare`, `add`, `sub`, `mul`, and `div` replace derived tasks or give operators, and any other form of those names is E0323
+
+**Why:** The spec says that hand-written tasks override, and it left the names open. `compare` gives an `int`, as `strcmp` does and as Java's `compareTo` does, so one task covers four operators. Reserving the form stops a task from silently failing to apply, and it costs few names, since only `self` tasks are affected. Judgment call.
+
+### Decision 74, 2026-11-05
+
+A body needs a bound for everything but storing a `T`, including `print`. `and` joins bounds. `int` lacks `Div`
+
+**Why:** Rule 3 in `agents.md`: the signature says what a body uses, and Rust works the same way. `and` is already a keyword, and reads like Python. Rust's `+` and Swift's `&` are the same idea. `/` on `int` gives `float`, so `T / T` could not give `T`. The agent trial tests whether agents omit `Show`.
+
+### Decision 75, 2026-11-05
+
+`any`, traits with type parameters, generic tasks in traits, bounds on aliases, `Hash` on compound values, `Copy`, and `Json` stay E0901 for now
+
+**Why:** The runtime hashes a key by its kind, so a compound key needs a design of its own. `Json` waits for `std.json` at M5. Nothing at M3 needs the others yet. Scope stays inside M3 or moves to the milestone named here.
+
+### Decision 76, 2026-11-05
+
+The limit on a type in decision 68 counts parts, 256 of them, not depth, and only generic instances and derived tasks count toward 20,000
+
+**Why:** Review found that `Pair[T, T]` doubles each level, so 32 levels could hang the compiler, since hashing a `Ty` walks a tree. Ordinary tasks are not what the limit guards against. A trait check on a type past the limit answers no, so a growing type gets E0320 or E0903, and never a hang.
+
+### Decision 77, 2026-11-05
+
+`Hash` is derived for lists, maps, sets, unions, `type`, and `choice`, as MIR tasks that a map keeps with `equal` and the runtime calls. A chain of keyed SipHash steps hashes a value, and a map or set adds up its entries. A hand-written `task hash(self: T) -> K` gives any `K` with `Hash`. A written `equal` with no written `hash` gives no `Hash`, nor does a written `hash` whose result leads back to its type. Supersedes the key limit in decision 44 and the `Hash` part of decision 75
+
+**Why:** Decision 69 already needs per-type tasks, since a record does not say what its slots hold, and a map outlives the code that made it, so it must carry them. Python removes `__hash__` from a class that defines `__eq__`, and Clippy flags a derived `Hash` with a manual `PartialEq`: both guard the rule that equal values hash equally. Returning a value in place of a mixed number needs no hash tools in the language, and `-> int` still reads as agents expect. Sets and maps ignore order in `==`, so their hash must too, as CPython's `frozenset` does. Evidence is in `research.md`.
+
+### Decision 78, 2026-11-05
+
+`any Trait` is the record of a union, with the value's type id as its tag. A call, `show`, and `==` are generated tasks that test the tag against every type that reaches that `any` in the whole program. It names one trait, of your own or `Show`. It has `Show`, `Equal`, and its trait, and no `Order`, `Hash`, or way back to the value. Supersedes the `any` part of decision 75
+
+**Why:** Decision 57 already gives a record that knows its type, so neither backend changes. A union goes in whole, as one more boxed type, since review found that its trait may be on the union and not on its members. It cannot go in a union with an `any` member, since `is` could then not find what it holds. Rust and Swift use a vtable because they compile in parts, and monomorphization here sees the whole program. Cost: a call tests tags one at a time, so it grows with the types boxed, and M4 can swap in a table. `any Order` needs two values of one type, as with Rust's dyn compatibility. Swift's `any` shows the cost of a box in the type, the reason Lucid keeps the keyword. Leaving out a way back keeps one tool for "which type is this": the union. Judgment call, and the agent trial tests it. Evidence is in `research.md`.
+
+### Decision 79, 2026-11-06
+
+`u8` is another name for `byte`, and `i64` for `int`, not new types. A literal takes the number type that its context asks for, including the other side of an operator or `in`, and is otherwise `int` or `float`. An integer literal never becomes a `float` type. Conversions are `.to_T()`, one per type, and trap if an integer result cannot hold the value. Every integer lives extended in 64 bits
+
+**Why:** Go makes `byte` an alias of `uint8` for the same reason, so that one size has one type. With distinct types, `list[u8]` and `.bytes()` would not fit each other. Go also lets a constant take the type around it, which keeps `x + 1` free of a cast, the common case by far. Lucid has no constant evaluation, so a literal has one type at once, and `200 + 100` for `u8` traps at run time rather than failing at compile time. The spec lists a failed conversion as a trap. Evidence is in `research.md`.
+
+### Decision 80, 2026-11-06
+
+Wrapping math is `wrapping_add`, `wrapping_sub`, and `wrapping_mul`, as tasks, with no operators. Truncating conversions and bit operations are left out for now
+
+**Why:** Rust uses the same names. Zig's `+%` operators are shorter, but rule 6 in `agents.md` prefers forms that models know, and rule 7 keeps the language small. `x % 256` then `.to_u8()` covers truncation. The spec has no bit operations yet, so that stays an open question.
+
+### Decision 81, 2026-11-06
+
+A lambda or nested task captures values when it is made. Capturing a `var` is E0325. Each loop pass gives a new capture. A nested task is a value made at its line, so it needs no forward use, and it reads its own name as its own record
+
+**Why:** Python reads a captured name at call time, and Go had a loop form of the same bug until 1.22, which the Go team found in real tests and in a Let's Encrypt incident. Capturing by value removes the bug, and fits rule 2 of the memory model, no stored references. But a silent copy of a `var` would be the reverse bug, a later change not seen, so it is an error with a one-line fix. Rust has both forms, `move` and borrow, which fails rule 1 in `agents.md`. An immutable capture can form no cycle, so task values need no `weak`. Cost: a counter closure must use `shared` or a parameter. The agent trial tests how often agents hit E0325. Evidence is in `research.md`.
+
+### Decision 82, 2026-11-06
+
+A task value is a record with its code address as its tag. All task code takes that record first, and a top-level task used as a value gets a small task in front of it. A lambda takes its types from the context, in a generic call too, and has no annotated form
+
+**Why:** One call form needs one calling convention, so a call site never tests what it holds. The record reuses decision 49, so neither `lucid_release` nor copy-on-write changes. Grammar has no annotated lambda, and rule 3 in `agents.md` puts types in the signature of the task that takes one. E0324 says what to write. Judgment call, with no source read, as `research.md` says.
+
+### Decision 83, 2026-11-06
+
+A task value shows as its type, and has no `Equal`, `Order`, or `Hash`
+
+**Why:** Code has no value to compare: two equal lambdas would need proof of equal behavior. Go also allows comparing a function only to `nil`, after an earlier rule surprised users of closures. `Show` stays on every type, so that a `type` with a task field can still print. Evidence is in `research.md`.
+
+### Decision 84, 2026-11-06
+
+`change` is copy-in copy-out through a stack slot of the caller, and a path argument takes its value out of its slot for the call. A dot call does not mark a `change` receiver, and a `change` receiver must be a `var` or a path into one
+
+**Why:** Swift defines `inout` this way, and calls a read of the original during the call a violation of exclusivity. The task keeps the value in a register, so a `change` local costs a load and a store per call, not one per use. Rust passes a pointer, which needs an address for every local. The marker choice was an open question with this default, and `self` in a signature already says it. Evidence is in `research.md`.
+
+### Decision 85, 2026-11-06
+
+`take` is a read parameter plus a local with its own count. Only `change` shows in a task type, so a task with a `change` parameter has no value form, and neither nested tasks nor lambdas take `change`. `any` cannot call a task with a `change` parameter
+
+**Why:** A caller cannot tell `take` from a read, so it needs no new form. Marking `change` in task types can come later without breaking anything, and the only cost now is a task that must be called by name. A `change` on what an `any` holds would have to write back through a tag test in every derived task. Judgment call.
+
+### Decision 86, 2026-11-06
+
+In one statement, a variable that goes to `change` may not be used elsewhere, except by other `change` arguments of the call that can be told apart, and by arguments of the call that give a plain number or `bool`. Field paths are compared, and stop at the first index. A statement passes a variable to one `change` call, and cannot also write to it
+
+**Why:** Counted reads stay borrowed to the end of a statement, so this is what keeps them valid. Rust added two-phase borrows to accept `vec.push(vec.len())`, so the plain-value exception goes in from the start. Swift allows more, and Lucid can loosen this later without breaking a program. The agent trial tests how often it fires. Evidence is in `research.md`.
+
+### Decision 87, 2026-11-06
+
+A `for` body cannot change what the loop visits, except text, which only gets replaced. M3 kept a copy and let the body change the variable, and this replaces that
+
+**Why:** `memory-model.md` planned this error. Keeping a copy was always safe, but that loop rarely means what it says: Java only detects it as a bug at run time, on a best-effort basis, and Rust rejects it. The fix is one line. Cost: a loop that wants the old value must name it.
+
+### Decision 88, 2026-11-06
+
+`for change` takes the list out of its place for the loop and each element out of the list for the body, so the loop name is a plain local. Every way out of the body puts it back. The body cannot use the list, or anything under the first field of its path
+
+**Why:** A view into the list would need a second kind of local. This form gets narrowing, writes, and `change` on the loop name for free, with no bounds check per use. The rule on the first field is stricter than the law, because each step of a path is out of its slot during the loop. It leaves `self.total += x` working in `for change x in self.items`, the common case. Judgment call.
+
+### Decision 89, 2026-11-06
+
+`self = value` is allowed, in a task with `change self` or `take self`
+
+**Why:** Replacing a whole value is the only way to move a `choice` to another variant from inside a method. The parser used to reject it.
+
+### Decision 90, 2026-11-06
+
+M3 ends on the trial's 10 of 10. No syntax changes from it, and each judgment call that named the trial stays open until the M5 benchmark, which gains an arm with the guide's warnings removed
+
+**Why:** The exit asks that failures be recorded, and there were none. But the guide warned of each trap, so the trial cannot show that agents avoid `x[0]` or `+` on text unaided, and changing syntax with no failure has no basis. An arm with no warnings measures what this could not. Evidence is in `research.md`.
+
+### Decision 91, 2026-11-06
+
+`x.sqrt()` is a built-in task on `float` and `f32`
+
+**Why:** The n-body benchmark needs it, and one Cranelift instruction does it. A Newton loop in Lucid would measure the wrong thing. The rest of the math prelude waits for a program that needs it.
+
+### Decision 92, 2026-11-06
+
+Every count is explicit in MIR after `ownership.rs`, through `Move` and `Retain`, and a place that keeps a value receives a count. A local moves only if it is not a parameter, nothing reads it after the statement, and the statement reads it once
+
+**Why:** Perceus also makes every count an explicit instruction, which leaves backends with no ownership rules of their own. The rule on one read is what makes a move safe: a second read in the statement may be a borrow that must outlive the move. It is stricter than it must be, and loosening it breaks nothing. The test suite runs with moves on and off. Evidence is in `research.md`.
+
+### Decision 93, 2026-11-06
+
+A top-level task's `take` parameter arrives with a count. A lifted task and a written `equal` keep the borrowed form
+
+**Why:** Without this, `take` could never reach a unique value, and `add_all(numbers, 4)` in `memory-model.md` would always copy. Task values show only `change`, per decision 85, so a call through one cannot pass a count, and the runtime calls a written `equal` with borrowed keys. Judgment call.
+
+### Decision 94, 2026-11-06
+
+A name lets go of its value at the end of its block, not at its last use
+
+**Why:** `Close` arrives at M5, and a file that closes at a block end can be read off the page. Rust and C++ do the same. Perceus and Swift release at last use, which frees memory sooner, and Swift then needs `withExtendedLifetime` for code that relies on a lifetime. Rust's scope rule sets the memory target, so this costs nothing against `vision.md`. Judgment call.
+
+### Decision 95, 2026-11-06
+
+A text literal and a variant with no fields are static data, with a count too large to reach zero
+
+**Why:** No allocation, and no case in `lucid_release`, since a count of `1 << 62` cannot run out. Counts still write to it, so static data stays writable. M7 must look again: a shared non-atomic count is a data race, though not one that can free anything. Judgment call. Replaced by 170, where static data has a count of 0.
+
+### Decision 96, 2026-11-06
+
+A text holds a capacity, and `s = "{s}x"` grows `s` in place when the join is its last use
+
+**Why:** `+` is left out on purpose by decision 31, so interpolation is the only way to build text, and a language with one way must make that way linear. Moves prove that nothing else reads the text, and a count of one rules out other holders. This costs 8 bytes per text. CPython has a similar fast path for `s += x`, from memory, not read for this entry. Measured: 45 s to 0.22 s.
+
+### Decision 97, 2026-11-06
+
+A text finds out whether it is all ASCII on first need, and keeps that in its header. Text slices and `.len()` are then O(1) to locate on ASCII text
+
+**Why:** Decision 36 made positions character positions, so each slice scanned from the start, and a parser that slices was quadratic: `json` did not finish in 280 s. The flag fits in the header's padding. Swift keeps a similar flag, from memory, not read for this entry. Text with other characters still scans. Measured: `json` 0.37 s.
+
+### Decision 98, 2026-11-06
+
+A local that only ever holds a path into a read parameter holds no count
+
+**Why:** Racordon et al. put most of the loss in Swiftlet on "unnecessary reference counter checks", and `research.md` already points this item at them. A read parameter is the one value that needs no proof about moves, since its caller holds it for the call. So this needs one fixed-point walk, and no alias analysis. Measured: `trees` 2.2 s to 1.9 s, `json` 0.37 s to 0.29 s. Paths into a `let` of the same task could join later, once moves know about them.
+
+### Decision 99, 2026-11-06
+
+A `list[byte]` has slots of one byte. Every other list keeps slots of 8 bytes. Supersedes decision 42
+
+**Why:** Measured as decision 42 asked: `.bytes()` was the only way to read text by position, and 8 bytes per byte put `json` at 1.79x of Rust's memory, against a limit of 1.2x. Bytes are the one element type where the waste is 8x and which files and sockets will use at M5. Other small types can follow if a program needs them.
+
+### Decision 100, 2026-11-06
+
+Reuse analysis is not built
+
+**Why:** The roadmap builds it only if measurements justify it, and they do not. `trees`, the program it exists for, runs at 0.62x of Rust and 0.92x of its memory. It stays possible, since nothing in MIR rules it out.
+
+### Decision 101, 2026-11-06
+
+M4 ends on the suite as measured: five of five on memory, four of five on time, and `nbody` at 3.38x. Keep the model, and add no LLVM backend now. The 2x target stays. Storing plain types inline leaves M4, and has no milestone
+
+**Why:** The roadmap asks for this decision when the suite misses. Evidence is in `research.md`. Vectorizing is worth 1.5x on `nbody`, and Rust itself loses 1.34x to boxing, so neither the model nor layout explains the gap alone. A second backend is a large cost for one tight float loop among five programs, and M5 needs `lucid build` next. As in decision 29, this accepts one exit, not a lower target. The owner can overrule it.
+
+### Decision 102, 2026-11-06
+
+`Error` is a real trait in a small Lucid prelude, so `any Error` works, and `any` allows it alongside `Show`
+
+**Why:** The spec defined an error type as one that satisfies a trait, and a generic body needs to call `error_message`. A written trait needs no special case in the checker. The cost is that the name `Error` is taken for types too. This follows from existing rules, so it needed no new evidence.
+
+### Decision 103, 2026-11-06
+
+E0328 covers a statement that drops an error, and a `let` or `var` name that is never read
+
+**Why:** The spec says an unused error is a compile error and left the scope open. Rust's `must_use` covers only an expression statement, per its reference, so a name would be a gap here. A pattern name in a `match` arm is exempt, since reaching the arm already handled the error. One read of the name counts, as does a `change` argument, and the check does not follow it further. See "Error handling" in `research.md`.
+
+### Decision 104, 2026-11-06
+
+A task that gives only `none` or error types returns `none` at its end
+
+**Why:** `examples/todo.lcd` already relied on it, and `return none` after a last `try` is noise. A plain `T?` still needs its `return`, since there a missing one is likely a bug.
+
+### Decision 105, 2026-11-06
+
+`try` at top level prints `error_message()` alone to stderr, and `none` as `none`
+
+**Why:** A failed run is a result for the user, not a bug, so it has no source position, unlike a trap. Exit code 1 was in the spec. Evidence is weak: see `research.md`.
+
+### Decision 106, 2026-11-06
+
+`else` takes the type of its value, or of the context if that accepts the value. The two sides do not join
+
+**Why:** One rule, like `if a then b else c`. `f() else none` on `int or E` with no annotation is an error, and an annotation fixes it.
+
+### Decision 107, 2026-11-06
+
+`try` may sit anywhere in an expression, and `ownership.rs` moves what is in flight to locals only when a part can return
+
+**Why:** The grammar already allowed this, and banning it would break `(try f()).x`. Turning off moves for such a statement would not help, since a `Retain` in flight leaks as well. Only such a statement pays.
+
+### Decision 108, 2026-11-06
+
+A stack trace walks frame pointers, with a table from return address to source position, and no unwinding tables
+
+**Why:** It costs one small table per program, and no measured time, see "Stack traces" in `research.md`. It shows at most 16 calls, since a stack overflow has millions.
+
+### Decision 109, 2026-11-06
+
+`expect` shows both sides of a comparison, each run once, and shows only `expect failed` otherwise. A pass narrows like an `if` that ends
+
+**Why:** The spec promised both values. One form means no `expect_eq`, by rule 1 in `agents.md`. See "`expect`" in `research.md`. A generic with no `Show` bound must still compile, so a side with no `Show` drops the values.
+
+### Decision 110, 2026-11-06
+
+`lucid test` runs tests in one child process, and starts a new child after each failure. A test is a task, and a failed `try` ends it as at top level
+
+**Why:** A trap must stay uncatchable, so only a process boundary contains it. See "Test isolation" in `research.md`. A test that sees top-level values would need top-level statements to run, and decision 27 rules that out.
+
+### Decision 111, 2026-11-06
+
+An `unsafe` block without a `#` comment is error E0332, and `lucid check --unsafe` lists sites
+
+**Why:** `security.md` already required both. Rust leaves this to an off-by-default Clippy lint, but Lucid has one tool and no lint levels. See "Unsafe code" in `research.md`.
+
+### Decision 112, 2026-11-06
+
+`pointer[byte]` is the only pointer, from `.pointer()` on a named `list[byte]`. Text has no pointer, and there is no pointer math, read, or write for now
+
+**Why:** A list slot is 8 bytes except for bytes, so other element types would expose layout. A C string needs its zero byte pushed by hand, so text layout stays free. C can fill a list directly, which covers calls such as `strlen` and `memset`. Add more when `std` needs it. Weak evidence, see `research.md`.
+
+### Decision 113, 2026-11-06
+
+An `extern` task is a normal task whose body is one foreign call. Symbols come from `ucrtbase` and `kernel32`, and a missing one is E0904
+
+**Why:** Calls, arguments, and errors reuse one path. No linking of other libraries until a real need appears.
+
+### Decision 114, 2026-11-06
+
+An `extern` task is not a value
+
+**Why:** A value could carry it out of an `unsafe` block, and safe code could then call C, which `security.md` rules out. Marking task types would add a second kind of task for no known need.
+
+### Decision 115, 2026-11-06
+
+`resolve.rs` joins all modules into one tree before `check.rs`, and gives each top-level name of an imported module the form `module.name`. All files sit in one `Source`
+
+**Why:** The checker, MIR, and backends need no idea of a module, and a span needs no file id. Teaching each lookup in `check.rs` about modules would touch more code, and a lazily read alias or literal would need its home module.
+
+### Decision 116, 2026-11-06
+
+`use ./a.b` means the file `a/b.lcd` first, then the name `b` in `a.lcd`. A module is reached by its last name, and an import works only in its file
+
+**Why:** Go uses a qualified name and scopes an import to one file, see `research.md`. The grammar keeps one form for both, so the file system decides, and a file wins so that the rule needs no second lookup.
+
+### Decision 117, 2026-11-06
+
+`public` marks a task, `type`, `choice`, or `trait`. Fields and variants follow their type, and there is no `public let`
+
+**Why:** Go marks each name by case, and fields too. Lucid has no private field syntax, and adding one has no known need yet. Private fields wait for a real one.
+
+### Decision 118, 2026-11-06
+
+A private task with `self` cannot be called from another module, but counts for traits and derived tasks. One receiver type has one task of each name in the program
+
+**Why:** Rust's coherence rules exist so one type has one meaning. Here, a value that prints one way in one module and another way elsewhere would be worse than a private task that shows through a trait. Go does the reverse for unexported methods, so this is a judgment call. See `research.md`.
+
+### Decision 119, 2026-11-06
+
+A pattern finds a variant from its subject's type, with no prefix or import. A binding in a pattern cannot reuse a type or variant name of any module
+
+**Why:** Grammar stays as it is, and Swift infers a case from the subject the same way. Without the wide check, a variant name on a union subject would bind and catch everything, the bug that decision 52 rules out.
+
+### Decision 120, 2026-11-06
+
+An imported module runs no code
+
+**Why:** Go runs package initializers, and imports for that effect exist there. Lucid has no need, and this keeps decision 27: no initialization order to define.
+
+### Decision 121, 2026-11-06
+
+`lucid.toml` is read by a small hand-written parser for a subset of TOML 1.0: tables, bare keys, strings, booleans, arrays, inline tables. Other forms are E0338, not a guess
+
+**Why:** `compiler.md` lists allowed dependencies and a TOML crate is not one. Every subset file is valid TOML, so tools still read it. See "Packages" in `research.md`.
+
+### Decision 122, 2026-11-06
+
+Until the registry at M8, a dependency needs `path`. `version` is allowed beside it and ignored
+
+**Why:** Cargo and Go both let a local path stand for a dependency. Each package is one copy, so no version solving exists yet, and `lucid.lock` waits for M8 with the registry.
+
+### Decision 123, 2026-11-06
+
+A package is a program with `src/main.lcd` or a library with `src/lib.lcd`, never both
+
+**Why:** Names follow Cargo, so agents already know them. One entry per package gives `lucid run`, `check`, and `test` one meaning. Cargo allows both, and this rule can loosen later with no program breaking.
+
+### Decision 124, 2026-11-06
+
+`use name` needs `name` in the file's own manifest, whose key must equal the package's name. Renaming uses `as` in the file, and two packages with one name are E0339
+
+**Why:** Rust and Go also make each dependency explicit. This leaves one way to rename, which `agents.md` asks for. Two versions of a package in one program waits for the registry.
+
+### Decision 125, 2026-11-06
+
+A package module's internal name starts with `@`, and all of a package's files can be imported, limited by `public`
+
+**Why:** Keeps decision 115: no written name can clash. A module passes nothing on from its imports, so a library has no other way to show a part of its files.
+
+### Decision 126, 2026-11-06
+
+No orphan rule yet. Two packages that add one task to one receiver type stop with E0304 in the program that uses both
+
+**Why:** It is a compile error, not a change in behavior, so no guarantee is at risk. A rule needs real packages to judge. Decide before the registry.
+
+### Decision 127, 2026-11-06
+
+A directory on the command line, or none, means the nearest package at or above it. `lucid test` on a package runs every file in `src`, in one report
+
+**Why:** Agents run commands from any directory, and Cargo finds its manifest the same way. Imported modules drop their tests, so only a walk of `src` reaches them all.
+
+### Decision 128, 2026-11-06
+
+`std` is Lucid source held inside the compiler, one copy per compiler. Only `std` may declare a `lucid_` runtime task, and pass it counted values. System calls are Rust's, in `lucid_rt`
+
+**Why:** `lucid build` must make a standalone `.exe`, and a program must not need files beside it. Rust's `std` already handles UTF-16 paths on Windows, and it brings Linux and macOS at M8. Calling `kernel32` from Lucid would need text from bytes, pointer reads, and one copy per system. Go and Rust also ship their standard library with the toolchain. See "Standard library" in `research.md`.
+
+### Decision 129, 2026-11-06
+
+What follows the path in `lucid run` goes to the program, with no `--`
+
+**Why:** `examples/todo.lcd` already shows this form, and `go run` and `python` work the same way. `cargo run` needs `--` only because its flags can follow the path, and Lucid's come first.
+
+### Decision 130, 2026-11-06
+
+`--unsafe` and `--costs` leave out `std`
+
+**Why:** They answer "what must I audit or fix", and a program's author can change neither. `std` ships with the compiler, and has no permission to grant.
+
+### Decision 131, 2026-11-06
+
+`std.fs` reads and writes whole files, with no open-file value. `Close` waits for the first value that holds a resource, at M7. Narrows decision 94, which expected it at M5
+
+**Why:** The M5 exit needs whole files only, and an open file brings `Close`, seek rules, and buffering with no program to judge them. Python's `Path.read_text` and Go's `os.ReadFile` show that the whole-file form is the common case. A file too large for memory waits for a real need. See "Standard library" in `research.md`.
+
+### Decision 132, 2026-11-06
+
+`FileError` has three kinds that a program acts on, and `Failed` for the rest with the system's words
+
+**Why:** Rust's `ErrorKind` has dozens of kinds. A `match` must cover every variant, so each one here is a cost, and adding one later breaks programs. Missing and denied are the two a program usually treats differently, and `NotText` comes from `read_text` itself. Judgment call.
+
+### Decision 133, 2026-11-06
+
+`std.time` has a wall `Time` and a forward `Instant`, each one `int` of nanoseconds, and a `Duration` of the same. `Date` is UTC only, with no zones or parsing
+
+**Why:** Two clocks follow Rust's `SystemTime` and `Instant`, and Go keeps both readings in one `Time` for the same reason: a wall clock can jump, so it cannot measure. One `int` gives order and `==` by derivation, at the cost of the range 1678 to 2262, which Go's `UnixNano` shares. Zone tables are large data with no program to justify them. The date math is Hinnant's, checked against Python's `datetime` in `tests/run/std_time.lcd`. See "Standard library" in `research.md`.
+
+### Decision 134, 2026-11-06
+
+`Json` is a built-in trait with no tasks. `mono.rs` swaps calls to two `...` tasks of `std/json.lcd` for tasks made per type, in MIR for a `type`, `choice`, or union, and Lucid for the rest. Text goes through a private tree. No hand-written form yet. Supersedes the `Json` part of decision 75
+
+**Why:** Decision 69 already derives per concrete type in MIR, and only the compiler sees a type's fields. Most of the work has no need of them, so it stays in Lucid, as `stdlib-and-web.md` asks. The tree lets a field be found in any order, and a task that writes MIR stays short. Cost: memory for the tree. Measured: 3 MB reads in 0.27 s.
+
+### Decision 135, 2026-11-06
+
+A `choice` is external tags: `"Red"` and `{"Circle": {...}}`. A `type` skips unknown names. A repeated name keeps the last
+
+**Why:** External tagging is serde's default, and names no field, so it clashes with none, unlike a `"type"` key. Skipping names lets a reader survive a newer writer, and serde does the same by default. RFC 8259 says many implementations keep the last repeated name. See "Standard library" in `research.md`.
+
+### Decision 136, 2026-11-06
+
+A union has `Json` only if each member reads from its own kind of JSON value. There is no trying of members
+
+**Why:** serde's `untagged` form depends on order, and a failed member's work is lost at each level, so nested unions can take exponential time on crafted input. Dispatch on the kind is linear, and it rejects `int or float` at compile time, where the fix is to write `float`. A mix that appears only through type parameters takes the first member, in type order, whose kind fits, and tries no other. `JsonError` has no `Json`, since a read could not tell it from a failure, which review found unsafe. Judgment call.
+
+### Decision 137, 2026-11-06
+
+Input nested over 128 levels is a `JsonError`
+
+**Why:** A stack overflow is a trap, and a trap on input would let any sender end a program. RFC 8259 allows a limit, and serde_json's default is 128.
+
+### Decision 138, 2026-11-06
+
+`json.write` gives `null` for a NaN or infinity, and reading a number too large for `float` is an error
+
+**Why:** JSON has no form for these, and RFC 8259 leaves range to the implementation. serde_json and JavaScript's `JSON.stringify` write `null`, from memory, not read for this entry. Python writes `NaN`, which is not JSON.
+
+### Decision 139, 2026-11-07
+
+`lucid build` links a Cranelift object file with `lucid_rt`, built as a release static library that has a C `main`. The compiler embeds that library, and runs the MSVC `link.exe`, found by the `find-msvc-tools` crate
+
+**Why:** Decision 128 asks for one compiler file and a standalone program. A `main` in Rust needs no start code from the backend. Finding `link.exe` is the easy part: the linker also needs the paths of the Windows SDK and the C runtime libraries, which come from the Visual Studio setup data and the registry. `find-msvc-tools` is the part of the `cc` crate that does this, and it has no dependencies. `rust-lld` would still need the same paths. See "Executables" in `research.md`.
+
+### Decision 140, 2026-11-07
+
+A built program reserves a 256 MiB main stack, and its tasks load the stack limit from a global. It targets baseline x86-64, and is named after its file or package directory, in the current directory
+
+**Why:** The same stack as `lucid run` gives the same programs the same traps. The load and the baseline target cost nothing measurable on three benchmarks, see "Executables" in `research.md`. A program built on one machine must run on another. Go also writes the program to the current directory, from memory.
+
+### Decision 141, 2026-11-07
+
+`docs/errors.md` is the one list of error codes, an entry per code with cause, example, and fix. The compiler holds it through `include_str!` for `lucid explain`, and a golden test checks that each example gives its code
+
+**Why:** One copy cannot drift from the compiler, and a checked example cannot go stale. rustc keeps its `--explain` text the same way, as Markdown inside the compiler. See "Error explanations" in `research.md`.
+
+### Decision 142, 2026-11-07
+
+`lucid context` prints each `public` header from the tokens of a file, with its `##` comments, and the members of a type, choice, or trait. It takes a file, a package directory, or `std.NAME`. A dependency by name waits for a real need
+
+**Why:** An agent needs the shape of an API, not its code, and a body costs tokens. Reading tokens keeps the output to what the author wrote, and works on a file that does not check. Go's `go doc` also prints declarations and doc comments without bodies, from memory.
+
+### Decision 143, 2026-11-07
+
+A fix goes in a diagnostic only when it is near certain, and `lucid fix` makes every such fix with no prompt. A name fix needs one candidate within a third of the length, and no tie
+
+**Why:** A wrong fix that applies itself costs more than no fix, since an agent may not read the change. rustc's suggestions mark how sure they are for `cargo fix` in the same way, and use the same distance limit. Two equal candidates mean a guess, so none is made. See "Fixes" in `research.md`.
+
+### Decision 144, 2026-11-07
+
+`lucid fmt` is a Lucid program inside the compiler that changes only space and line breaks, from tokens, with no parse. It has no options and no line limit. `lucid` re-lexes each file after it, and puts the old text back if the tokens differ
+
+**Why:** A token pass is enough for one canonical layout here, because the grammar already fixes indentation and line breaks. It needs no parser in Lucid before the self-hosted front end of M9, and is still a real program to test the language on, as decision 16 wants. gofmt also has no options and no line limit. The re-lex check turns a formatter bug into an error instead of a changed program. See "Formatting" in `research.md`.
+
+### Decision 145, 2026-11-07
+
+Built `lucid fmt`, with two changes to the spec of decision 144. A line inside brackets is indented 4 past the line that opened the innermost open bracket, and a line that starts with closing brackets lines up with the line that opened the first of them. No space goes before `(` or `[` after `}`. The formatter runs in a child process
+
+**Why:** The first rule counted lines with open brackets, which put `], c)` 8 spaces in when `call(a, [` opened both brackets on one line. Lining up a closing line with its opening line is what gofmt and Black do, and the rule is shorter. After `}` a `[` or `(` can only index or call that value, as after `)`. A child process lets the re-lex check run even when the formatter traps, which in one process would end `lucid` before the check.
+
+### Decision 146, 2026-11-07
+
+Permission checks: names at compile time per package, the root package too, and paths and names at run time against the root's lists for the whole program. `files` and `env` also take `true`. Outside the list, `std.fs` returns `Failed` and `env.get` traps. A program with no `lucid.toml` has full trust. Spec in `security.md`
+
+**Why:** Per-package run-time lists need a copy of each `std` task per package with shared types, which the resolver cannot do today. Deno checks paths for the whole process too. The compile-time rules still make the root list every path a dependency asks for. A command-line tool that takes paths as arguments needs `files = true`. See "Security" in `research.md`
+
+### Decision 147, 2026-11-07
+
+A `use ./` cannot reach a file under another `lucid.toml` (E0339), and a listed path or name cannot be empty (E0338)
+
+**Why:** Permissions follow the nearest `lucid.toml`, so a nested manifest would let a package grant itself `unsafe`. An empty path would mean the whole working directory by accident. Found while building decision 146
+
+### Decision 148, 2026-11-07
+
+The M5 agent benchmark has four arms: Lucid, Lucid with the bare guide, Python, and TypeScript. Each arm does the 50 tasks in 5 blocks of 10, one new subagent per block, with at most 5 attempts per task. Tasks 01 to 10 are the M3 trial's. A task passes when its output matches a Python reference exactly. An attempt compiles when the language's own check passes: `lucid check`, `py_compile`, or `tsc --strict`
+
+**Why:** Reusing the trial's tasks lets the two runs be compared. Blocks of 10 keep each subject's context small, and spend 20 subagents in all, against 2 for the trial. Each check is the one a user of that language would run, so Python's is the weakest, which counts against Lucid and TypeScript in compile rate, not in pass rate. Judgment call, following the trial's method. No source on benchmark design was read.
+
+### Decision 149, 2026-11-07
+
+A parameter or field default may be an empty `[]` or `{}`, as well as a literal. Each use makes a new collection
+
+**Why:** Both Lucid arms of the agent benchmark pilot wrote `balances: map[text, int] = {}` and hit E0313. Python's shared mutable default does not arise, since values copy and each use builds its own. A signature still tells everything. Evidence is the pilot in `research.md`.
+
+### Decision 150, 2026-11-07
+
+Fuzzing is a hand-written mutation fuzzer, run as a unit test of the compiler, with no new dependency. It mutates the golden tests and other Lucid files, and checks that the front end through the ownership pass never panics. Code generation is not fuzzed
+
+**Why:** `cargo-fuzz` needs nightly Rust and libFuzzer, and `docs/compiler.md` allows no new crate without a reason. A unit test runs in every `cargo test`, so a regression shows at once. Mutating real programs reaches the checker often enough: about 14% of inputs. It finds panics, not wrong answers, and is weaker than coverage-guided fuzzing. Judgment call; no source was read. Look again if a panic is found in the field that it missed.
+
+### Decision 151, 2026-11-07
+
+Decision 27 stays: a task reads a top-level `let` only if its value is a literal. No initialization order is defined
+
+**Why:** Go orders package variables by their dependencies, and Swift makes each global lazy behind a one-time check. Both add rules or run-time cost. Rust allows only constant initializers in a `static`, which is close to Lucid's rule. In the M5 agent benchmark, no Lucid solution of 100 hit the limit, and the only top-level values subjects wanted were literals. See "M5 open questions" in `research.md`.
+
+### Decision 152, 2026-11-07
+
+No literal types, such as `"open" or "closed"`, in version 1. A `choice` covers the job
+
+**Why:** A second way to name a fixed set of cases breaks rule 1 in `agents.md`. TypeScript needs them because JavaScript passes such values as plain strings. Lucid has `choice`. Across 50 TypeScript solutions in the M5 benchmark, subjects wrote no literal union. See "M5 open questions" in `research.md`.
+
+### Decision 153, 2026-11-07
+
+Bit operations are operators, `&` `|` `^` `~` `<<` `>>`, on integer types, with Python's precedence: all bind tighter than comparisons and looser than `+`. A shift count below 0 or not less than the width traps. `>>` keeps the sign of a signed type
+
+**Why:** Python, TypeScript, Rust, Go, and C all spell them this way, so rule 6 in `agents.md` wins over rule 7. Tasks would be a form no model has seen, unlike `wrapping_add` in decision 80, which follows Rust. Python and TypeScript subjects of the M5 benchmark reached for `&`, `>>`, and `>>>` in hashing and checksum tasks. Python's precedence avoids C's trap, where `x & 1 == 0` means `x & (1 == 0)`. Rust traps on an oversized shift in debug builds, and Lucid traps in all builds, as with overflow.
+
+### Decision 154, 2026-11-07
+
+Lucid is GPL-3.0-or-later. `runtime/` and `std/` add the Classpath exception, which `LICENSE-EXCEPTION` extends to compiling `std` into a program and to code the compiler writes into it
+
+**Why:** The owner chose GPL version 3, the runtime exception, and "or later". Every built program holds `lucid_rt`, `std`, and generated code, so without an exception each one would be covered by the GPL. GCC solves this with its Runtime Library Exception, but that text defines GCC by name and may not be changed. The Classpath exception is generic, and has an SPDX identifier. OpenJDK uses it with GPL version 2. See "License" in `research.md`.
+
+### Decision 155, 2026-11-07
+
+Text split, integer parsing, case change, and list sort go in the prelude at M6. Their names and forms are settled when they are built
+
+**Why:** In the M5 agent benchmark, subjects with the bare guide wrote each of these by hand, so programs need them. They are not M5 items, and M5 met its exit criterion without them. M6 is next, and its browser programs will parse and show text too. Python, TypeScript, Go, and Rust all have all four. Evidence is "M5 agent benchmark" in `research.md`.
+
+### Decision 156, 2026-11-07
+
+The header fields that compiled code reads are fixed width on every target: a count, a text's or list's length and room, a map's length, and a record's tag are `u64`, not `usize`
+
+**Why:** Then each offset, and each image of static data that `lucid_rt` builds, is the same on x86-64 and `wasm32`, so the WebAssembly backend reuses the host constants and needs no second copy of the layout. On x86-64 nothing changes size. Built at M6. See "WebAssembly" in `research.md`.
+
+### Decision 157, 2026-11-07
+
+A web program is two WebAssembly modules: `lucid_rt` built for `wasm32-unknown-unknown`, which exports its memory and a growable function table, and the program, which imports them, two base offsets, and the runtime tasks it calls. Its data and table entries go at those offsets. Planned for M6
+
+**Why:** This is the dynamic-linking convention of the WebAssembly tool conventions, with `__memory_base` and `__table_base`. The runtime can then call a compiled key task or task value through the shared table, and no linker or object format is needed. A relocatable object for `wasm-ld` needs much more encoder work, and merging modules in the compiler means rewriting runtime code. See "WebAssembly" in `research.md`.
+
+### Decision 158, 2026-11-07
+
+In WebAssembly, every value is an `i64`, as on native, with addresses zero-extended. A `change` argument lives on a shadow stack in linear memory. Replaced by 167
+
+**Why:** Slots, keys, and MIR already assume 64-bit values, so one rule serves both backends. A WebAssembly local has no address, so a slot that a callee writes must be in memory.
+
+### Decision 159, 2026-11-07
+
+On `wasm32`, the runtime prints, traps, and exits through JavaScript imports. `time.now` and `time.clock` use `Date.now` and `performance.now`, and `time.sleep` traps. Hash keys come from `crypto.getRandomValues`. `std.fs`, `std.env`, and `std.args` stay unchanged, so a file task gives `Failed`, `env.get` gives none, and `args.all()` gives `[]`. Built at M6
+
+**Why:** Rust's standard library on that target imports nothing and returns errors from `std::fs`, so only what it cannot do needs code. A browser cannot block, so a sleep would freeze the page. JSPI may change that at M7. `SipHasher::new_with_keys` is deprecated but stable, and takes keys where `RandomState` cannot.
+
+### Decision 160, 2026-11-07
+
+`lucid build --target web app.lcd` writes one file, `app.js`: the loader, with both modules inside it as base64. A page loads it with a classic `<script src>`. The same file runs under `node`
+
+**Why:** Module scripts and `fetch` fail from `file://`, since module requests use CORS, so one classic script is the only form that opens straight from disk. One file is also one thing to ship. Base64 costs a third more bytes, which waits for a real page that minds. Node runs the golden tests.
+
+### Decision 161, 2026-11-07
+
+A trap in WebAssembly prints the same message and trace as native. The compiler writes a table from code offset to task, line, and column, and the loader reads the frames of the JavaScript stack through it. An engine stack overflow prints the stack overflow trap. Planned for M6
+
+**Why:** WebAssembly has no frame pointers to walk, but engines put each frame's function and code offset in `Error.stack`. One output for both targets keeps one set of golden files, and agents read the same trace.
+
+### Decision 162, 2026-11-07
+
+Under `--target web`, a user `extern` and `.pointer()` are a compile error, and `use std.dom` without it is another, each with its own code: E0905 and E0906. Built at M6
+
+**Why:** Neither can run there, and an error at compile time costs an agent one turn, where a missing import fails only when the page loads.
+
+### Decision 163, 2026-11-07
+
+The browser UI shape is the Elm architecture: a model, `view(model)` giving a tree of nodes whose handlers name messages, and `update(change model, message)`, run by `dom.app`. `std.dom` diffs each new tree against the page, matching by tag and position. Names are settled by writing the example page first. Built at M6, refined by 168
+
+**Why:** A capture cannot change (E0325) and there is no mutable global, so state cannot live in an event handler. A model that one task changes in reply to messages fits value semantics exactly. Elm splits every program into these three parts, and Redux and iced use the same split. Matching by position keeps an `<input>` and its focus. A keyed diff waits for a list that reorders. See "WebAssembly" in `research.md`.
+
+### Decision 164, 2026-11-07
+
+`cargo test` builds every run and trap test with `--target web`, runs it under Node, and compares with the same golden files. `std.dom` tests use a small fake `document`. A missing `node` fails these tests. Built at M6
+
+**Why:** The same files hold both backends to one behavior. Skipping when `node` is missing would let a broken backend pass. Leak checks stay native only, since the web runtime is a release build.
+
+### Decision 165, 2026-11-07
+
+The prelude tasks of decision 155 are `x.split(separator)`, `x.upper()`, `x.lower()`, and `x.to_int()` on text, and `x.sort()` on a list. An empty separator traps. `to_int` gives `int?`, and takes only an optional sign and ASCII digits. Case follows Unicode's default rules. `sort` is a stable merge sort, written in Lucid in the prelude
+
+**Why:** Each name is the one Python uses, or the one Lucid already uses: `to_int` is the number conversion, and `int?` follows `.get`. A trap on an empty separator follows Python, and `for` already visits characters. A strict `to_int` follows Rust and Go, so `" 4"` is not a number by accident. Python, JavaScript, and Rust sort stably by default, and stable is never wrong where unstable is fine. A sort in Lucid calls a hand-written `compare`, which the runtime cannot. See "Prelude tasks" in `research.md`.
+
+### Decision 166, 2026-11-07
+
+Refines 157 and 158. A WebAssembly local has the type of the Cranelift value on native: `i64` for an integer or an address, `f64` or `f32` for a float, and `i32` for a `bool` or `none`, since WebAssembly has no `i8`. The loader makes room for static data by growing memory itself, not through a runtime task
+
+**Why:** Decision 158 says "every value is an `i64`, as on native", but native keeps a float in float registers and a `bool` in a byte. A float moved through an integer local would cost a reinterpret at each operation. The runtime's allocator, dlmalloc, takes each new region from `memory.grow` and uses only what that call returned, so pages that the loader grew first are never handed out, and the runtime needs no new task. See "WebAssembly" in `research.md`.
+
+### Decision 167, 2026-11-07
+
+Replaces the shadow stack of decision 158. In WebAssembly, a task with `change` parameters returns several values: its result, then the value of each `change` parameter when it ends. The caller sets its locals from them. Built at M6
+
+**Why:** Native passes the address of a stack slot, which the callee loads when it starts and stores when it ends. Returning the values does the same with no memory, no global, and no allocation. Multi-value returns are in WebAssembly 2.0, and Chrome 86, Firefox 78, and Safari 13.1 support them. A task value has no `change` parameter, so `call_indirect` keeps one result. See "WebAssembly" in `research.md`.
+
+### Decision 168, 2026-11-07
+
+Refines 163. `update` is a `task(M, Msg) -> M` that gives the new model, and `dom.app(init, view, update)` runs the page. A page is a `dom.Node[Msg]`, built only by the constructors `dom.Element`, `dom.Text`, `dom.Attribute`, and `dom.On`. `dom.On(event, message)` gives a `Msg` from the event's key, or else the element's value. Each render numbers its handlers, and the runtime keeps one task value, which runs a handler by its number and then keeps the next one. `std.dom` traps on a `script` element, on an attribute that starts with `on`, on `formaction` and `srcdoc`, and on a `javascript:` or `data:text/html` value. Built at M6
+
+**Why:** A task with a `change` parameter has no value form, so `update(change model, message)` could not be passed. Elm's `update` gives the new model too, and copy on write makes `var next = model` cheap. A generic call takes no type arguments from its context, so `dom.text("a")` could not know `Msg`, where a constructor can. The state lives in the task value that the runtime holds, since there is no mutable global. Elm's virtual DOM rewrites the same tags, attribute names, and values, so that a page runs no code that it did not write. Lucid traps instead, since a silent change hides a bug. See "Browser pages" in `research.md`.
+
+### Decision 169, 2026-11-07
+
+Each `spawn` runs on an OS thread of its own. There is no scheduler of lightweight tasks. Planned for M7
+
+**Why:** Java's virtual threads cannot unmount while native frames are on the stack, and JEP 491 still pins a thread that blocks under a foreign call. Lucid calls foreign code from any task, so a scheduler would pin often. Rust removed green threads before 1.0, partly for their stack cost. With no `async`, by decision 10, a scheduler can replace threads later and no program changes. The ceiling is one thread for each open connection, so a server caps them, by decision 178. See "Concurrency" in `research.md`.
+
+### Decision 170, 2026-11-07
+
+Counts are safe across threads by the sign of the count, as in Lean 4. A positive count belongs to one thread and changes with plain instructions. A negative count is shared by threads and changes atomically. A count of 0 marks static data, which nothing changes, in place of `1 << 62`. A value that crosses to another thread, through `spawn`, `send`, or a lock, is marked, with all it reaches. Marking stops at a value already marked, so a marked value reaches only marked values. A write to a marked value with one count first makes it positive again, after an acquire load, as Rust's `Arc::get_mut` does. The result of `wait` is not marked. Built at M7, within 2% on the M4 benchmarks, see "Signed counts (M7)" in `research.md`. Nothing marks until `spawn`
+
+**Why:** Values in one thread pay one compare more on retain, and nothing more on release, since compiled code already tests the count there. Marking costs the size of a value once, and a value sent again costs nothing. Lean 4 never writes in place to a marked value, so a list in a lock would copy on each write. Taking back a marked value with one count is sound: no other thread holds it, so no other thread can add a count. The thread of `spawn` has ended when `wait` returns, so its own values are reachable only from the result. Static data had a count that every thread wrote, which would be a data race.
+
+### Decision 171, 2026-11-07
+
+`spawn f(x)` takes a call, runs it on a new thread, and gives a `spawned[T]`. `.wait()` blocks until the thread ends, and gives its result. Every spawn ends before the task, lambda, or top level that ran it returns, which waits for it. This replaces "the enclosing block" in `language.md`. A thread whose handle no value holds is forgotten when it ends. `shared` values cannot cross, with an error code when `shared` is built. Planned for M7
+
+**Why:** A block per loop pass would wait at the end of each pass, so `for` could never start many tasks at once. Waiting at the end of the task keeps the guarantee that nothing outlives its parent, as Rust's `thread::scope` and Java's `StructuredTaskScope` do. A server's loop never returns, so it must not keep a record of every thread it ran. `spawned` is lowercase like `list`, since the prelude defines it.
+
+### Decision 172, 2026-11-07
+
+A trap in any thread ends the process, with code 101 and its trace. No trap is contained. A server runs under a process supervisor, which restarts it. Planned for M7
+
+**Why:** Go's `net/http` recovers a panic in a handler, and the Go team calls that a historical mistake. A trap can stop a task in the middle of a write through a lock, so the state that other threads see would be broken. Unwinding Cranelift frames would also need unwind tables and a release of every count on the way. This settles the open question.
+
+### Decision 173, 2026-11-07
+
+`channel[T](capacity)` and `lock(value)` are prelude types, not `std.task`, which `task` cannot name, since it is a keyword. Copying either one shares it, like a file. A channel has `send(value)`, which blocks when full, `receive()`, which gives `T?` and gives `none` once it is closed and empty, and `close()`. `send` after `close` traps. `receive` must be a whole statement, as `pop` must. A lock has `read()`, which gives a copy, and `update(f)`, which runs a `task(T) -> T` while it holds the lock, and keeps the result. A thread that takes a lock it holds traps. Planned for M7
+
+**Why:** Go's channels have the same operations, and Go panics on a send after close. A `change` parameter has no task type, so `update` takes the value and gives it back, as `dom.app` does by decision 168. `read` copies, so no thread holds a view into the lock. A lock taken twice by one thread would wait forever.
+
+### Decision 174, 2026-11-07
+
+When every thread of a program waits in `wait`, `send`, `receive`, or a lock, the program traps with "deadlock". A thread in a system call, such as `accept`, does not count as waiting. Planned for M7
+
+**Why:** Go reports "all goroutines are asleep" the same way. A count of threads and of waiting threads finds it, with no scan of the graph. A thread in a system call may still wake.
+
+### Decision 175, 2026-11-07
+
+Every task takes a hidden first parameter: the stack limit of its thread. The runtime keeps it in a Rust thread local, for calls from the runtime into compiled code. A spawned thread gets a 64 MiB stack, reserved, not committed. Built at M7, except the spawned thread: within 2% on the M4 benchmarks, and up to 10% on `fib`, see "Stack limit parameter (M7)" in `research.md`. Replaces the global of decision 140
+
+**Why:** `cranelift-jit` 0.137 does not support thread locals ("JIT doesn't yet support TLS"), so `lucid run` could not read a per-thread limit. Wasmtime passes a context to every function, and reads the stack limit from it. If the benchmarks of "M4 benchmarks" slow by more than 2%, try Cranelift's pinned register.
+
+### Decision 176, 2026-11-07
+
+Under `--target web`, `spawn`, `std.net`, and `std.http` are error E0907. `channel` and `lock` work there, with one thread. Planned for M7
+
+**Why:** WebAssembly threads need shared memory, which browsers allow only on pages with cross-origin isolation headers. A channel and a lock are still useful as a queue and a cell with one thread. An error at compile time costs an agent one turn, as with E0905.
+
+### Decision 177, 2026-11-07
+
+`std.net` gives `net.listen(port)`, a `Listener` with `accept()`, and `net.connect(host, port)`, which each give a `Connection` with `read(max)`, `write(bytes)`, and `set_timeout(length)`. Each one fails with a `NetError`. A listener or connection is a runtime value that closes when its last count goes. A `Close` trait for user types still waits. Planned for M7
+
+**Why:** The runtime already frees a value at its last count, so a socket closes with no new language feature. Timeouts are needed so a slow client cannot hold a thread forever.
+
+### Decision 178, 2026-11-07
+
+`std.http` is written in Lucid on `std.net`. The server speaks HTTP/1.1 with keep-alive, and runs each connection on a spawned thread, with at most 256 at once. It rejects a request with both `Content-Length` and `Transfer-Encoding`, with two `Content-Length` values, with a coding other than `chunked`, or with a folded header line, and closes the connection. It limits a request head to 16 KiB and a body to 1 MiB, and times out a silent connection after 30 seconds. Every response has a `Content-Length`. `http.App` routes by method and exact path. Planned for M7
+
+**Why:** RFC 9112 lets a server reject a message with both framing headers, and smuggling bugs in Crystal and http4s came from accepting one. Writing the parser in Lucid needs no new dependency, and tests the language on real input. The limits and timeout bound what one client can hold.
+
+### Decision 179, 2026-11-07
+
+TLS is for the client only, through `rustls` with the `ring` provider, and `webpki-roots` for trusted roots. The runtime holds them on native targets only. A server with TLS waits for a program that needs it: run it behind a proxy. Planned for M7
+
+**Why:** Never hand-roll cryptography. `rustls` defaults to `aws-lc-rs`, which needs `cmake`, and NASM on Windows, while `ring` needs only a C compiler, which `lucid build` already finds. Roots built into the program act the same on every system, and update with each Lucid release.
+
+### Decision 180, 2026-11-07
+
+`std.html` builds a tree with `html.Element`, `html.Text`, and `html.Attribute`, and a task for each common tag, such as `html.h1(text)`. `html.render` escapes all text and attribute values. It traps on what `std.dom` traps on, by decision 168. Planned for M7
+
+**Why:** The same tree shape as `std.dom` gives one way to write a page. Escaping by default is a rule in `security.md`. A `javascript:` link from user input would run code even when escaped, so the guards apply on the server too.
+
+### Decision 181, 2026-11-07
+
+Bit operator details beyond decision 153. The levels follow Python from loose to tight: `|`, `^`, `&`, then shifts, all between `..` and `+`. A shift count has the type of the value, as both sides of every other operator do. `<<` drops the bits shifted out instead of trapping, and `~` flips the bits of the type's width only
+
+**Why:** Rust traps on a count of the width or more, or below zero, but lists no overflow for bits shifted out of `<<`, and Go discards them. Hashes such as FNV-1a and checksums shift bits out on purpose, and the M5 subjects wrote them that way. One type on both sides keeps rule 6 of `agents.md`: no new conversion rule. Built in M7. See "Bit operators" in `research.md`
+
+### Decision 182, 2026-11-07
+
+How `spawn` is built, beyond decisions 171 and 175. `spawn f(x)` lowers to a task value with no parameters, whose captures are the arguments, and whose code returns a list of one item, the result. A hidden counted local holds the join handles of each task's threads, and its last count, which the exit block gives up, joins them. Once that local holds 16 threads, and then twice what was kept, the runtime joins and drops each thread that ended and that no handle reaches. A `spawned[T]` shows its type, as a task value does, and has no other trait. A `spawn` not given a call of a task, or given a `change` argument, is E0341. Built in M7
+
+**Why:** Captures already run in the thread that makes a task value, which is what decision 171 asks of arguments, so `spawn` needs no new lowering. One result shape lets the runtime call any spawn through one signature: a float would otherwise come back in a float register. The exit block already releases every counted local once, on every path, so a join there needs no new exit code. Joining only at the end of a task would keep every thread of a server loop, which never returns, so ended threads that no handle reaches are dropped as they pile up, which costs a scan each time the count doubles. A thread handle has no sensible order or equality, as Rust's `JoinHandle` and Go's goroutines have none. A `change` argument would let the thread write a variable of this one.
+
+### Decision 183, 2026-11-07
+
+Refines 93. A task value owns its arguments: a call through one gives a count of each counted argument, and its code moves each to a local of its own when it starts. So a lambda, a nested task, and the small task in front of a top-level task used as a value all list their counted parameters in `Task::take`, in both stages of the ownership pass. A top-level task and a written `equal` keep the borrowed form. Built in M7
+
+**Why:** `lock.update(f)` must write in place when the lock's value has one count, by decision 173, and a borrowed parameter cannot reach one: the caller still holds its count. Decision 93 said a call through a value cannot pass a count, but that holds only if the convention depends on the callee. One convention for every task value needs no test at the call. Lean 4 uses owned parameters for code it reaches through a closure for the same reason, see "Counting Immutable Beans" in `research.md`. The cost is a retain at a call that reads its argument again, which `lucid check --costs` shows, in place of a retain inside a task that keeps it.
+
+### Decision 184, 2026-11-07
+
+How `channel` and `lock` are built, beyond decisions 173 and 174. Each value in a channel or a lock is a list of one item. `send`, `close`, and `update` are statements, and `receive` is the whole value of one. `update(f)` takes the value out of the lock, so it has one count, and passes it to `f`, which owns it by decision 183. `close` on a closed channel traps. One 64-bit word counts threads and waiting threads, and a thread that wakes others stops counting them before it notifies. A runtime task that fails records why, and the compiled code traps right after the call. The type of a channel comes from `channel[T](n)` or from the context, and that of a lock from its value or the context. Built in M7
+
+**Why:** A list of one item lets one runtime type hold any value, as the result of `spawn` does by decision 182. A statement keeps the moves of the ownership pass, which an expression's own statements do not get, so `update` can write in place. Go panics on a second `close` too: it is a bug in who owns the channel. Counts in one word change together, so no thread sees a deadlock between two updates. The trap after the call shows the place of the call on native and web alike, which a trap inside the runtime cannot, since a Rust frame ends the walk of frame pointers.
+
+### Decision 185, 2026-11-08
+
+How `std.net` is built, beyond decision 177. `Listener` and `Connection` are `type`s in `std/net.lcd` whose field has the built-in type `socket`, which only `std` can name. `net.listen(port, host = "127.0.0.1")` takes port 0 for a free one, and `Listener.port` tells which. `NetError` is `Refused`, `TimedOut`, `InUse`, `Closed`, or `Failed(detail)`. `read(max)` gives an empty list when the other end has closed, and takes at most 64 KiB at once. A timeout must be longer than 0. `use std.net` under `--target web` is E0907, at the `use`. Built in M7
+
+**Why:** A field of a hidden type lets each kind be its own type with tasks written in Lucid, and adds one counted handle type, not two. Listening on this machine only, until a program asks for `"0.0.0.0"`, keeps a program under development off the network. Flask does the same, though its stated reason is its debugger, so the evidence is weak and this is a judgment call. Rust's `set_read_timeout` rejects a zero length, and reports a timeout as `WouldBlock` on Unix and `TimedOut` on Windows, so both read as `TimedOut`. An error at the `use` points at the user's line, not inside `std`. See "Sockets (M7)" in `research.md`.
+
+### Decision 186, 2026-11-08
+
+How `std.html` and the `std.http` server are built, beyond decisions 178 and 180. `html.render` checks each tag and attribute name, which must be ASCII letters, digits, and `-`, and for an attribute `_` and `:`, and traps through `expect` with the reason as the text compared. `app.serve(port, host = "127.0.0.1")` gives a value only if it cannot listen, and `app.answer(connection)` serves one connection, which `serve` runs on a thread for each, holding one of 256 slots of a channel. A request needs exactly one `Host` in HTTP/1.1, no space before a colon, and a target that starts with `/`. A refusal answers 400, 413, 431, or 501 for an unknown coding, then closes. HTTP/1.0 closes after each response. `HEAD` runs the `GET` handler and drops the body. A path with routes for other methods gives 405 with `Allow`. A handler cannot set `Content-Length`, `Transfer-Encoding`, or `Connection`, nor a header with a line break, nor a status below 200, nor a body on 204 or 304, which get no length. `request.body_text()` gives the body as text. Built in M7
+
+**Why:** Each rule is a MUST or SHOULD of RFC 9112 or RFC 9110, see "HTTP server (M7)" in `research.md`. A name check is needed since escaping covers values only: a tag of `a onclick=x` would add an attribute. A header from a handler with a line break, or a second length, would let it write two responses where a proxy reads one. `expect` already traps with a position and a trace, so the reason needs no new built-in. `answer` lets a test, or a program, serve a connection it accepted itself. A program has no other way to turn bytes into text, and a POST handler needs one.
+
+### Decision 187, 2026-11-08
+
+How the `std.http` client is built, beyond decision 179. `http.get(url)` and `http.post(url, kind, body)` give a `Response or NetError`, in Lucid on `std.net`, whose new `connection.secure(host)` starts TLS as a client and checks the certificate within that call. Each request opens its own connection, and sends `Host`, `User-Agent: lucid`, and `Connection: close`, and for a `POST`, `Content-Type` and `Content-Length`. A URL is printable ASCII, starts with `http://` or `https://`, and has a host of letters, digits, `-`, and `.`, and a port from 1 to 65535. Its fragment is not sent. A response is read strictly: a 1xx response is skipped, 204 and 304 have no body, and two lengths, a length with chunks, or a coding other than `chunked` fail. With no length, the body ends where the server closes. The head may hold 16 KiB, and the body 16 MiB, and a silent server fails after 30 seconds. No redirect is followed. A failure is `Failed(detail)`. Built in M7
+
+**Why:** One connection per request needs no pool, and RFC 9112 makes a client that sends `close` close after the response, so a body with no length ends safely at the close. RFC 9112 calls two different lengths an unrecoverable error, and a length with `Transfer-Encoding` a message that "ought to be handled as an error". Lucid rejects these as its server does, and also a coding other than `chunked`, where the RFC reads to the close, since the client asks for no coding. Printable ASCII keeps a URL from adding a line to the request. A redirect followed with no sign could send a `POST` body to a new host, or move from `https` to `http`, so the program sees the 3xx and decides. `NetError` keeps one error type, and its detail tells what failed. A handshake inside `secure` makes a bad certificate fail there, and not at the first read. See "HTTP client (M7)" in `research.md`.
+
+### Decision 188, 2026-11-08
+
+M8 builds in this order: prelude text tasks, dead-task elimination, Linux, macOS, `std.crypto`, `std.sql`, the orphan rule, the registry and `lucid.lock`, `lucid lsp`, then the spec review and the 1.0 promise. Planned for M8
+
+**Why:** Each later step must pass its tests on all three systems, so the systems come first. The registry hashes archives through `std.crypto`. Dead-task elimination comes before `std.sql`, so a program that does not use SQLite does not link it. The spec review comes last, since every other step changes the spec.
+
+### Decision 189, 2026-11-08
+
+Text gets `starts_with`, `ends_with`, `contains`, `find`, and `trim` in the prelude. `x.find(part)` gives the `int?` character index of the first match. `trim` removes Unicode white space at both ends. `std.http` and `std.html` drop their own copies, except that `std.http` keeps a trim of spaces and tabs alone, the optional white space of RFC 9110: a wider trim would accept header values that another server reads differently. `contains` is `find` with a test, so the runtime has one search
+
+**Why:** The M7 audit found `std/http.lcd` and `std/html.lcd` each writing these by hand, and any user program would too. The names and forms follow Python's `startswith`, `in`, `find`, and `strip`, with Rust's names and `none` in place of Python's -1, as decision 165 did for `to_int`.
+
+### Decision 190, 2026-11-08
+
+Only tasks that the top level, a `test` block, or an export for the web loader can reach are compiled. `lucid check` and `lucid fix` still build every task with no type parameters, so each one shows its errors and costs. Built at M8: `examples/website.lcd` went from 2,067,968 to 933,888 bytes
+
+**Why:** Every non-generic task compiles today, so each program that uses `std.net` links `rustls`, about 1.5 MB, and SQLite would add more. A linker drops only what nothing names, and a compiled task names its callees. Reachability from the entry points is the standard fix, and the monomorphizer already walks calls.
+
+### Decision 191, 2026-11-08
+
+`lucid run`, `test`, `check`, and `build` work on `x86_64-unknown-linux-gnu` and `aarch64-apple-darwin`, for the machine they run on only. `lucid build` links through the system `cc`, which finds the C start files and libc. On both, a built program runs `lucid_main` on a thread with an `EXE_STACK_BYTES` stack, since the linker does not set the main thread's stack there. Foreign tasks resolve through `dlsym`. `lucid build` stages files in a new directory with a random name, made with `create_dir` and mode `0700`, that must not exist yet. Built at M8 for Linux, where a built program also ignores SIGPIPE, as a Rust `main` does, and `find_symbol` also looks in libm
+
+**Why:** `cranelift-object` 0.137.1 writes ELF and Mach-O, read in its source. `cc` is how rustc links on both systems, and macOS needs the Xcode command line tools for the SDK. Linux takes the main thread's stack from `ulimit`, often 8 MiB, not from the file. The fresh private directory closes the gap found in M5 review: `/tmp` is shared, so a reused directory name could let another user plant files. Cross-compiling waits for a need. Intel Macs are left out, since Apple no longer sells them.
+
+### Decision 192, 2026-11-08
+
+Linux is checked on the owner's machine in WSL. macOS is checked by a GitHub Actions job on `macos-latest` that runs `cargo test` on each push to the private repository. The account keeps a spending limit of $0, so a job past the free minutes stops instead of costing money. Planned for M8
+
+**Why:** No Mac is at hand. GitHub's docs say a macOS minute counts as 10 Linux minutes, and the Free plan has 2,000 a month for private repositories, so about 200 macOS minutes. That is enough only if each run stays short, so the job runs the tests, not the benchmarks.
+
+### Decision 193, 2026-11-08
+
+`std.crypto` wraps `ring` for `sha256`, `sha512`, `hmac_sha256`, `hmac_check`, `same` (a constant-time compare), and `random_bytes`, and the `argon2` crate for `hash_password` and `check_password`. Passwords use Argon2id with OWASP's first setting, m=19456, t=2, p=1, in a PHC string, so the setting can rise later and old hashes still check. `crypto.hex(bytes)` writes lowercase hex. It needs no permission, and is E0907 under `--target web`. Built at M8, and amended by decision 208
+
+**Why:** `stdlib-and-web.md` forbids hand-rolled primitives. `ring` is already in `lucid_rt`, through `rustls`, and holds digests, HMAC, and a constant-time check. OWASP's cheat sheet puts Argon2id first, and PBKDF2 only where FIPS-140 is required. `ring` has no Argon2, so one new crate is needed. The web waits for a need, since `ring` builds C for each target.
+
+### Decision 194, 2026-11-08
+
+`std.sql` is SQLite, through `libsqlite3-sys` with its `bundled` feature, in `lucid_rt` on native targets only. `sql.open(path)` needs the `files` permission for the path, checked as `std.fs` checks it, and `":memory:"` needs none. `db.run(query, values)` and `db.query(query, values)` take a `sql` query and a `list[sql.Value]` for its `?` marks, and a `Row` has `columns` and `values`. Each call can fail with `SqlError`. A `Db` is a counted handle, closed on its last release. It may go to another thread, since the bundled build is serialized. E0907 under `--target web`. Built at M8, and amended by decision 209
+
+**Why:** SQLite needs no server, so a program and its tests stay one process. The bundled build pins one SQLite version on every system. `rusqlite` is a safe wrapper for Rust callers, which the runtime does not need: its own small layer calls the C API. Typed decoding of rows, as `Json` does, waits for real programs.
+
+### Decision 195, 2026-11-08
+
+`sql` is a built-in type. A text literal with no interpolation has type `sql` where the context expects `sql`, and `sql + sql` is `sql`. There is no conversion from `text`. So a query is built only from text that the program's author wrote, and every value goes through a `?` mark. Built at M8, and amended by decision 209
+
+**Why:** Kern's "Safe Coding" report and Google's compile-time constant strings make an injection a type error, not a review item. A number literal already takes its type from the context, so this adds no new kind of rule. `+` lets a program write a list of `?` marks of any length for `IN`. A name chosen at run time, such as a table, has no way in. That is the price, and it waits for a need.
+
+### Decision 196, 2026-11-08
+
+Orphan rule, settling the open question. In a package, a task with `self` needs its receiver's type, or a trait that names the task, declared in the same package. Built-in types belong to `std`. A file with no `lucid.toml` is exempt, since nothing can depend on it. A breach gets a new error code. Built in M8, see decision 210
+
+**Why:** With a registry, two authors who never met can each add one task to `text`, and a program that uses both has no fix but to drop one. Rust's orphan rule exists for the same reason. A package can still write a task that takes the value as a plain argument, or a type of its own that holds it. Scripts and tests keep the freedom they use today.
+
+### Decision 197, 2026-11-08
+
+A registry is a tree of static files: `index/NAME`, with one JSON line per version that holds the version, its dependencies, and the SHA-256 of its archive, and `files/NAME/VERSION.lpk`. The root manifest names it with `[registry] url`, an `https://` URL or a local directory. There is no default registry until a public release, which is the owner's choice. `lucid package` writes the archive and the index line, and the author uploads both. Built in M8, see decision 211
+
+**Why:** Cargo's sparse index, by RFC 2789 and the default for crates.io since Rust 1.68, is also plain files over HTTP, and the Go module proxy is the same idea. Static files need no server code and run on any static host, and a local directory makes the tests work offline.
+
+### Decision 198, 2026-11-08
+
+A dependency with `version = "1.2.0"` and no `path` comes from the registry. Versions are chosen by minimal version selection: each requirement is a floor, and the program gets the highest floor of each package. A floor reaches up to the next major version, or the next minor while the major is 0. A program holds one version of each package, so two majors of one package in one program are an error. Built in M8, see decision 211
+
+**Why:** Russ Cox's MVS gives the same build from the same manifests, with no solver, and needs no lock file to pick versions. An upgrade happens only when a manifest asks for it. One version per name is already the rule, by decision 124, and keeps types from two copies of a package apart.
+
+### Decision 199, 2026-11-08
+
+`lucid.lock`, beside the root manifest, lists each registry package with its version and the SHA-256 of its archive. Commands write it, and the author checks it in. An archive whose hash differs from the lock or the index is an error, and is never fetched again in silence. `lucid run`, `test`, `check`, and `build` fetch missing archives into a cache owned by the user, and say so on stderr. Built in M8, see decision 211
+
+**Why:** MVS already fixes versions, so the lock pins contents, as `go.sum` does. A changed archive is an attack or a broken registry, and both need a person. Cargo also fetches on build, which keeps one step for agents. Compiling never runs a dependency's code, so a fetch cannot run it either. Go's checksum database also guards the first download. Lucid has none at 1.0, which `security.md` states.
+
+### Decision 200, 2026-11-08
+
+An archive, `.lpk`, is one JSON object from each path to its text: `lucid.toml`, every `.lcd` file under `src`, and `README.md` and `LICENSE` if present. A path holds only lowercase ASCII letters, digits, `_`, `-`, `.`, and `/`, with no empty part, `.`, or `..`. A registry package may not have a `path` dependency, settling the open question. Built in M8, see decision 211
+
+**Why:** Packages are text, so JSON through `std.json` needs no zip or tar code. The strict path rule stops an archive from writing outside its cache directory, the "zip slip" attack. crates.io also refuses a package that reaches outside itself.
+
+### Decision 201, 2026-11-08
+
+The registry client is a Lucid program inside the compiler, as `lucid fmt` is, on `std.http`, `std.crypto`, `std.json`, and `std.fs`. The compiler runs it before it loads the program, when the lock and the cache do not cover the manifest. Built in M8, see decision 211
+
+**Why:** Decision 16 wants real programs in Lucid. Everything the client needs exists by then, and the compiler already holds the runtime and its TLS.
+
+### Decision 202, 2026-11-08
+
+`lucid lsp` is a language server on stdin and stdout, in Rust inside the compiler, with no new dependency. It syncs whole documents, and gives diagnostics, formatting through `lucid fmt`, go to definition, and hover with the type and `##` comment of a name. Positions are in UTF-16, the one encoding the protocol requires. Completion waits until the checker can work past an error. No editor extension ships yet: `docs/agents.md` will show how to point an editor at the command. Built in M8, by decision 212
+
+**Why:** LSP 3.17 makes UTF-16 mandatory, and full sync is its simplest mode. The compiler already writes JSON for `--json`, so it needs only a small reader. Diagnostics, formatting, definition, and hover reuse what `check`, `fmt`, and the resolver give now. An editor extension needs packaging and a store, which waits for a public release.
+
+### Decision 203, 2026-11-08
+
+No LLVM backend for 1.0, settling the open question. Decision 101 stands
+
+**Why:** No real program has shown tight numeric loops as a problem. The cost of an LLVM dependency is known, and the gain for Lucid programs is not. Look again with evidence.
+
+### Decision 204, 2026-11-08
+
+Version 1.0 promises, as Go 1 does, that a program that builds under 1.0 builds and behaves the same under every 1.x. It covers `docs/language.md`, `docs/grammar.md`, the `std` modules, `lucid.toml` and `lucid.lock`, the commands and their flags, the meaning of each error code, and the fields of `--json` output, which may gain fields. It does not cover message text, the runtime's layout, built files, or speed. A fix to a safety hole may break a program. There are no editions. In force from the end of M8, see "Version 1.0 promise" in `vision.md`
+
+**Why:** Go's promise has held since 2012 with the same limits: source, not binary, and security fixes excepted. Editions, as in Rust, are a second way to read a program, and `vision.md` puts simplicity first. The promise needs a full spec review first, against the code, by the `spec-reviewer` agent and the planned `/code-review ultra`.
+
+### Decision 205, 2026-11-08
+
+Supersedes the macOS part of decision 191, and decision 192. M8 supports Windows and Linux only. macOS waits, with no milestone, and there is no GitHub Actions job. Code for Linux keeps to what POSIX gives, such as `dlsym` and `cc`, so macOS stays a small step later. Planned for M8
+
+**Why:** The owner has no Mac, and the GitHub Free plan. A port that no one can run is not checked, and an unchecked port breaks the rule that every feature has a passing test. CI on macOS would spend free minutes at 10 times the Linux rate.
+
+### Decision 206, 2026-11-08
+
+The public website, lucidlang.dev, lives in `website/`: a static Astro site with Starlight for the docs, deployed by Cloudflare Pages from this repository. It needs no Rust toolchain to build. Its docs are curated by hand, and every `lucid` block in them must pass `lucid check`, by `npm run check:examples`. Only `docs/errors.md`, `docs/agent-guide.md`, and `examples/` are read straight from the repository. No Tailwind, no analytics, no external fonts or scripts. Installers at `/install.sh` and `/install.ps1` are reserved, and fail with a message until a release exists
+
+**Why:** Starlight gives a sidebar, a table of contents, copy buttons, and Pagefind search with no paid service. A static site fits the free Pages plan. Those two files are written for users, so reading them keeps one source. The rest of `docs/` holds internal research and decisions, which stay private. Plain CSS covers six pages, so Tailwind would add a dependency for nothing. An installer that pretends to work is worse than none. Sources: the Astro, Starlight, and Cloudflare Pages docs, read 2026-11-08.
+
+### Decision 207, 2026-11-08
+
+When the `std.http` server refuses a request, it closes in stages: it sends the answer, closes its write half through the runtime's `lucid_net_close_write`, then reads and drops input until the client closes, 2 seconds pass with no bytes, or 16 reads have come, so at most 1 MiB and 32 seconds. Only `std/http.lcd` calls it, so `std.net` gains no public task
+
+**Why:** RFC 9112 §9.6: a close with input unread can reset the connection, so the client may never read the answer. On Linux, in WSL, the 431 check of `tests/run/std_http.lcd` lost its answer this way in every full test run. The time and byte limits keep a client from holding the thread, as the 30-second timeout does. See "Ecosystem (M8)" in research.md.
+
+### Decision 208, 2026-11-08
+
+Amends decision 193. `crypto.same` compares through `subtle`'s `ConstantTimeEq`, not `ring`. `crypto.hex` is in the runtime. `random_bytes` traps on a negative count. `check_password` gives false for a hash that is not an Argon2 PHC string. `argon2` 0.6 has only `alloc` and `password-hash`, and the 16-byte salt comes from `ring`'s `SystemRandom`. `argon2` and `blake2` are optimized in dev builds
+
+**Why:** `ring` 0.17.14 marks its `constant_time` module deprecated, "with no promises regarding side channels", in `src/lib.rs`. `subtle` 2.6.1 is already built for `rustls`, so no new crate compiles. `argon2`'s default `getrandom` feature would add a second random source. Its check reads the algorithm, version, and setting from the PHC string, in `password-hash` 0.6.1, so a later rise in the setting still checks old hashes. Unoptimized, the golden test took 2.2 s, and 0.7 s optimized. See "Ecosystem (M8)" in `research.md`
+
+### Decision 209, 2026-11-08
+
+Amends decisions 194 and 195. A `Value` is `Null`, `Int`, `Float`, `Text`, or `Bytes`, each with one field `value`. A `SqlError` is `Constraint`, `Busy`, which also covers SQLite's `LOCKED`, or `Failed`, each with `detail`. `db.run` gives the rows that the statement changed, from the change in `sqlite3_total_changes64` with the connection's mutex held, so triggers and foreign keys count. A query holds exactly one statement, and SQLite's parser decides that what follows holds none, so a comment may follow. A count of values other than the count of `?` marks traps. An authorizer refuses `ATTACH`, except the literal empty name that `VACUUM` attaches, and so a null name, which SQLite gives for a `?` mark or any name that is not a literal. It also refuses the pragmas `temp_store_directory` and `data_store_directory`. A connection waits up to 5 seconds for another one's lock before `Busy`. `sql.open` gives a path that starts with `file:` a `./`. `sql` has `Show` and `Equal`, as every type has `Show` in `language.md`, and is a built-in type name. On Windows the runtime's C builds with `/Gw`, and on Linux `lucid build` links with `--gc-sections`, so a program that never opens a database does not carry SQLite
+
+**Why:** SQLite reads a missing value as null, and `sqlite3_prepare_v2` skips what follows the first statement, so both would hide a bug. `sqlite3_changes` keeps the count of the last `INSERT`, `UPDATE`, or `DELETE`, so after `VACUUM` it gave 1. The bundled build sets `SQLITE_USE_URI`, so a `file:` name is a URI that can name any file, and `ATTACH` or `VACUUM INTO` could open a file that `files` does not list. `VACUUM` runs `ATTACH` through the same parser, so the authorizer sees it. A hello program grew from 449,536 to 2,112,000 bytes on Windows, since the runtime's code that every program needs shares an object with `sql.rs`, and SQLite's tables are not in their own sections. With both flags it is 266,240 bytes, and 363,183 bytes of code on Linux, down from 3,364,014. See "Ecosystem (M8)" in `research.md`
+
+### Decision 210, 2026-11-08
+
+Amends decision 196. A receiver's type is in a package when it is a `type` or `choice` declared in one of the package's files, or an `any` of a trait declared there. `list`, `map`, `set`, unions, task types, and the other built-in types belong to `std`, whatever they hold, so `self: list[User]` and `self: User?` are outside every package. A trait names the task when one of its tasks has that name and the trait is declared in the package. A breach is E0342. A task that already gives E0304 does not also give E0342. Built in M8
+
+**Why:** Rust allows an inherent `impl` only in the crate that defines the type, and `Vec<Local>` is not local there, by the Rust Reference. A wider rule, with a package owning `list[User]` because it owns `User`, needs the overlap check to reason across packages: two packages could each own a part of `map[A, B]`. The narrow rule needs one lookup per task, and a package that wants a dot call on a list can hold the list in a type of its own.
+
+### Decision 211, 2026-11-08
+
+Amends decisions 197 to 201, as built. `lucid.lock` is a `#` line, then one line `NAME VERSION SHA256` per package, sorted by name, so the Rust loader and the Lucid client each read it with a split. A cached package lives in `CACHE/NAME-VERSION-SHA256/`, named by the whole hash, and is unpacked into a `.part-` directory and renamed, so a directory in the cache is whole. The compiler runs the client only when a registry dependency of a loaded package has no lock line in its floor's range, at or above the floor, or no cache directory, so a lowered floor keeps the locked version until the client next runs. The client takes the floors of the packages outside the cache, and follows the dependencies of every version it reads, as MVS does, so the lock can list a package that only a passed-over version wanted. Two majors are E0344 only when a chosen version, or a package outside the cache, wants them, so the order of the walk cannot change the result. It prints `note TEXT` and `error CODE NAME TEXT` lines, which the compiler turns into stderr notes and diagnostics: E0343 for what a registry cannot give, E0344 for two majors, and E0345 for a hash that differs from the index or the lock. A cached package must hold the locked version, and its `lucid.toml` must name no dependency that the index left out. An index line is `{"version", "dependencies", "sha256"}`, with `dependencies` an object of name to floor. `lucid package` checks the library, writes `NAME-VERSION.lpk` to the current directory, and prints the index line. Under `src`, an archive holds only `.lcd` files, and no part may be a Windows device name, `con`, `prn`, `aux`, `nul`, or `com` or `lpt` with a digit. `README.md` and `LICENSE` keep their capitals. `[registry] url` refuses any scheme but a lowercase `https://`
+
+**Why:** Plain lines need no TOML or JSON reader on either side. A directory named by name and version alone would let two registries' packages meet, and a 64-bit prefix of the hash can be matched by a birthday search, so the whole hash names it. The client is the one place that reads an index, so the compiler only checks that what it loads is covered. Go's MVS keeps every reachable version's requirements, by "Minimal Version Selection", and a lock that lists one extra package costs only a download. Writing `con.lcd` on Windows reaches a device, not a file, so an archive could block or write to it. The device names are from memory of Microsoft's "Naming Files, Paths, and Namespaces", not read for this entry, and `com0` and `lpt0` are refused for margin. See "Ecosystem (M8)" in `research.md`
+
+### Decision 212, 2026-11-08
+
+Amends decision 202, as built. `lucid lsp` checks each open document as the entry of `lucid check`, and checks every open document again after any open, change, or close. A file's diagnostics go to its own URI, and one in a `std` file goes to the start of the document, named. Go to definition and hover come from the checker, which records each written name it resolves, and the span of its declaration: a binding, a task, a method, or a type or constructor. Only the server records them, so other commands pay nothing. Fields and module names are not recorded yet. The server never runs the registry client: a dependency missing from `lucid.lock` or the cache is E0343, with a note to run `lucid check`. Hover shows a binding as `name: type`, and a task or type as its declaration's line with its `##` lines. Formatting runs `lucid fmt` in a child on a copy in a new private directory, and gives one edit for the whole text. A panic while checking is caught, and gives that document no results
+
+**Why:** Checking each document as an entry needs no map from a file to the packages that load it, and a change to a module reaches every open file that uses it. Recording at the checker's own lookups gives the declaration that the checker chose, so shadowing and methods by receiver type come out right with no second resolver. Running `lucid fmt` itself keeps its check that only space changed. A fetch on each keystroke would wait on the network and write the lock while the user types. Checked in Neovim 0.12.4, through `vim.lsp.start` and through `vim.lsp.config`. See "Ecosystem (M8)" in `research.md`
+
+### Decision 213, 2026-11-08
+
+Outcome of the spec review before version 1.0, by the `spec-reviewer` agent against the lexer, parser, resolver, and checker. Code now follows the spec in four places: a variant with `()` and no fields is E0201, an unknown `std` module is E0334 and only the planned `std.process` gives E0901, an index on a value that takes none is E0303, and a list or `set(...)` literal on the right of `==` or `in` takes its type from the left whatever that type is. The spec now follows the code in five: `shared` and `weak` are planned and outside the 1.0 promise, a tab is an error only in the indentation of a line of code, `_` is always the wildcard in a pattern, a hand-written `show` and the like may be on a union, and a whole module may share its name with a built-in type, as `std.sql` does. `?` gets its row in the precedence table
+
+**Why:** Each pair was settled by which side was right. A tab where no depth depends on it misleads no tool, and `lucid fmt` already rewrites one on a comment line, so the narrower rule is the true one. `use std.sql` must bind `sql` next to the type, and a module name is always followed by a dot, so the two cannot be confused. `tests/run/review.lcd` relies on `show` for `text?`. An unknown `std` name is a typo, not a missing feature, and E0901 told the user to wait for a milestone. Promising `shared` while it does not run would bind 1.x to a design no program has tested. Both words stay keywords, so adding them later breaks nothing. The review found every error code documented, emitted, and tested. The `/code-review ultra` that decision 204 also needs is the owner's to run.
+
+### Decision 214, 2026-11-08
+
+The self-hosted compiler is a Lucid package in `compiler/lucid/`. At M9 it holds the whole front end, the lexer, parser, resolver with `lucid.toml` reading, checker, `derive`, monomorphizer, and ownership pass, and the driver for `lucid check`, with `--json`, `--costs`, and `--unsafe`, `lucid run`, and `lucid build`, both targets. Code generation, the runtime, and linking stay in Rust, behind the C ABI of decision 217. `test`, `fmt`, `fix`, `explain`, `context`, `package`, `lsp`, and the registry client stay in the Rust driver. The shipped `lucid` stays the Rust program through M9, and the Rust front end is not deleted. Amends the M9 plan in `roadmap.md`. Planned for M9
+
+**Why:** Decision 16 keeps Cranelift in Rust. MIR is the one input of both backends, so the cut at MIR keeps `native.rs` and `wasm.rs` whole, and the C ABI needs a few calls, not one per Cranelift instruction. The exit test needs only `build`. `lucid test` and the registry client start child processes, and `std.process` is only planned, so porting them would first need a new `std` module. The Rust driver still needs a front end for `lsp`, `fix`, and `test`, so deleting the Rust stages waits until the Lucid compiler covers every command.
+
+### Decision 215, 2026-11-08
+
+Each Lucid stage is checked against its Rust stage by dumps. The internal variable `LUCID_DUMP`, set to `tokens`, `ast`, `mir`, or `owned`, makes `lucid check` print the tokens, the tree, the MIR after `mono.rs`, or the MIR after `ownership.rs`, in one text form that both compilers write. A golden test runs both on every `.lcd` file in `tests/`, `examples/`, `std/`, `tools/`, and `compiler/lucid/`, and compares each dump, and the `--json` diagnostics, byte for byte. Each port copies its Rust file's behavior, message text included, and keeps one Lucid module per Rust file. A Rust bug found while porting is fixed in Rust first. The variable is not under the 1.0 promise, as `LUCID_FMT_CHILD` is not. Built at M9 step 1, in `dump.rs`, with the form in "Self-hosting" in `compiler.md`: one node per line, so a reader can take it as one stream of atoms. Until a Lucid stage exists, the test compares two Rust runs, which proves the dumps deterministic
+
+**Why:** A differential test needs no hand-written expected output, and finds a fault at the first stage that differs, not in a program's output much later. The golden tests already hold every error code and feature, so they are the spec that both sides must meet. Matching the Rust code line for line makes a diff traceable to one function. Go 1.5 also moved its compiler from C to Go by translation, not redesign, from memory of the Go 1.5 release notes, not read for this entry. Decision 204 covers commands and flags, not internal variables.
+
+### Decision 216, 2026-11-08
+
+The `owned` dump of decision 215 is also the input of the Rust backends. It holds the files of `Source`, names and text, and the `Program` after `ownership.rs`, in a line-based text form. Rust gains a reader, `dump::read` in `lucid_backend`, beside the writer, which rebuilds `Program` and `Source` with leaked types, as `check.rs` builds them. Built at M9: `stage_dumps_are_stable` reads back every `owned` dump and writes it again
+
+**Why:** One form for testing and for the backend means the test checks what the backend reads. Text can be diffed and read by an agent. The backends need the source text for diagnostics and the line tables for traces. If the read is slow on the compiler's own MIR, a binary form can replace it later, with the dump kept for tests. The cost is measured at that step.
+
+### Decision 217, 2026-11-08
+
+A new Rust crate `backend/`, `lucid_backend`, takes `mir.rs`, `native.rs`, `wasm.rs`, `loader.js`, and the linking code of `main.rs`, and `lucid` depends on it. Its C ABI has `lucid_backend_run`, `lucid_backend_build`, and a pair that gives the text of a file held inside, `std` and `tools`, by size and then by copy. Each takes a `.pointer()` and a length of a `list[byte]`, and gives an `int`. The backend prints its own diagnostics, in the form that `--json` asks for. `native.rs` lists these tasks with the runtime's, so the Lucid compiler runs under `lucid run`, and `lucid build` links a program that names one with a library that holds `lucid_backend`, `lucid_rt`, and `exe.rs`, in place of the plain runtime. The Lucid compiler's manifest grants `unsafe`, `files = true`, and the `env` names it reads. Planned for M9
+
+**Why:** Plain bytes through `.pointer()` already pass the C ABI from user code, so no new language rule and no new privilege for counted values is needed. Rust cannot link two static libraries that each hold its standard library, so one library holds both. `std` files live inside the compiler through `include_str!`, and Lucid has no such form, so asking the backend keeps one copy. `unsafe` grants full trust by `security.md`, which a compiler that runs native code already has.
+
+### Decision 218, 2026-11-08
+
+The exit test builds in stages. Stage 0 is the Rust `lucid`, stage 1 is what stage 0 builds from `compiler/lucid/`, stage 2 is what stage 1 builds, and stage 3 is what stage 2 builds. Stage 2 and stage 3 must be byte-identical, and so must stage 1 and stage 2, since both front ends must give the same MIR. On Windows, `lucid build` passes `/Brepro` to `link.exe` for every program. The claim covers one machine and one checkout. A test in `golden.rs` runs the stages on Windows, and the same test runs in WSL. Built 2026-11-12: stage 1 matches only from a release stage 0, since a debug `lucid` does not inline counts
+
+**Why:** A fixed point is the usual proof that a compiler compiles itself. Measured 2026-11-08: `hello.exe` built twice two seconds apart differed in 2 bytes, at offset 257, which is in the PE header, and `website.exe` built twice in one second matched, so Cranelift's object output is already stable and the PE timestamp is the difference. `/Brepro` is undocumented by Microsoft, and reports say it writes a hash in place of the timestamp, with PDB files still varying. `lucid build` writes no PDB. Go reached reproducible toolchains in 1.21, after removing inputs such as the host C toolchain. Lucid links with the system linker, so a reproducible build across machines is not claimed. See "Self-hosting (M9)" in `research.md`
+
+### Decision 219, 2026-11-08
+
+Bootstrap path. Until a release exists, stage 0 is the Rust `lucid` from `cargo build --release` in the same checkout. When the owner makes the first release, `compiler/lucid/stage0.txt` pins its version and the SHA-256 of its Windows and Linux binaries, and the bootstrap steps in `compiler.md` start from that binary. Deleting the Rust front end waits for both that pin and the full command set of decision 214. Built 2026-11-12, with the steps in `compiler.md`
+
+**Why:** Rust bootstraps from a pinned beta compiler named in a file in its repository, and Go from a named older release. A pin with no release behind it would point at nothing, and releases are the owner's choice. Zig avoids a binary by keeping a WebAssembly build of its compiler, which Lucid cannot copy while code generation is Cranelift in Rust.
+
+### Decision 220, 2026-11-08
+
+The port adds no feature for the compiler alone. A gap in Lucid or `std` found while porting goes through the usual rules, with a decision entry, and is planned on its own. The time of `lucid check` on `compiler/lucid/` is measured for both compilers at each step and recorded in `research.md`. No speed target is set. Planned for M9
+
+**Why:** Decision 16 self-hosts to test the language on a large program. A private feature would hide the gap that the port should find. No evidence gives a fair target for a first port that counts references, so the numbers come first.
+
+### Decision 221, 2026-11-08
+
+E0103 shows a printable ASCII character as itself, and any other character as `\u{hex}` of its code point. Amends the message, not the code
+
+**Why:** The Rust lexer used `char::escape_debug`, which escapes control characters, grapheme extenders, and the characters its Unicode tables mark as not printable, and shows every other character as itself. The Lucid lexer would need those tables to match it. A zero-width space or a non-breaking space shown as itself tells the reader nothing, and a code point always names the character. One rule in both lexers is shorter than either table.
+
+### Decision 222, 2026-11-08
+
+An assignment whose value is a text join that starts with the place being assigned, such as `t = "{t}x"` on a `change` parameter or `b.t = "{b.t}x"`, takes the text out of that place for the join, as a `change` argument that is a path does, so the append is in place when the text is unique. Built in M9: in `check.rs` for a field, which takes the text out of its slot after the other parts run, and in stage 2 of `ownership.rs` for a parameter
+
+**Why:** Measured in `research.md`, "Self-hosting (M9)": 800,000 appends take 70 ms on a local and over 7 s on a `change` parameter or a field, since stage 2 moves only a local that is not a parameter. The port builds diagnostics and dumps through `change self`, so the checker port would hit it. By decision 220 it is a general fix, not one for the compiler alone.
+
+### Decision 223, 2026-11-09
+
+A fifth dump stage, `LUCID_DUMP=resolved`, prints what `resolve.rs` gives: the files of `Source` with their starts, the grants, `no_unsafe`, `packages`, `web_only`, and `host_only`, then the joined tree in the `ast` form. It prints even with errors. The roadmap's checker step splits in two: the resolver first, checked by this dump, then the checker, `derive`, and the monomorphizer. Amends decision 215
+
+**Why:** The resolver is 1,500 lines of Rust plus 700 of manifest reading, and its only other check would be the MIR dump, after 7,000 more lines of checker. A bug found then could sit in any of them. The tree after joining already has a dump form, so the new stage costs about 50 lines of Rust.
+
+### Decision 224, 2026-11-09
+
+`std.fs` gains `real_path(path) -> text or FileError`: the absolute path, with no `.`, `..`, or links, through Rust's `fs::canonicalize`. On Windows the `\\?\` prefix is dropped from a drive path or a share, so the result takes `/` like any other path. Found by the resolver port, under decision 220
+
+**Why:** The resolver finds a package by walking up from a file's real directory, and keeps one copy of a package reached by two spellings, so the Lucid port needs real paths, and `std.fs` had none. Rust has `fs::canonicalize`, Go `filepath.EvalSymlinks` with `filepath.Abs`, and Python `os.path.realpath`, so the task is common. A verbatim `\\?\` path turns off parsing of `/`, so keeping the prefix would make a joined path wrong. See "Self-hosting (M9)" in `research.md`.
+
+### Decision 225, 2026-11-10
+
+A sixth dump stage, `LUCID_DUMP=checked`, prints the program that `check.rs` gives, before `mono.rs` and `derive.rs` run, in the `mir` form, when the checker reports no errors. The stage ends with the checker, as `resolved` ends with loading, so only the checker's diagnostics print. The roadmap's checker step splits in two: the type checker first, checked by this dump and its diagnostics, then `derive` and the monomorphizer, checked by the `mir` dump. Amends decision 215
+
+**Why:** `check.rs` is 6,000 lines of Rust, and `derive.rs` and `mono.rs` 1,350 more. With only the `mir` dump, a mismatch could sit in any of the three. The checker's output is already a `mir::Program`, so the stage costs a few lines, as decision 223 did for the resolver.
+
+### Decision 226, 2026-11-12
+
+The backend's C ABI names its tasks `backend_run`, `backend_build`, and `backend_has_symbol`, since a name that starts with `lucid_` is kept for the runtime, and only `std` may declare one. `backend_has_symbol` looks a name up as `native::find_symbol` does, so the Lucid checker reports E0904. The pair that gives the files held inside waits: Lucid has no way to make text from bytes outside `std.fs`, so the Lucid resolver reads `std` from the directory in the internal variable `LUCID_STD`, or else `std/` under the current directory, until `std` gains text from a `list[byte]`, which is planned on its own. A program that the Lucid compiler runs in its own process replaces the runtime's arguments, grants, and call sites, which were set once per process. `lucid build` reads the library for a program that calls the backend from where the build left it, with its system libraries and their directories in `libs.txt` beside it. Amends decision 217
+
+**Why:** Another name keeps one rule for every user `extern`, where an exception for the compiler would be a private feature, against decision 220. Text from bytes is a common need: Go converts with `string(b)`, Rust with `String::from_utf8`, and Python with `bytes.decode`, all from memory, not read for this entry. A static library cannot hold its own bytes, so a path is the shortest way, and it ties the build of the compiler to one checkout, which decision 218 already assumes. `--print native-static-libs` names `windows.0.52.0.lib`, from `windows-targets` under `cranelift-jit`, with no directory, which only the build scripts' messages give.
+
+### Decision 227, 2026-11-12
+
+M10 readies the first release: the owner's ultra review and its fixes, version 1.0.0, Linux programs without debug sections, a Firefox check of the web loader, written release steps, a license review, and the push. Every crate moves from 0.1.0 to 1.0.0 together, since they ship as one program. `lucid --version` prints `lucid 1.0.0` and a line feed, and with `--json` prints `{"version":"1.0.0"}`, so the site's claim that every command speaks JSON stays true. The text comes from `CARGO_PKG_VERSION`, so the manifest is the one place it is written
+
+**Why:** The 1.0 promise of decision 204 is in `vision.md`, but nothing reports which version a user has, so a bug report cannot name one. `rustc --version`, `cargo --version`, `node --version`, and `python --version` all print the version on one line, and `go version` is a subcommand: from memory, not read for this entry. A flag keeps the command list unchanged. See "Release (M10)" in `research.md`
+
+### Decision 228, 2026-11-12
+
+On Linux, `lucid build` passes `-Wl,--strip-debug` to `cc`, so a program carries no DWARF. Symbols stay, so `nm` and `perf` still name tasks. Windows needs no change, since `link.exe` writes debug data only with `/DEBUG`, which `lucid build` does not pass
+
+**Why:** A Linux program is about 6 MB where its code is 363 KB, measured at M8 step 5, and the rest is debug sections from the Rust standard library and the runtime. A Lucid trace comes from the program's own call-site tables, not from DWARF, so nothing reads them. GNU `ld` documents `--strip-debug`, or `-S`, as dropping debug symbols only: checked at the build step: `hello` fell to 564 KB with its symbols kept, and `tests/trap` passes
+
+### Decision 229, 2026-11-12
+
+Amends decision 219. The `stage0.txt` pin waits until the Rust front end is deleted. A release records the SHA-256 of each binary in its notes, by the release steps in `compiler.md`
+
+**Why:** A released `lucid` cannot be stage 0 today. It reads the 77 MB backend library and `libs.txt` from the `target/` directory of the checkout that built it, by decision 226, and `libs.txt` names a library inside cargo's registry. The backend is Rust, so a bootstrap needs cargo and the checkout anyway, and the Rust front end in that checkout is a stage 0 that needs no pin. A pin pays only when no Rust front end is left to build from
+
+### Decision 230, 2026-11-12
+
+The web loader is checked in Firefox, by running the web examples and a trap with a trace in it, as was done in Chrome for M6. If Firefox writes WebAssembly frames in another form, the loader's pattern widens to read it, and `web_programs_match_run` keeps V8. Safari stays unchecked, like macOS by decision 205
+
+**Why:** The loader finds a trace's tasks with the pattern `wasm-function[i]:0xOFF`, which was checked only in V8. From memory, Firefox writes frames as `name@url:line:col`, and a WebAssembly frame as `wasm-function[i]:0xOFF` after the URL, so the pattern may already match, which the check settles. Checked 2026-11-12 in Firefox 160: the pattern matches, and a stack overflow is an `InternalError`, which the loader now reads too, as in `docs/research.md` "Firefox frames". Safari needs a Mac, which the owner does not have
+
+### Decision 231, 2026-11-12
+
+Any edit under `backend/src` reruns `backend/build.rs`, which rebuilds the release `lucid_backend` library in its own target directory, even for a build that never links a program through it. Kept, answering an M9 ultra review finding
+
+**Why:** The library must match the backend source, or programs that the Lucid compiler builds get stale code, as the `Cargo.lock` finding showed. Building it only on demand needs a second build path and a staleness check of its own. The cost lands only on backend edits, which are rare in M10. Revisit if the edit loop on the backend gets slow. Judgment call, not measured.
+
+### Decision 232, 2026-11-12
+
+Supersedes decision 154. All of Lucid, the compiler, backend, runtime, and `std`, is licensed under MIT or Apache-2.0, at the user's option, with `LICENSE-MIT` and `LICENSE-APACHE` at the root and `license = "MIT OR Apache-2.0"` in every crate. `LICENSE` and `LICENSE-EXCEPTION` are gone. A contribution is dual licensed the same way unless its author states otherwise
+
+**Why:** The owner chose it. Every built program holds `lucid_rt`, `std`, and generated code, and permissive licenses let it use any license with no exception text, where decision 154 needed a Classpath exception extended by a notice that had no legal review. Apache-2.0 adds a patent grant, and the pair is the form Rust and most of its crates use. See "License" in `research.md`
 
 ## Open questions
 
-Decide each one by the milestone shown.
-
-| Question | Default if undecided | Decide by |
-| --- | --- | --- |
-| None open now | | |
+None open now. A question that cannot be settled at once goes here, with
+the default that holds until it is decided and the milestone that must
+decide it.

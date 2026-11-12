@@ -1,8 +1,11 @@
 # Research
 
-Evidence behind Lucid's design. Reviewed on 2026-11-04. Add to this file whenever a decision is made or challenged.
+The evidence behind Lucid's design: papers and documentation read, and
+Lucid's own measurements. Each entry says how closely its source was
+read, and where the evidence is weak it says so. Entries are added when a
+decision is made or challenged, and are kept as written.
 
-**Evidence levels**
+Evidence levels:
 
 - **Read:** the primary source text was read.
 - **Snippet:** seen only through search excerpts or a summary. Read the source before relying on the exact figure.
