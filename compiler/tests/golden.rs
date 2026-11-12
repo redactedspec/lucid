@@ -326,7 +326,8 @@ fn all_sources(dir: &str, out: &mut Vec<String>) {
 
 /// `LUCID_DUMP` prints each stage of every file in the repository the same way
 /// twice, and never panics, by decision 215. The Lucid compiler is compared
-/// with these dumps as each of its stages lands.
+/// with these dumps as each of its stages lands. `naive` is `owned` with
+/// `LUCID_NAIVE`, and `costs` and `unsafe` are those `check` flags.
 #[test]
 fn stage_dumps_are_stable() {
     let mut sources = Vec::new();
@@ -344,7 +345,7 @@ fn stage_dumps_are_stable() {
     let jobs: Vec<(&str, &str)> = sources
         .iter()
         .flat_map(|file| {
-            ["tokens", "ast", "resolved", "checked", "mir", "owned"]
+            ["tokens", "ast", "resolved", "checked", "mir", "owned", "naive", "costs", "unsafe"]
                 .map(|stage| (file.as_str(), stage))
         })
         .collect();
@@ -352,7 +353,18 @@ fn stage_dumps_are_stable() {
     let failures = std::sync::Mutex::new(Vec::new());
     let dump = |file: &str, stage: &str, exe: &Path| {
         let mut command = Command::new(exe);
-        command.args(["check", "--json", file]).current_dir(repo()).env("LUCID_DUMP", stage);
+        command.current_dir(repo());
+        match stage {
+            "costs" | "unsafe" => {
+                _ = command.args(["check", "--json", &format!("--{stage}"), file])
+            }
+            "naive" => {
+                _ = command
+                    .args(["check", "--json", file])
+                    .envs([("LUCID_DUMP", "owned"), ("LUCID_NAIVE", "1")])
+            }
+            _ => _ = command.args(["check", "--json", file]).env("LUCID_DUMP", stage),
+        }
         command.output().expect("cannot start lucid")
     };
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
@@ -366,8 +378,7 @@ fn stage_dumps_are_stable() {
                     // Lucid compiler can do only once the backend's C ABI
                     // exists, by decision 217.
                     let later = file == "tests/fail/extern_missing.lcd";
-                    let lucid_stage = matches!(stage, "tokens" | "ast" | "resolved")
-                        || (matches!(stage, "checked" | "mir") && !later);
+                    let lucid_stage = matches!(stage, "tokens" | "ast" | "resolved") || !later;
                     let second_exe = if lucid_stage { &ported } else { Path::new(LUCID) };
                     let (first, second) =
                         (dump(file, stage, Path::new(LUCID)), dump(file, stage, second_exe));
