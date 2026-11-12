@@ -87,7 +87,7 @@ mailer = { path = "../mailer", allow = ["net"] }
 | `net` | `true` | `std.net`, `std.http` |
 | `files` | `true`, or a list of paths | `std.fs` and `std.sql`, limited to the listed paths |
 | `env` | `true`, or a list of names | `std.env`, limited to the listed names |
-| `process` | `true` | `std.process` |
+| `process` | `true` | `std.process`, which is planned |
 | `unsafe` | `true` | `unsafe` blocks and `extern` declarations |
 
 `std.args`, `std.json`, and `std.time` need no permission.

@@ -1,6 +1,17 @@
-# Language Reference
+# The Lucid Language Reference
 
-This document is normative. The formal syntax is in [grammar.md](grammar.md).
+This is the reference manual for the Lucid programming language. It is
+normative: where the compiler disagrees with it, one of the two has a
+bug. The formal syntax is in [grammar.md](grammar.md). For a gentler
+introduction, read the [agent guide](agent-guide.md), which shows
+everything that runs today by example.
+
+Lucid is a general-purpose language that compiles to machine code and to
+WebAssembly. It is strongly typed, has no garbage collector, and manages
+memory by reference counting that the compiler places, as described in
+[memory-model.md](memory-model.md). Programs are built from modules and
+packages, and the syntax is regular enough that a snippet parses without
+seeing any other file.
 
 ## Files and programs
 
@@ -33,7 +44,7 @@ Every value must be initialized. Shadowing in the same scope is an error.
 
 Tasks cannot read or write a top-level `var`. Pass it as a parameter. This keeps exclusivity checks static.
 
-A task may read a top-level `let` whose value is a literal, with or without a leading `-`. A text with no interpolation is a literal. Such a value exists before any statement runs, so a task never sees it uninitialized. Reading any other top-level `let` reports E0901, by decision 151.
+A task may read a top-level `let` whose value is a literal, with or without a leading `-`. A text with no interpolation is a literal. Such a value exists before any statement runs, so a task never sees it uninitialized. Reading any other top-level `let` reports E0901.
 
 ## Basic types
 
@@ -61,7 +72,7 @@ There are no implicit conversions. Every number type has a task for each other o
 
 Integer overflow traps in every build. Wrapping math uses explicit tasks: `a.wrapping_add(b)`, `a.wrapping_sub(b)`, and `a.wrapping_mul(b)`, on any integer type, wrap at the width of that type. The argument has the same type as `a`.
 
-Bit operators `&`, `|`, `^`, `~`, `<<`, and `>>` work on any integer type, by decisions 153 and 181. They bind tighter than comparisons and looser than `+`, as in Python, so `x & 1 == 0` tests the low bit. `~x` flips every bit of the type's width, so `~a` is `55` for a `byte` of `200`. The shift count has the same type as the value. A count below 0, or not less than the width, traps. `<<` drops the bits shifted out, and does not trap on them. `>>` keeps the sign of a signed type, and fills with zeros on an unsigned one.
+Bit operators `&`, `|`, `^`, `~`, `<<`, and `>>` work on any integer type. They bind tighter than comparisons and looser than `+`, as in Python, so `x & 1 == 0` tests the low bit. `~x` flips every bit of the type's width, so `~a` is `55` for a `byte` of `200`. The shift count has the same type as the value. A count below 0, or not less than the width, traps. `<<` drops the bits shifted out, and does not trap on them. `>>` keeps the sign of a signed type, and fills with zeros on an unsigned one.
 
 `/` always yields a `float` type, and follows IEEE 754, so `1 / 0` is `inf`. Two integers of any type are converted to `float` first. Two `f32` values give an `f32`.
 
@@ -104,7 +115,7 @@ Any value can be interpolated, and reads as `print` shows it. Interpolation is t
 
 `==`, `!=`, `<`, `<=`, `>`, and `>=` work on `text`. Order is by Unicode code point.
 
-A text literal with no `{...}` has the type `sql` where the context expects `sql`, as a number literal takes the type the context expects. `sql + sql` is `sql`, and a text literal, or `+` of text literals, next to a `sql` in `+`, `==`, or `!=` is one too. Nothing else makes a `sql`: there is no conversion from `text`, and `sql` has only `Show` and `Equal`, so `json.parse` cannot give one. So a query holds only text that the program's author wrote, and `std.sql` takes each value through a `?` mark, by decision 195. A `sql` shows as its text, and `==` compares the text. Giving `text` where `sql` is expected is error E0303.
+A text literal with no `{...}` has the type `sql` where the context expects `sql`, as a number literal takes the type the context expects. `sql + sql` is `sql`, and a text literal, or `+` of text literals, next to a `sql` in `+`, `==`, or `!=` is one too. Nothing else makes a `sql`: there is no conversion from `text`, and `sql` has only `Show` and `Equal`, so `json.parse` cannot give one. So a query holds only text that the program's author wrote, and `std.sql` takes each value through a `?` mark. A `sql` shows as its text, and `==` compares the text. Giving `text` where `sql` is expected is error E0303.
 
 ```lucid
 let all: sql = "SELECT name FROM users"
@@ -379,7 +390,7 @@ if ada.is_adult()
 
 `x.f(a)` runs the task `f` whose `self` type is the type of `x`. A `self` type can be an `any`, except for a task of its own trait. So one name can have one task per type, and such a name stays out of the shared namespace of "Choices". `f(x, a)` is an error, since one job has one form. `self` needs a type, which cannot be a bare type parameter, and `self: list[T]` covers every list. Two tasks of one name whose receivers can overlap are an error, counting each type parameter as free, and so is a built-in name on a built-in type, such as `len` on `text`. A dot call does not widen its receiver: an `int` does not reach `self: int?`. `x is empty` calls `x.is_empty()`.
 
-In a package, a task with `self` needs its receiver's type, or a trait that names the task, declared in that package, or else it is error E0342. This is the orphan rule, by decisions 196 and 210. A built-in type belongs to `std`, and so do `list`, `map`, `set`, unions, and task types, whatever they hold, so `self: list[User]` is outside every package. An `any` belongs where its trait is declared. A file with no `lucid.toml` is exempt.
+In a package, a task with `self` needs its receiver's type, or a trait that names the task, declared in that package, or else it is error E0342. This is the orphan rule. A built-in type belongs to `std`, and so do `list`, `map`, `set`, unions, and task types, whatever they hold, so `self: list[User]` is outside every package. An `any` belongs where its trait is declared. A file with no `lucid.toml` is exempt.
 
 The receiver must be a `var`, or a path into one, when `self` is `change`, and it follows the rules for a `change` argument. The `change` keyword is not repeated on a dot call, but it is required on any other argument. `x is empty` cannot call an `is_empty` that changes `self`.
 
@@ -672,13 +683,11 @@ url = "https://packages.example.com"
 markdown = { version = "1.2.0" }
 ```
 
-A `version` is a floor. By minimal version selection, decision 198, the program gets the highest floor that it or any of its dependencies names for each package, never a newer version than some manifest asks for. A floor reaches up to the next major version, or the next minor while the major is 0, so two floors in different ranges are error E0344. A registry package cannot have a `path` dependency, by decision 200.
+A `version` is a floor. By minimal version selection, the program gets the highest floor that it or any of its dependencies names for each package, never a newer version than some manifest asks for. A floor reaches up to the next major version, or the next minor while the major is 0, so two floors in different ranges are error E0344. A registry package cannot have a `path` dependency.
 
 `lucid.lock`, beside the root manifest, lists each registry package as `NAME VERSION SHA256`, the hash of its archive. Commands write it, and it belongs in version control. When the lock and the cache do not cover a dependency, `lucid run`, `check`, `test`, and `build` fetch what is missing, and say so on stderr. A registry that cannot give a package is error E0343, and an archive whose hash differs from the index or the lock is error E0345. `lucid package` writes a library's archive and its line of the index. See "Registry" in [compiler.md](compiler.md).
 
 ## Concurrency
-
-Planned for M7, by decisions 169 to 176. `spawn`, `spawned`, waiting at the end of a task, `channel`, `lock`, and the deadlock trap are built.
 
 `spawn f(x)` runs the call `f(x)` on a new thread, and gives a `spawned[T]`, where `T` is what `f` returns. Its arguments run first, in the current thread. `.wait()` blocks until the thread ends, and gives its result. Every spawn ends before the task, lambda, or top level that ran it returns: that one waits for each spawn it did not wait for. Nothing outlives its parent, so no thread leaks. Spawns in a loop run at once. `spawn` takes a call of a task, with no `change` argument, or else gives E0341. A `spawned[T]` shows as its type, such as `spawned[int]`, and cannot be compared.
 

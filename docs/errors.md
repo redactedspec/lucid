@@ -35,7 +35,7 @@ Fix: indent the block by 4 spaces more than its opening line.
 
 ## E0103: Unexpected character
 
-The character starts no token in Lucid. The message shows a printable ASCII character as itself, and any other character as `\u{hex}`, its code point in hex, so a character that cannot be seen still shows, by decision 221.
+The character starts no token in Lucid. The message shows a printable ASCII character as itself, and any other character as `\u{hex}`, its code point in hex, so a character that cannot be seen still shows.
 
 ```lucid
 let a = 1 $ 2
@@ -595,7 +595,7 @@ Fix: add the permission to `[permissions]` in the package's `lucid.toml`, as `fi
 
 ## E0341: `spawn` is not given a call of a task, or is given a `change` argument
 
-`spawn` runs one call of a task on a new thread, by decision 171. A built-in task, such as `.len()`, is not a task call, and a `change` argument would let two threads hold one variable.
+`spawn` runs one call of a task on a new thread. A built-in task, such as `.len()`, is not a task call, and a `change` argument would let two threads hold one variable.
 
 ```lucid
 let job = spawn 1 + 2
@@ -605,7 +605,7 @@ Fix: spawn a call of a task, as `spawn add(1, 2)`. For a `change` argument, pass
 
 ## E0342: A task with `self` in a package is on a type from outside it
 
-By the orphan rule, decision 196, a task with `self` in a package needs its receiver's type declared in that package, or else a trait of that package that names the task. Built-in types, including `list`, `map`, `set`, unions such as `User?`, and task types, belong to `std`, whatever they hold. So do the types of `std` modules. A file with no `lucid.toml` is exempt.
+By the orphan rule, a task with `self` in a package needs its receiver's type declared in that package, or else a trait of that package that names the task. Built-in types, including `list`, `map`, `set`, unions such as `User?`, and task types, belong to `std`, whatever they hold. So do the types of `std` modules. A file with no `lucid.toml` is exempt.
 
 For example, `task shout(self: text) -> text` in a package. The test is `tests/package/orphan`, since it needs a manifest.
 
@@ -613,19 +613,19 @@ Fix: take the value as a plain argument, as `shout(t: text)`, or declare a `type
 
 ## E0343: A registry cannot give a package
 
-The registry has no index for the package, or no such version, or cannot be reached, or gives an index line or archive that is not valid. An archive may hold only `lucid.toml`, `README.md`, `LICENSE`, and `.lcd` files under `src` with plain lowercase paths, by decision 200. After a fetch, a package whose `lucid.toml` names a dependency that its index line does not is this error too. `lucid lsp` never fetches, so there it means that `lucid.lock` or the cache does not cover a dependency, and `lucid check` fetches it. The test is `registry_fetches_and_locks` in `compiler/tests/golden.rs`, since it needs a registry.
+The registry has no index for the package, or no such version, or cannot be reached, or gives an index line or archive that is not valid. An archive may hold only `lucid.toml`, `README.md`, `LICENSE`, and `.lcd` files under `src` with plain lowercase paths. After a fetch, a package whose `lucid.toml` names a dependency that its index line does not is this error too. `lucid lsp` never fetches, so there it means that `lucid.lock` or the cache does not cover a dependency, and `lucid check` fetches it. The test is `registry_fetches_and_locks` in `compiler/tests/golden.rs`, since it needs a registry.
 
 Fix: check the name and version in `lucid.toml` against the registry's `index/NAME`, and check `[registry] url`. For a broken archive, ask its author to publish a new version.
 
 ## E0344: Two major versions of one package are wanted
 
-By decision 198, a program holds one version of each package, and a `version` floor reaches only up to the next major version, or the next minor while the major is 0. Two floors in different ranges, such as `1.2.0` and `2.0.0`, from the program or from its dependencies, cannot both hold.
+A program holds one version of each package, and a `version` floor reaches only up to the next major version, or the next minor while the major is 0. Two floors in different ranges, such as `1.2.0` and `2.0.0`, from the program or from its dependencies, cannot both hold.
 
 Fix: raise the older floor to the newer major, or use a version of the dependency that wants the same major as the program.
 
 ## E0345: An archive's SHA-256 differs from the index or the lock
 
-By decision 199, `lucid.lock` pins each registry package by the SHA-256 of its archive, and the index gives the same hash. A fetched archive whose hash differs from the index, or an index whose hash differs from the lock, means a registry that changed a published version, or an attack. Nothing is unpacked, and the lock is not changed.
+`lucid.lock` pins each registry package by the SHA-256 of its archive, and the index gives the same hash. A fetched archive whose hash differs from the index, or an index whose hash differs from the lock, means a registry that changed a published version, or an attack. Nothing is unpacked, and the lock is not changed.
 
 Fix: find out why the archive changed before you trust it. To take the registry's new archive on purpose, delete the package's line from `lucid.lock`.
 
@@ -671,13 +671,13 @@ Fix: correct the name, or use a task that one of those libraries has.
 
 ## E0905: Foreign code cannot run on the web
 
-A user `extern` task or `.pointer()` is in a program built with `lucid build --target web`. WebAssembly in a page reaches no C library, by decision 162. Only code generation for the web finds this, so `lucid check` and `lucid run` do not report it. The test is `web_rejects_foreign_code`.
+A user `extern` task or `.pointer()` is in a program built with `lucid build --target web`. WebAssembly in a page reaches no C library. Only code generation for the web finds this, so `lucid check` and `lucid run` do not report it. The test is `web_rejects_foreign_code`.
 
 Fix: build the program without `--target web`, or move the foreign code out of what the page uses.
 
 ## E0906: `std.dom` works only in a browser
 
-A program that uses `std.dom` ran with `lucid run` or `lucid test`, or was built without `--target web`. A page needs a browser, by decision 162. `lucid check` does not report this code.
+A program that uses `std.dom` ran with `lucid run` or `lucid test`, or was built without `--target web`. A page needs a browser. `lucid check` does not report this code.
 
 ```lucid
 use std.dom
@@ -689,6 +689,6 @@ Fix: build it with `lucid build --target web`, and open the page that loads the 
 
 ## E0907: `spawn`, `std.net`, `std.http`, `std.crypto`, or `std.sql` cannot run on the web
 
-A program built with `lucid build --target web` uses `spawn`, `use std.net`, `use std.http`, `use std.crypto`, or `use std.sql`. Threads in WebAssembly need shared memory, which browsers allow only on pages with cross-origin isolation headers, and a page cannot open a socket, by decision 176. `std.crypto` wraps `ring`, which builds C for each target, so the web waits for a need, by decision 193. `std.sql` wraps SQLite, which is C too, by decision 194. Only a build for the web finds this, so `lucid check` and `lucid run` do not report it. The test is `web_rejects_spawn`.
+A program built with `lucid build --target web` uses `spawn`, `use std.net`, `use std.http`, `use std.crypto`, or `use std.sql`. Threads in WebAssembly need shared memory, which browsers allow only on pages with cross-origin isolation headers, and a page cannot open a socket. `std.crypto` wraps `ring`, which builds C for each target, so the web waits until a program needs it. `std.sql` wraps SQLite, which is C too. Only a build for the web finds this, so `lucid check` and `lucid run` do not report it. The test is `web_rejects_spawn`.
 
 Fix: build the program without `--target web`, or do the work in one thread. A page talks to a server with the browser's own requests.

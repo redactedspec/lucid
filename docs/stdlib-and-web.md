@@ -24,6 +24,9 @@ libraries.
 | `std.html` | HTML built with escaping |
 | `std.dom` | Browser pages, in the Elm architecture |
 
+`std.process`, for running other programs, is planned. Its permission
+exists already, and a `use` of it reports E0901.
+
 A package needs a permission for some modules: `files` for `std.fs` and
 `std.sql`, `env` for `std.env`, and `net` for `std.net` and `std.http`.
 See [security.md](security.md#package-permissions).
