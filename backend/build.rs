@@ -23,6 +23,9 @@ fn main() {
     println!("cargo::rerun-if-changed=../runtime");
     println!("cargo::rerun-if-changed=src");
     println!("cargo::rerun-if-changed=Cargo.toml");
+    // Dependency versions and the workspace profile reach the nested builds.
+    println!("cargo::rerun-if-changed=../Cargo.toml");
+    println!("cargo::rerun-if-changed=../Cargo.lock");
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("cargo sets OUT_DIR"));
     let windows = env::var_os("CARGO_CFG_WINDOWS").is_some();
     // The table export lets the program module add its tasks for the runtime
