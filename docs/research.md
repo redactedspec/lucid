@@ -780,6 +780,15 @@ Decisions 227 to 230. Written 2026-11-12.
 - **Backend library.** Measured 2026-11-12: the release backend library is 77 MB on Windows, at `target/release/build/lucid_backend-*/out/backend/release/lucid_backend.lib`, and the release `lucid.exe` is 37 MB. So holding the library inside every `lucid` would triple its size for a use only the compiler's own build needs, which supports decision 229.
 - **Firefox frames.** **Checked** in headless Firefox 160 on Windows, 2026-11-12. Each of the 110 programs that `web_programs_match_run` runs was built for the web and run in a page from `127.0.0.1`, and its console compared with the golden file. All match, so the loader's `wasm-function[i]:0xOFF` pattern reads Firefox's frames, and the offsets agree with V8's. The first run differed only on the two stack overflow tests: Firefox throws `InternalError: too much recursion`, not V8's `RangeError`, so the loader printed `trap: InternalError: too much recursion` and no trace. The loader now treats both as a stack overflow, and the error's stack gives the full trace. Level: Measured. See decision 230.
 
+## Installers (M11)
+
+Decision 233. Written 2026-11-12.
+
+- **Practice.** From memory, not read for this entry: rustup installs with `curl ... | sh` and a separate Windows installer, and Deno with `curl ... | sh` and `irm ... | iex`. Both install into the user's home directory. Neither was checked for how it verifies a download.
+- **glibc floor.** Measured 2026-11-12: the 1.0.0 Linux binary, built on glibc 2.44, has no versioned symbol newer than `GLIBC_2.39`, by `objdump -T`. So it loads on glibc 2.39 or newer. Distribution versions in the docs, Ubuntu 24.04, Debian 13, and Fedora 40, are from memory and were not checked.
+- **Checked.** 2026-11-12, against the real release assets: `install.sh` in WSL, and `install.ps1` in Windows PowerShell 5.1 and PowerShell 7.6, each installed `lucid 1.0.0`, did nothing on a second run, and installed nothing when the list's hash was wrong. `install.sh` also refused an `http://` URL, and the installed binary ran a program. PowerShell 7 does not read `file://` with `Invoke-WebRequest`, so its test served the list over local HTTP. Not checked: a machine without Rust or Visual Studio, an older glibc, and ARM64 Windows, which the script refuses.
+- **Weak ground.** The release list and the assets have one owner, so the hash guards against a broken or swapped upload, not against that owner. Signing would cover that, and is not done.
+
 ## Open research
 
 | Topic | Needed by |

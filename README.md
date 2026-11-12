@@ -139,11 +139,27 @@ under every 1.x release. [vision.md](docs/vision.md#version-10-promise)
 says exactly what that covers. `shared` and `weak` references are planned
 and not part of the promise.
 
+## Install
+
+```sh
+# Linux x86-64, glibc 2.39 or newer
+curl -fsSL https://lucidlang.dev/install.sh | sh
+```
+
+```powershell
+# Windows x86-64
+irm https://lucidlang.dev/install.ps1 | iex
+```
+
+Each installer checks the archive's SHA-256 and installs into your user
+directory. The archives themselves are on the
+[release page](https://github.com/redactedspec/lucid/releases/tag/v1.0.0). `lucid build` needs a
+linker: the MSVC linker on Windows, or `cc` on Linux.
+
 ## Building from source
 
 You need Rust with the `wasm32-unknown-unknown` target, and, for `lucid
-build`, the MSVC linker on Windows or `cc` on Linux. No binaries are
-published yet.
+build`, the MSVC linker on Windows or `cc` on Linux.
 
 ```sh
 git clone https://github.com/redactedspec/lucid

@@ -162,6 +162,22 @@ Started after M9. Designed by decisions 227 to 230. No language change. Build in
 
 **Exit:** `lucid --version` prints `lucid 1.0.0` on Windows and Linux, every test passes on both, and each finding of the ultra review is fixed or answered in `decisions.md`.
 
+## M11: Binaries and installers (done)
+
+Started after M10. Designed by decision 233. No language change.
+
+- [x] Archives for Windows and Linux x86-64, with `SHA256SUMS`, as assets of the `v1.0.0` GitHub release, at the owner's word
+- [x] `releases.txt` on the site, read by both installers
+- [x] `install.sh` and `install.ps1`: HTTPS only, SHA-256 checked, into the user's directory, no profile changes, nothing done when current. Checked in WSL, Windows PowerShell 5.1, and PowerShell 7
+- [x] The downloads page, Installation, and the README show how to install
+- [x] Release steps in `compiler.md` cover packing, the list, and the GitHub release
+
+**Exit:** the commands on the downloads page install `lucid 1.0.0` on Windows and Linux, from the live site.
+
+## M12: Editor support (planned)
+
+A VS Code extension: the TextMate grammar the site already uses, and a client for `lucid lsp`. Not designed yet.
+
 ## Later, not planned
 
 macOS, by decision 205. Text from a `list[byte]` in `std`, so the Lucid compiler takes the `std` files held inside the backend in place of `LUCID_STD`, by decision 226. The Lucid compiler for every command, then the `stage0.txt` pin, then deleting the Rust front end, by decisions 214, 219, and 229. Safari, by decision 230. `shared` and `weak`, by decision 213. Native backend in Lucid, LLVM release backend, plain types stored inline, literal types, compile-time evaluation.

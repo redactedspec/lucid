@@ -1402,6 +1402,12 @@ Supersedes decision 154. All of Lucid, the compiler, backend, runtime, and `std`
 
 **Why:** The owner chose it. Every built program holds `lucid_rt`, `std`, and generated code, and permissive licenses let it use any license with no exception text, where decision 154 needed a Classpath exception extended by a notice that had no legal review. Apache-2.0 adds a patent grant, and the pair is the form Rust and most of its crates use. See "License" in `research.md`
 
+### Decision 233, 2026-11-12
+
+Binaries ship as assets of a GitHub release, one archive per platform with `SHA256SUMS` beside them. The site publishes `releases.txt`, one line per archive: version, platform, URL, and SHA-256, newest first. `install.sh` and `install.ps1` read that list, so no script holds a download URL. Each refuses a URL that is not HTTPS, checks the archive's SHA-256 against the list before unpacking, installs into the user's directory (`~/.lucid/bin`, or `%LOCALAPPDATA%\\Lucid\\bin`), runs nothing it downloads, changes no shell profile or environment variable, and does nothing when the installed version is current. `install.sh` refuses a system with no glibc or one older than the binary's newest versioned symbol, 2.39 for 1.0.0. A plain text list, not JSON, so `sh` reads it with `awk` and needs no `jq`
+
+**Why:** The downloads page promised these rules before there was a release, so this keeps that promise. A GitHub release costs nothing and is where people look for binaries of a GitHub project. The hash in a list on a second host means a swapped asset on GitHub alone is caught, though the site and GitHub share one owner, so this is not a signature. rustup and Deno install with `curl | sh` and a PowerShell one-liner in the same way, from memory, not read for this entry. Windows PowerShell 5.1 still ships with Windows, so the script keeps to what it has. See "Installers (M11)" in `research.md`.
+
 ## Open questions
 
 None open now. A question that cannot be settled at once goes here, with

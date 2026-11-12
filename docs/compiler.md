@@ -441,7 +441,7 @@ Cranelift crates are at 0.137, the latest stable release at M1. No parser genera
 
 A release ships the Rust `lucid`, built in release mode, for Windows and for Linux x86-64, by decision 229. The binary holds `std`, the runtime, the WebAssembly runtime, and `docs/errors.md`, so it needs no other file. `lucid build` needs the MSVC linker on Windows and `cc` on Linux, as under "`lucid build`". The Linux binary needs a glibc no older than the one it was built against. The Lucid compiler in `compiler/lucid/` does not ship, since it reads its backend library from `target/`.
 
-The owner decides when to release, and pushes. The steps, from a clean checkout of `main`, with `VERSION` the new version:
+The steps, from a clean checkout of `main`, with `VERSION` the new version:
 
 1. Set `version = "VERSION"` in `compiler/Cargo.toml`, `backend/Cargo.toml`, and `runtime/Cargo.toml`, by decision 227, and commit with the docs that name the version.
 2. On Windows, run `cargo fmt --check`, `cargo clippy --all-targets`, `cargo test`, and `cargo test --release`. Each must pass. The release run is the one that compares stage 1 of the fixed point. Then, in `website/`, run `npm run check:examples`, `npm run check:links`, and `npm run build`.
@@ -454,8 +454,14 @@ The owner decides when to release, and pushes. The steps, from a clean checkout 
 
 4. Check that `target/release/lucid --version` prints `lucid VERSION` on each system.
 5. Record the SHA-256 of each binary, with `sha256sum target/release/lucid.exe` on Windows and `sha256sum target/release/lucid` in WSL, and the host each was built on: the Rust version, and the glibc version from `ldd --version` on Linux.
-6. Make an annotated tag `vVERSION` on the release commit, whose message holds the hashes and hosts of step 5. These are the release notes.
-7. The owner pushes `main` and the tag, which deploys the site, and publishes the two binaries beside their hashes.
+6. Make an annotated tag `vVERSION` on the release commit, whose message holds the hashes and hosts of step 5.
+7. Pack the archives, by decision 233: `lucid-VERSION-windows-x86_64.zip` and `lucid-VERSION-linux-x86_64.tar.gz`, each holding the binary, `README.md`, `LICENSE-MIT`, and `LICENSE-APACHE`, flat. Pack the Linux one in WSL, so the binary keeps mode 755. Write `SHA256SUMS` with `sha256sum` over both, and check it with `sha256sum -c`.
+8. Find the Linux binary's real glibc floor, the newest version in `objdump -T target/release/lucid | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1`. If it moved, change the check in `website/public/install.sh` and the pages that name it.
+9. Add a line per archive at the top of `website/public/releases.txt`: `VERSION PLATFORM URL SHA256`, with the URL of the release asset.
+10. Push `main` and the tag, which deploys the site, then make the release: `gh release create vVERSION --verify-tag --title "Lucid VERSION" --notes-file NOTES --latest`, with both archives and `SHA256SUMS`. The notes say how to install, and give the hash and host of each binary.
+11. Check that both installers, run as the downloads page shows them, install `lucid VERSION`.
+
+The owner decides when to release. Each step that publishes, 10 above, needs the owner's word at the time.
 
 ## Development machine
 
