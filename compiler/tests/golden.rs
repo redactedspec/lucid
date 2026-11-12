@@ -379,9 +379,9 @@ fn compiler_reaches_fixed_point() {
 }
 
 /// `LUCID_DUMP` prints each stage of every file in the repository the same way
-/// twice, and never panics, by decision 215. The Lucid compiler is compared
-/// with these dumps as each of its stages lands. `naive` is `owned` with
-/// `LUCID_NAIVE`, and `costs` and `unsafe` are those `check` flags.
+/// in the Rust and the Lucid compiler, and never panics, by decision 215.
+/// `naive` is `owned` with `LUCID_NAIVE`, and `costs` and `unsafe` are those
+/// `check` flags.
 #[test]
 fn stage_dumps_are_stable() {
     let mut sources = Vec::new();
@@ -430,7 +430,7 @@ fn stage_dumps_are_stable() {
                     } else if first.stdout.is_empty() {
                         Some("printed nothing".to_string())
                     } else if first.stdout != second.stdout {
-                        Some("differs between two runs".to_string())
+                        Some("Rust and Lucid compilers differ".to_string())
                     } else if matches!(stage, "owned" | "naive") && first.status.success() {
                         read_back(&text(&first.stdout))
                     } else {
