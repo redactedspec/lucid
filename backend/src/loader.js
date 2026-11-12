@@ -184,7 +184,10 @@
     // output. After an error, the page takes no more events.
     const end = error => {
         if (error !== undefined) {
-            const { task, trace } = error instanceof RangeError ? place(error.stack) : {};
+            // V8 throws a RangeError when the stack runs out, and Firefox an
+            // InternalError, "too much recursion".
+            const overflow = error instanceof RangeError || error?.name === "InternalError";
+            const { task, trace } = overflow ? place(error.stack) : {};
             if (task !== undefined) {
                 write(2, text(`${TASKS[task]}: trap: stack overflow${trace}\n`));
             } else if (!(error instanceof Stop)) {

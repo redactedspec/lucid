@@ -119,7 +119,7 @@ export const milestones: Milestone[] = [
       { text: 'Deep review of the M9 work, and its fixes', done: true },
       { text: 'Version 1.0.0 and `lucid --version`', done: true },
       { text: 'Linux programs without debug sections', done: true },
-      { text: 'Web loader checked in Firefox', done: false },
+      { text: 'Web loader checked in Firefox', done: true },
       { text: 'Release steps, with a hash of each binary', done: false },
       { text: 'License review', done: false },
       { text: 'First public release', done: false },
