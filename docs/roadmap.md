@@ -157,7 +157,7 @@ Started after M9. Designed by decisions 227 to 230. No language change. Build in
 - [x] Linux programs linked without debug sections, by decision 228
 - [x] The web loader checked in Firefox, by decision 230. Firefox throws `InternalError` on a stack overflow, which the loader now reads too
 - [x] Release steps in `compiler.md`, under "Release": build on Windows and in WSL, run every test, and record the SHA-256 of each binary in the tag, by decision 229
-- [ ] License review, by the owner, before any public release
+- [x] License review, by the owner, before any public release
 - [ ] Push to `origin`, which deploys the site, by the owner
 
 **Exit:** `lucid --version` prints `lucid 1.0.0` on Windows and Linux, every test passes on both, and each finding of the ultra review is fixed or answered in `decisions.md`.

@@ -121,7 +121,7 @@ export const milestones: Milestone[] = [
       { text: 'Linux programs without debug sections', done: true },
       { text: 'Web loader checked in Firefox', done: true },
       { text: 'Release steps, with a hash of each binary', done: true },
-      { text: 'License review', done: false },
+      { text: 'License review', done: true },
       { text: 'First public release', done: false },
     ],
   },

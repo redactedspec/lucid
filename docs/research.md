@@ -667,7 +667,7 @@ Decision 232, which supersedes decision 154.
 
 - **The problem.** `lucid build` puts `lucid_rt`, `std`, and derived tasks into every program, so the license of those parts reaches every program built with Lucid. Under the GPL that needed a linking exception, which decision 154 took from Classpath and extended in a notice of its own, with no legal review.
 - **MIT or Apache-2.0.** Both are permissive, so a built program may use any license with no exception text. Apache-2.0 adds an explicit patent grant. Offering either, at the user's option, is the form Rust and most of its crates use: `serde` and `libc` in the cargo registry ship the same `LICENSE-MIT` and `LICENSE-APACHE`, and the files here are copied from `serde` 1.0.229.- **Notices in built programs.** MIT asks that its notice go with "all copies or substantial portions of the Software", and a built program holds runtime code. Rust's standard library has the same licenses and is compiled into every Rust program, and Rust programs ship without its notice in common practice: from memory, not read for this entry.
-- **Weak ground.** No lawyer read this. The owner's license review before the first public release still stands.
+- **Weak ground.** No lawyer read this. The owner reviewed the license on 2026-11-12, before the first public release.
 
 Level: **Read** for the two license texts, through the copies in the cargo registry.
 
