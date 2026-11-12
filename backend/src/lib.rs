@@ -200,8 +200,10 @@ pub fn link(object: &[u8], exe: &str, backend: bool) -> Result<(), String> {
                 command.arg(format!("/OUT:{exe}"));
             } else {
                 // Drops the sections that the program never reaches, such as
-                // SQLite in a program that never opens a database.
-                command.arg("-Wl,--gc-sections").arg("-o").arg(exe);
+                // SQLite in a program that never opens a database. Debug
+                // sections go too: a trace reads the call-site tables, not
+                // DWARF, by decision 228.
+                command.args(["-Wl,--gc-sections", "-Wl,--strip-debug", "-o"]).arg(exe);
             }
             command.arg(&object_file).arg(&runtime_file);
             command.args(libs.lines()).output()

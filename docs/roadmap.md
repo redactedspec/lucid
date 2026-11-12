@@ -154,7 +154,7 @@ Started after M9. Designed by decisions 227 to 230. No language change. Build in
 
 - [x] `/code-review ultra` over the M9 commits, run by the owner, then fixes. It covered the Rust side of M9, since the whole diff was over the size limit. Of nine findings, eight were fixed and one is answered by decision 231. The M5 commits held for review go to the 1.0 review
 - [x] Version 1.0.0 in every crate, and `lucid --version`, by decision 227
-- [ ] Linux programs linked without debug sections, by decision 228
+- [x] Linux programs linked without debug sections, by decision 228
 - [ ] The web loader checked in Firefox, by decision 230. Installing Firefox needs the owner's approval
 - [ ] Release steps in `compiler.md`: build on Windows and in WSL, run every test, and record the SHA-256 of each binary, by decision 229
 - [ ] License review, by the owner, before any public release
