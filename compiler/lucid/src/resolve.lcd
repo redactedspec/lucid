@@ -225,7 +225,7 @@ type Loader
     host_only: TargetUse?
 
 # True on Windows, where a real path starts with a drive or `\\`, not `/`.
-task on_windows() -> bool
+public task on_windows() -> bool
     let here = fs.real_path(".") else "/"
     return not here.starts_with("/")
 
@@ -271,7 +271,7 @@ task inside(dir: text, name: text) -> text
         return "{dir}{name}"
     return "{dir}/{name}"
 
-task is_dir(path: text) -> bool
+public task is_dir(path: text) -> bool
     let listed = fs.list_dir(path)
     return listed is not fs.FileError
 
@@ -300,7 +300,7 @@ task parent(real: text, windows: bool) -> text
 
 # The file name of a path without its last extension, as Rust's
 # `Path::file_stem` gives it.
-task file_stem(path: text, windows: bool) -> text
+public task file_stem(path: text, windows: bool) -> text
     var start = path.len()
     while start > 0 and not (path[start - 1..start] == "/" or (windows and path[start - 1..start] == "\\"))
         start -= 1
@@ -371,7 +371,7 @@ task package_above(file: text, windows: bool) -> text?
 
 # The package that a directory on the command line means: its own, or the
 # one around it, so a command works from anywhere in a package.
-task package_root(dir: text, windows: bool) -> text
+public task package_root(dir: text, windows: bool) -> text
     let prefix = dir_prefix(dir)
     return package_above("{prefix}x", windows) else prefix
 
@@ -642,9 +642,11 @@ public task read_into(change source: diag.Source, change diags: list[diag.Diagno
     if path.starts_with("@std/") and path.ends_with(".lcd")
         let module = path[5..path.len() - 4]
         if module in std_modules()
-            # ponytail: read from `std/` under the current directory, until
-            # the backend gives the files held inside, by decision 217.
-            real = "std/{module}.lcd"
+            # ponytail: read from the directory in `LUCID_STD`, or `std/`
+            # under the current directory, until Lucid can make text from
+            # the bytes that the backend would give, by decision 226.
+            let dir = env.get("LUCID_STD") else "std"
+            real = "{dir}/{module}.lcd"
     let read = fs.read_bytes(real)
     match read
         bytes: list[byte] ->
@@ -906,7 +908,7 @@ task names_of(written: list[ast.Name]) -> list[text]
         parts.push(name.text)
     return parts
 
-task with_note(code: text, message: text, span: diag.Span, note: text) -> diag.Diagnostic
+public task with_note(code: text, message: text, span: diag.Span, note: text) -> diag.Diagnostic
     var d = diag.new(code, message, span)
     d.notes.push(note)
     return d

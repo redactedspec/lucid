@@ -1283,11 +1283,17 @@ unsafe fn release_slot(slot: i64) {
     unsafe { lucid_release(slot as *mut Head) };
 }
 
-/// Debug builds only: reports values that the program never released.
-#[unsafe(no_mangle)]
-pub extern "C" fn lucid_check_leaks() {
+/// How many values are live now, for `check_leaks`.
+pub fn live_values() -> usize {
+    LIVE.load(Ordering::Relaxed)
+}
+
+/// Debug builds only: reports values that the program never released, of
+/// those made since `live_values` gave `before`. The Lucid compiler runs a
+/// program inside its own process, with its own values still live.
+pub fn check_leaks(before: usize) {
     if cfg!(debug_assertions) {
-        let live = LIVE.load(Ordering::Relaxed);
+        let live = LIVE.load(Ordering::Relaxed).saturating_sub(before);
         if live > 0 {
             trap(format!("trap: runtime bug: {live} values leaked").as_bytes());
         }
@@ -2315,8 +2321,10 @@ pub unsafe extern "C" fn lucid_trap_text(
 }
 
 /// Where each call in compiled code returns to, with its place in the source
-/// if a stack trace shows it. See `add_trace`.
-static CALL_SITES: OnceLock<HashMap<usize, Option<CallSite>>> = OnceLock::new();
+/// if a stack trace shows it. See `add_trace`. Set again when the Lucid
+/// compiler runs a program in its own process.
+static CALL_SITES: std::sync::RwLock<Option<HashMap<usize, Option<CallSite>>>> =
+    std::sync::RwLock::new(None);
 
 /// A call that a stack trace shows.
 pub struct CallSite {
@@ -2329,9 +2337,9 @@ pub struct CallSite {
 /// How many calls a stack trace shows. A stack overflow has millions.
 const MAX_TRACE: usize = 16;
 
-/// Records the call sites of the one compiled program.
+/// Records the call sites of the compiled program that runs now.
 pub fn set_call_sites(sites: HashMap<usize, Option<CallSite>>) {
-    let _ = CALL_SITES.set(sites);
+    *CALL_SITES.write().unwrap_or_else(|e| e.into_inner()) = Some(sites);
 }
 
 /// Adds a line for each call on the way to `frame`, innermost first. A return
@@ -2342,7 +2350,8 @@ pub fn set_call_sites(sites: HashMap<usize, Option<CallSite>>) {
 ///
 /// `frame` must be the frame pointer of a compiled task.
 unsafe fn add_trace(report: &mut Vec<u8>, mut frame: *const usize) {
-    let Some(sites) = CALL_SITES.get() else { return };
+    let sites = CALL_SITES.read().unwrap_or_else(|e| e.into_inner());
+    let Some(sites) = sites.as_ref() else { return };
     let mut shown = 0;
     // SAFETY: a compiled frame holds its caller's frame pointer, then its
     // return address. So a return address in compiled code makes the saved
@@ -2394,16 +2403,18 @@ fn trap(message: &[u8]) -> ! {
 /// line starts the program. `lucid run` calls this, since the command line then
 /// names the compiler.
 pub fn set_args(args: Vec<String>) {
-    let _ = ARGS.set(args);
+    *ARGS.lock().unwrap_or_else(|e| e.into_inner()) = Some(args);
 }
 
-static ARGS: OnceLock<Vec<String>> = OnceLock::new();
+/// Set again when the Lucid compiler runs a program in its own process.
+static ARGS: Mutex<Option<Vec<String>>> = Mutex::new(None);
 
 /// A new list of each argument of the program. An argument that is not Unicode
 /// has its bad parts replaced.
 #[unsafe(no_mangle)]
 pub extern "C" fn lucid_args() -> *mut List {
-    let args = ARGS.get_or_init(|| {
+    let mut args = ARGS.lock().unwrap_or_else(|e| e.into_inner());
+    let args = args.get_or_insert_with(|| {
         std::env::args_os().skip(1).map(|arg| arg.to_string_lossy().into_owned()).collect()
     });
     text_list(args.iter().map(String::as_str))
@@ -2439,15 +2450,22 @@ struct Grants {
     start: PathBuf,
 }
 
-/// Unset for a program with no `lucid.toml`, which has full trust.
-static GRANTS: OnceLock<Grants> = OnceLock::new();
+/// Unset for a program with no `lucid.toml`, which has full trust. Set
+/// again when the Lucid compiler runs a program in its own process.
+static GRANTS: std::sync::RwLock<Option<Grants>> = std::sync::RwLock::new(None);
+
+fn grants() -> std::sync::RwLockReadGuard<'static, Option<Grants>> {
+    GRANTS.read().unwrap_or_else(|e| e.into_inner())
+}
 
 /// Limits `std.fs` and `std.env` to a package's permissions, before the
 /// program starts. Each line of `text` is `package`, `files`, `env`, or one of
 /// them and a space and a listed path or name. `files` alone means all files,
 /// and no `files` line means none. Empty text means full trust.
 pub fn set_grants(text: &str) {
+    let mut grants = GRANTS.write().unwrap_or_else(|e| e.into_inner());
     if text.is_empty() {
+        *grants = None;
         return;
     }
     let (mut files, mut env) = (Some(Vec::new()), Some(Vec::new()));
@@ -2464,7 +2482,7 @@ pub fn set_grants(text: &str) {
         }
     }
     let start = std::env::current_dir().unwrap_or_default();
-    let _ = GRANTS.set(Grants { files, env, start });
+    *grants = Some(Grants { files, env, start });
 }
 
 /// A path made absolute from `start`, with each link that exists followed,
@@ -2518,7 +2536,8 @@ const OUTSIDE_FILES: &str = "outside the `files` permission in `lucid.toml`";
 /// True if the `files` permission reaches `path`. If not, the next
 /// `lucid_fs_failure` says so.
 fn file_allowed(path: &str) -> bool {
-    let Some(Grants { files: Some(roots), start, .. }) = GRANTS.get() else { return true };
+    let grants = grants();
+    let Some(Grants { files: Some(roots), start, .. }) = grants.as_ref() else { return true };
     let allowed = inside(start, roots, path);
     if !allowed {
         FILE_FAILURE.set((3, OUTSIDE_FILES.to_string()));
@@ -2536,7 +2555,7 @@ fn file_allowed(path: &str) -> bool {
 pub unsafe extern "C" fn lucid_env_has(name: *const Text) -> bool {
     // SAFETY: the caller guarantees a live text.
     let name = unsafe { system_text(name) };
-    if let Some(Grants { env: Some(names), .. }) = GRANTS.get()
+    if let Some(Grants { env: Some(names), .. }) = grants().as_ref()
         && !names.iter().any(|listed| listed == name)
     {
         let message = format!("trap: `env.get(\"{name}\")`: the `env` permission does not list it");

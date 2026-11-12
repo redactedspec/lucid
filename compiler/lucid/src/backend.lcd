@@ -1,0 +1,53 @@
+# The C ABI of the Rust crate `lucid_backend`, by decision 217: code
+# generation, linking, and the C library's symbols. Each task takes the bytes
+# of a text, and gives an `int`. See "Backend" under "Self-hosting" in
+# docs/compiler.md.
+
+unsafe extern task backend_has_symbol(name: pointer[byte], length: int) -> int
+unsafe extern task backend_run(input: pointer[byte], length: int) -> int
+unsafe extern task backend_build(input: pointer[byte], length: int) -> int
+unsafe extern task exit(code: i32)
+
+## Ends the process with this exit code, after the backend has reported why.
+public task stop(code: i32)
+    # C `exit` ends the process. Each `print` has already written its line.
+    unsafe
+        exit(code)
+
+## True if the C library, or the backend, has a task with this name, for
+## E0904.
+public task has_symbol(name: text) -> bool
+    let bytes = name.bytes()
+    # `bytes` stays in scope and unchanged for the call, which only reads it.
+    unsafe
+        return backend_has_symbol(bytes.pointer(), bytes.len()) == 1
+
+## Runs a program from its `owned` dump. `program_args` are what the program
+## reads from `std.args`. Gives 0, or 1 after the backend reports errors. A
+## trap or `exit` in the program ends the process.
+public task run(owned: text, json: bool, program_args: list[text]) -> int
+    var head = "{json} {program_args.len()}"
+    for arg in program_args
+        head = "{head} {quote(arg)}"
+    let bytes = "{head}\n{owned}".bytes()
+    # `bytes` stays in scope and unchanged for the call, which only reads it.
+    unsafe
+        return backend_run(bytes.pointer(), bytes.len())
+
+## Builds a program from its `owned` dump into the file `out`: native code,
+## or a script for the web. Gives 0, or 1 after the backend reports a problem.
+public task build(owned: text, json: bool, web: bool, out: text) -> int
+    let bytes = "{json} {web} {quote(out)}\n{owned}".bytes()
+    # `bytes` stays in scope and unchanged for the call, which only reads it.
+    unsafe
+        return backend_build(bytes.pointer(), bytes.len())
+
+# A text in double quotes, which the backend reads as the dump's texts. It
+# reads any other character as itself, line breaks too.
+task quote(value: text) -> text
+    var out = "\""
+    for c in value
+        if c == "\\" or c == "\""
+            out = "{out}\\"
+        out = "{out}{c}"
+    return "{out}\""

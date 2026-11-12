@@ -99,8 +99,9 @@ fn run_entry(entry: *const u8, stack_bytes: usize) {
     // parameter, and a one-byte `none` result. Its module is leaked, so the
     // code stays mapped.
     let entry = unsafe { std::mem::transmute::<*const u8, extern "C" fn(usize) -> u8>(entry) };
+    let before = lucid_rt::live_values();
     entry(stack_limit);
-    lucid_rt::lucid_check_leaks();
+    lucid_rt::check_leaks(before);
 }
 
 fn clif(ty: Ty) -> Type {
@@ -361,9 +362,10 @@ fn jit(
     Ok((entry, tests))
 }
 
-/// Compiles the top level to an object file, for `lucid build`. It defines
+/// Compiles the top level to an object file, for `lucid build`, and tells
+/// whether it calls a task of `EXPORTS`. It defines
 /// `lucid_main`, and the call site table that `exe.rs` in `lucid_rt` reads.
-pub fn object(program: &Program, source: &Source) -> Result<Vec<u8>, Vec<Diagnostic>> {
+pub fn object(program: &Program, source: &Source) -> Result<(Vec<u8>, bool), Vec<Diagnostic>> {
     let mut flags = settings::builder();
     for (name, value) in FLAGS {
         flags.set(name, value).expect(CODEGEN);
@@ -418,7 +420,10 @@ pub fn object(program: &Program, source: &Source) -> Result<Vec<u8>, Vec<Diagnos
     description.define([grants.as_bytes(), &[0]].concat().into_boxed_slice());
     let id = module.declare_data("lucid_grants", Linkage::Export, false, false);
     module.define_data(id.expect(CODEGEN), &description).expect(CODEGEN);
-    Ok(module.finish().emit().expect(CODEGEN))
+    // A program that calls the backend links the library that holds it.
+    let exported = |name: Option<&str>| name.is_some_and(|name| crate::EXPORTS.contains(&name));
+    let backend = module.declarations().get_functions().any(|(_, f)| exported(f.name.as_deref()));
+    Ok((module.finish().emit().expect(CODEGEN), backend))
 }
 
 /// Lowers every task. Panics on a failure: valid input reaching here makes that
@@ -575,6 +580,9 @@ fn compile(
 #[cfg(windows)]
 pub fn find_symbol(name: &str) -> Option<*const u8> {
     use std::ffi::{CString, c_char, c_void};
+    if let Some(found) = crate::export(name) {
+        return Some(found);
+    }
     unsafe extern "system" {
         fn GetModuleHandleA(name: *const c_char) -> *mut c_void;
         fn GetProcAddress(module: *mut c_void, name: *const c_char) -> *const u8;
@@ -597,6 +605,9 @@ pub fn find_symbol(name: &str) -> Option<*const u8> {
 #[cfg(not(windows))]
 pub fn find_symbol(name: &str) -> Option<*const u8> {
     use std::ffi::{CString, c_char, c_int, c_void};
+    if let Some(found) = crate::export(name) {
+        return Some(found);
+    }
     use std::sync::OnceLock;
     unsafe extern "C" {
         fn dlopen(file: *const c_char, mode: c_int) -> *mut c_void;

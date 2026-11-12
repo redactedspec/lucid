@@ -1,16 +1,15 @@
 # The Lucid compiler, written in Lucid, by decision 214. It ports the Rust
 # front end one stage at a time, and each stage is checked against the Rust
-# one by its dump, by decision 215. Built so far: `check` with
-# `LUCID_DUMP=tokens` or `ast`, which lexes and parses one file, with no
-# imports, `resolved`, which loads the whole program, `checked`, which also
-# type checks it, `mir`, which also monomorphizes it, and `owned`, which
-# also runs the ownership pass. Also `check --costs` and `check --unsafe`.
-# See "Self-hosting" in docs/compiler.md.
+# one by its dump, by decision 215. It runs `check`, also with `--costs`,
+# `--unsafe`, and `LUCID_DUMP`, `run`, and `build`, which hand the program to
+# the Rust backend through its C ABI, by decision 217. See "Self-hosting" in
+# docs/compiler.md.
 
 use std.args
 use std.env
 use std.fs
 use ./ast
+use ./backend
 use ./check
 use ./diag
 use ./dump
@@ -29,65 +28,153 @@ task error_message(self: Stop) -> text
     return self.message
 
 task usage() -> Stop
-    return Stop(message: "usage: lucid check [--json] [--costs | --unsafe] PATH, or with LUCID_DUMP=tokens, ast, resolved, checked, mir, or owned")
+    return Stop(message: "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--target web] [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\nPATH is a file or a package directory, by default the current directory.")
 
 task main() -> none or Stop
     let words = args.all()
-    if words.len() == 0 or words[0] != "check"
+    if words.len() == 0
         return usage()
+    let command = words[0]
+    var rest = words[1..words.len()]
+    # What follows the path of `lucid run` belongs to the program.
+    var program_args: list[text] = []
+    if command == "run" and rest.len() > 0 and not rest[0].starts_with("-")
+        program_args = rest[1..rest.len()]
+        rest = rest[0..1]
+    var path = "."
+    if rest.len() > 0 and not rest[rest.len() - 1].starts_with("-")
+        path = rest[rest.len() - 1]
+        rest = rest[0..rest.len() - 1]
+    let build = command == "build"
+    # `--target web` comes first, so the flags below match as they do
+    # without it.
+    var web = false
+    if build and rest.len() >= 2 and rest[0] == "--target" and rest[1] == "web"
+        web = true
+        rest = rest[2..rest.len()]
+    let flags = join_flags(rest)
+    var run = false
     var json = false
     var costs = false
-    var sites = false
-    var path = ""
-    for word in words[1..words.len()]
-        if word == "--json"
-            json = true
-        else if word == "--costs" and not sites
-            costs = true
-        else if word == "--unsafe" and not costs
-            sites = true
-        else if path is empty and not word.starts_with("-")
-            path = word
-        else
-            return usage()
-    let stage = env.get("LUCID_DUMP") else ""
-    if path is empty
-        return usage()
-    if sites
-        try unsafe_sites(path, json)
-    else if costs
-        try check_costs(path, json)
-    else if stage == "resolved"
-        let found = resolve.load(path, false)
-        print dump.resolved(found)
-        try finish(found.source, found.diags, json)
-    else if stage == "checked" or stage == "mir" or stage == "owned"
-        let found = resolve.load(path, false)
-        var diags = found.diags
-        let file = found.file
-        if diags is empty and file is ast.File
-            let checked = check.check(file, found, true)
-            diags = checked.diags
-            var program = checked.program
-            if stage != "checked" and diags is empty
-                diags = mono.run(change program, true)
-            if stage == "owned" and diags is empty
-                ownership.run(change program, env.get("LUCID_NAIVE") is none)
-                print dump.owned(program, found)
-            else if diags is empty
-                print dump.program(program)
-            # `check` reports errors in the program. An unbuilt feature is
-            # not one.
-            var kept: list[diag.Diagnostic] = []
-            for d in diags
-                if d.code != "E0901"
-                    kept.push(d)
-            diags = kept
-        try finish(found.source, diags, json)
-    else if stage == "tokens" or stage == "ast"
-        try dump_syntax(path, stage, json)
+    if command == "check" and (flags == "--unsafe" or flags == "--json --unsafe")
+        try unsafe_sites(path, flags != "--unsafe")
+        return none
+    if (command == "run" or build) and flags is empty
+        run = true
+    else if build and flags == "--json"
+        run = true
+        json = true
+    else if command == "check" and flags is empty
+        json = false
+    else if command == "check" and flags == "--json"
+        json = true
+    else if command == "check" and flags == "--costs"
+        costs = true
+    else if command == "check" and flags == "--json --costs"
+        json = true
+        costs = true
     else
         return usage()
+    if costs
+        try check_costs(path, json)
+        return none
+    var stage = ""
+    if command == "check"
+        stage = env.get("LUCID_DUMP") else ""
+    if stage == "tokens" or stage == "ast"
+        try dump_syntax(path, stage, json)
+        return none
+    if not (stage is empty or stage == "resolved" or stage == "checked" or stage == "mir" or stage == "owned")
+        return Stop(message: "lucid: LUCID_DUMP must be tokens, ast, resolved, checked, mir, or owned")
+    let found = resolve.load(path, run)
+    if stage == "resolved"
+        print dump.resolved(found)
+        try finish(found.source, found.diags, json)
+        return none
+    var diags = found.diags
+    let file = found.file
+    if diags is empty and file is ast.File
+        let checked = check.check(file, found, not run)
+        diags = checked.diags
+        var program = checked.program
+        if stage == "checked"
+            # The stage ends with the checker, as `resolved` ends with
+            # loading.
+            if diags is empty
+                print dump.program(program)
+            try finish(found.source, without_unbuilt(diags), json)
+            return none
+        if diags is empty
+            diags = mono.run(change program, not run)
+        if diags is empty and stage == "mir"
+            print dump.program(program)
+        if diags is empty and (run or stage == "owned")
+            ownership.run(change program, env.get("LUCID_NAIVE") is none)
+        if diags is empty and stage == "owned"
+            print dump.owned(program, found)
+        let web_only = found.web_only
+        if run and not web and diags is empty and web_only is diag.Span
+            let note = "build the program with `lucid build --target web`"
+            diags.push(resolve.with_note("E0906", "`std.dom` works only in a browser", web_only, note))
+        let host_only = found.host_only
+        if web and diags is empty and host_only is resolve.TargetUse
+            let note = "a page cannot open sockets, so build this program without `--target web`"
+            let message = "`{host_only.module}` cannot run on the web"
+            diags.push(resolve.with_note("E0907", message, host_only.span, note))
+        if run and diags is empty
+            let owned = dump.owned(program, found)
+            var result = 0
+            if web
+                result = backend.build(owned, json, true, out_name(path, "js"))
+            else if build
+                result = backend.build(owned, json, false, out_name(path, exe_extension()))
+            else
+                result = backend.run(owned, false, program_args)
+            # The backend has reported any problem.
+            if result != 0
+                backend.stop(1)
+            return none
+        if not run
+            # `check` reports errors in the program. An unbuilt feature is
+            # not one.
+            diags = without_unbuilt(diags)
+    try finish(found.source, diags, json)
+
+task join_flags(flags: list[text]) -> text
+    var out = ""
+    for flag in flags
+        out = if out is empty then flag else "{out} {flag}"
+    return out
+
+task without_unbuilt(diags: list[diag.Diagnostic]) -> list[diag.Diagnostic]
+    var kept: list[diag.Diagnostic] = []
+    for d in diags
+        if d.code != "E0901"
+            kept.push(d)
+    return kept
+
+# The extension of a built program: `exe` on Windows, none on Linux.
+task exe_extension() -> text
+    return if resolve.on_windows() then "exe" else ""
+
+# What `lucid build` writes to the current directory: named after the file,
+# or after the directory of the package, with this extension, if any.
+task out_name(path: text, extension: text) -> text
+    let windows = resolve.on_windows()
+    var stem = ""
+    if resolve.is_dir(path)
+        let root = fs.real_path("{resolve.package_root(path, windows)}.") else ""
+        var start = root.len()
+        while start > 0 and not (root[start - 1..start] == "/" or (windows and root[start - 1..start] == "\\"))
+            start -= 1
+        stem = root[start..root.len()]
+    else
+        stem = resolve.file_stem(path, windows)
+    if stem is empty
+        stem = "main"
+    if extension is empty
+        return stem
+    return "{stem}.{extension}"
 
 # `lucid check --costs`: each place where the program pays for a count or a
 # copy. It needs the ownership pass, so an unbuilt feature stays an error.

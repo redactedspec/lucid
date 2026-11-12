@@ -30,8 +30,7 @@ const TEST_FROM: &str = "LUCID_TEST_FROM";
 /// Set for the child process of `lucid fmt`, which runs the formatter.
 const FMT_CHILD: &str = "LUCID_FMT_CHILD";
 
-/// Debug builds use large stack frames, and `MAX_DEPTH` levels of nesting must fit.
-const STACK_BYTES: usize = 256 * 1024 * 1024;
+use lucid_backend::STACK_BYTES;
 
 fn main() -> ExitCode {
     // A path that is not Unicode becomes E0001 instead of a panic in `args()`.
@@ -165,18 +164,16 @@ fn cli(args: &[String]) -> ExitCode {
         }
         if web && diags.is_empty() {
             match wasm::script(&program, &source) {
-                Ok(script) => return write_script(&script, &out_name(path, "js")),
+                Ok(script) => {
+                    return built(lucid_backend::write_script(&script, &out_name(path, "js")));
+                }
                 Err(errors) => diags = errors,
             }
         } else if build && diags.is_empty() {
             match native::object(&program, &source) {
-                Ok(object) => match lucid_backend::link(&object, &out_name(path, EXE)) {
-                    Ok(()) => return ExitCode::SUCCESS,
-                    Err(problem) => {
-                        emit(std::io::stderr(), &format!("lucid: {problem}\n"));
-                        return ExitCode::FAILURE;
-                    }
-                },
+                Ok((object, backend)) => {
+                    return built(lucid_backend::link(&object, &out_name(path, EXE), backend));
+                }
                 Err(errors) => diags = errors,
             }
         } else if run && diags.is_empty() {
@@ -229,13 +226,13 @@ fn out_name(path: &str, extension: &str) -> String {
     format!("{}{dot}{extension}", stem.display())
 }
 
-/// Writes the output of `lucid build --target web`. As in `link`, a failure
-/// is in the system, so it has no code.
-fn write_script(script: &str, name: &str) -> ExitCode {
-    match std::fs::write(name, script) {
+/// The exit code of a build. A failure here is in the system, so it has no
+/// code, and its text tells what failed.
+fn built(result: Result<(), String>) -> ExitCode {
+    match result {
         Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            emit(std::io::stderr(), &format!("lucid: cannot write `{name}`: {e}\n"));
+        Err(problem) => {
+            emit(std::io::stderr(), &format!("lucid: {problem}\n"));
             ExitCode::FAILURE
         }
     }
@@ -243,11 +240,7 @@ fn write_script(script: &str, name: &str) -> ExitCode {
 
 /// Reports compile errors, as data on stdout with `json`.
 fn report_errors(source: &Source, diags: &[Diagnostic], json: bool) {
-    if json {
-        emit(std::io::stdout(), &diag::render_json(source, diags));
-    } else {
-        emit(std::io::stderr(), &diag::render_text(source, diags));
-    }
+    lucid_backend::report(source, diags, json);
 }
 
 /// `lucid check --unsafe`: each `unsafe` block and `extern` task, in file order.

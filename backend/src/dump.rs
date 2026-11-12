@@ -467,18 +467,27 @@ fn two(out: &mut Out, name: &str, value: &mir::Expr, a: &mir::Expr, b: &mir::Exp
 /// leaked, as `check.rs` leaks them. Text that `program` cannot write is an
 /// error, never a guess.
 pub fn read(text: &str) -> Result<(mir::Program, Source), String> {
+    read_after(text, |_| Ok(())).map(|((), program, source)| (program, source))
+}
+
+/// As `read`, after a header that `header` reads.
+pub(crate) fn read_after<H>(
+    text: &str,
+    header: impl FnOnce(&mut Atoms) -> Result<H, String>,
+) -> Result<(H, mir::Program, Source), String> {
     let mut atoms = Atoms { text, at: 0 };
+    let head = header(&mut atoms)?;
     let source = read_source(&mut atoms)?;
     let program = read_program(&mut atoms)?;
     match atoms.next()? {
-        None => Ok((program, source)),
+        None => Ok((head, program, source)),
         Some(extra) => Err(format!("text after the program: `{extra}`")),
     }
 }
 
 /// The atoms of a dump in order. Indentation and line breaks are space. A
 /// quoted atom keeps its quotes, so `"-"` is a text, not an absent value.
-struct Atoms<'t> {
+pub(crate) struct Atoms<'t> {
     text: &'t str,
     at: usize,
 }
@@ -514,7 +523,7 @@ impl<'t> Atoms<'t> {
         Ok(Some(&self.text[start..self.at]))
     }
 
-    fn atom(&mut self) -> Result<&'t str, String> {
+    pub(crate) fn atom(&mut self) -> Result<&'t str, String> {
         self.next()?.ok_or_else(|| "the dump ends too soon".into())
     }
 
@@ -528,19 +537,19 @@ impl<'t> Atoms<'t> {
         Ok(false)
     }
 
-    fn word(&mut self, want: &str) -> Result<(), String> {
+    pub(crate) fn word(&mut self, want: &str) -> Result<(), String> {
         match self.atom()? {
             got if got == want => Ok(()),
             got => Err(format!("expected `{want}`, found `{got}`")),
         }
     }
 
-    fn number<N: std::str::FromStr>(&mut self) -> Result<N, String> {
+    pub(crate) fn number<N: std::str::FromStr>(&mut self) -> Result<N, String> {
         let atom = self.atom()?;
         atom.parse().map_err(|_| format!("expected a number, found `{atom}`"))
     }
 
-    fn flag(&mut self) -> Result<bool, String> {
+    pub(crate) fn flag(&mut self) -> Result<bool, String> {
         match self.atom()? {
             "true" => Ok(true),
             "false" => Ok(false),
@@ -548,7 +557,7 @@ impl<'t> Atoms<'t> {
         }
     }
 
-    fn text(&mut self) -> Result<String, String> {
+    pub(crate) fn text(&mut self) -> Result<String, String> {
         let atom = self.atom()?;
         let Some(inner) = atom.strip_prefix('"').and_then(|a| a.strip_suffix('"')) else {
             return Err(format!("expected a text, found `{atom}`"));

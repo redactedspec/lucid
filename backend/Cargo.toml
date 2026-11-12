@@ -5,6 +5,9 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 
 [features]
+# The C `main` of a built program, in the library that `build.rs` makes for
+# a program that calls the backend, by decision 217.
+exe = ["lucid_rt/exe"]
 # Removes overflow checks, only to measure their cost. See docs/compiler.md.
 bench-unchecked = []
 

@@ -34,6 +34,27 @@ fn naive(dir: &Path, args: &[&str]) -> Output {
     command.output().expect("cannot start lucid")
 }
 
+/// The compiler in Lucid, built once by the Rust one into its own directory,
+/// by decision 214.
+fn ported_exe() -> &'static Path {
+    static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BUILT.get_or_init(|| {
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("lucid-stage");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("no stage dir");
+        let built = lucid(&dir, &["build", repo().join("compiler/lucid").to_str().unwrap()]);
+        assert!(built.status.success(), "lucid in Lucid: {}", text(&built.stderr));
+        dir.join(format!("lucid{EXE_SUFFIX}"))
+    })
+}
+
+/// The compiler in Lucid. It reads `std` from `LUCID_STD`, by decision 226.
+fn ported(dir: &Path, args: &[&str]) -> Output {
+    let mut command = Command::new(ported_exe());
+    command.args(args).current_dir(dir).env("LUCID_STD", repo().join("std"));
+    command.output().expect("cannot start lucid in Lucid")
+}
+
 fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).replace("\r\n", "\n")
 }
@@ -53,7 +74,11 @@ fn file_name(path: &Path) -> &str {
     path.file_name().and_then(|n| n.to_str()).expect("file name is not UTF-8")
 }
 
-/// Runs every test in `dir`, and reports all failures together.
+/// A way to start a compiler: `lucid`, `naive`, or `ported`.
+type Run = fn(&Path, &[&str]) -> Output;
+
+/// Runs every test in `dir` with each compiler, and reports all failures
+/// together.
 fn golden(dir: &str, expected_extension: &str, check: fn(&Output, &str) -> Option<String>) {
     let dir = repo().join("tests").join(dir);
     let mut failures = Vec::new();
@@ -61,10 +86,10 @@ fn golden(dir: &str, expected_extension: &str, check: fn(&Output, &str) -> Optio
         let name = file_name(&source);
         let expected = fs::read(source.with_extension(expected_extension))
             .unwrap_or_else(|e| panic!("{name}: no .{expected_extension} file: {e}"));
-        for run in [lucid, naive] {
+        for (run, by) in [(lucid as Run, ""), (naive, " naive"), (ported, " in Lucid")] {
             let output = run(&dir, &["run", name]);
             if let Some(problem) = check(&output, &text(&expected)) {
-                failures.push(format!("{name}: {problem}"));
+                failures.push(format!("{name}{by}: {problem}"));
             }
         }
     }
@@ -199,7 +224,7 @@ fn packages_build_or_report() {
         let name = file_name(&package);
         let good = fs::read(package.join("expected.out"));
         let bad = fs::read(package.join("expected.err"));
-        for run in [lucid, naive] {
+        for run in [lucid as Run, naive, ported] {
             let output = run(&dir, &["run", name]);
             let (code, found, expected) = match (&good, &bad) {
                 (Ok(expected), _) => (0, text(&output.stdout), expected),
@@ -334,14 +359,9 @@ fn stage_dumps_are_stable() {
     for dir in ["tests", "examples", "std", "tools", "compiler/lucid"] {
         all_sources(dir, &mut sources);
     }
-    // The second run of each stage that Lucid has ported uses the Lucid
-    // compiler, so it must print what the Rust one does.
-    let stage_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("lucid-stage");
-    let _ = fs::remove_dir_all(&stage_dir);
-    fs::create_dir_all(&stage_dir).expect("no stage dir");
-    let built = lucid(&stage_dir, &["build", repo().join("compiler/lucid").to_str().unwrap()]);
-    assert!(built.status.success(), "lucid in Lucid: {}", text(&built.stderr));
-    let ported = stage_dir.join(format!("lucid{}", std::env::consts::EXE_SUFFIX));
+    // The second run of each stage uses the Lucid compiler, so it must print
+    // what the Rust one does.
+    let ported = ported_exe();
     let jobs: Vec<(&str, &str)> = sources
         .iter()
         .flat_map(|file| {
@@ -374,14 +394,8 @@ fn stage_dumps_are_stable() {
                 while let Some(&(file, stage)) =
                     jobs.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
                 {
-                    // E0904 looks a symbol up in the C library, which the
-                    // Lucid compiler can do only once the backend's C ABI
-                    // exists, by decision 217.
-                    let later = file == "tests/fail/extern_missing.lcd";
-                    let lucid_stage = matches!(stage, "tokens" | "ast" | "resolved") || !later;
-                    let second_exe = if lucid_stage { &ported } else { Path::new(LUCID) };
                     let (first, second) =
-                        (dump(file, stage, Path::new(LUCID)), dump(file, stage, second_exe));
+                        (dump(file, stage, Path::new(LUCID)), dump(file, stage, ported));
                     let problem = if !matches!(first.status.code(), Some(0 | 1)) {
                         Some(format!("exit {:?}: {}", first.status.code(), text(&first.stderr)))
                     } else if first.stdout.is_empty() {
@@ -769,18 +783,20 @@ fn built_programs_match_run() {
     for (kind, name, extension) in cases {
         let source = repo().join("tests").join(kind).join(format!("{name}.lcd"));
         fs::copy(source, dir.join(format!("{name}.lcd"))).expect("cannot copy");
-        let output = lucid(&dir, &["build", &format!("{name}.lcd")]);
-        assert!(output.status.success(), "{name}: {}", text(&output.stderr));
-        let program =
-            Command::new(dir.join(format!("{name}{EXE_SUFFIX}"))).current_dir(&dir).output();
-        let output = program.expect("cannot start the program");
-        let path = repo().join("tests").join(kind).join(format!("{name}.{extension}"));
-        let expected = text(&fs::read(path).expect("no expected output"));
-        let (code, got) = match kind {
-            "trap" => (Some(101), text(&output.stderr)),
-            _ => (Some(0), text(&output.stdout)),
-        };
-        assert_eq!((output.status.code(), got), (code, expected), "{name}");
+        for build in [lucid as Run, ported] {
+            let output = build(&dir, &["build", &format!("{name}.lcd")]);
+            assert!(output.status.success(), "{name}: {}", text(&output.stderr));
+            let program =
+                Command::new(dir.join(format!("{name}{EXE_SUFFIX}"))).current_dir(&dir).output();
+            let output = program.expect("cannot start the program");
+            let path = repo().join("tests").join(kind).join(format!("{name}.{extension}"));
+            let expected = text(&fs::read(path).expect("no expected output"));
+            let (code, got) = match kind {
+                "trap" => (Some(101), text(&output.stderr)),
+                _ => (Some(0), text(&output.stdout)),
+            };
+            assert_eq!((output.status.code(), got), (code, expected), "{name}");
+        }
     }
 }
 

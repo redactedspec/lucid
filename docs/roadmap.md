@@ -143,11 +143,11 @@ Started after the version 1.0 promise. Designed by decisions 214 to 220, see "Se
 - [x] Type checker in Lucid. `checked` dumps and diagnostics match, by decision 225
 - [x] `derive` and the monomorphizer in Lucid. `mir` dumps and diagnostics match
 - [x] Ownership pass, `--costs`, and `--unsafe` in Lucid. `owned` dumps match
-- [ ] Crate `lucid_backend`, the MIR reader, and the C ABI, by decisions 216 and 217. The Lucid compiler runs `check`, `run`, and `build`, and the golden tests of those commands pass with it
+- [x] Crate `lucid_backend`, the MIR reader, and the C ABI, by decisions 216, 217, and 226. The Lucid compiler runs `check`, `run`, and `build`, and the golden tests of those commands pass with it
 - [ ] Fixed point and bootstrap path, by decisions 218 and 219: `/Brepro`, the stage test on Windows and in WSL, and the steps in `compiler.md`
 
 **Exit:** the Lucid-written compiler builds itself. A second build from that output is byte-identical.
 
 ## Later, not planned
 
-macOS, by decision 205. The Lucid compiler for every command, then deleting the Rust front end, by decisions 214 and 219. `shared` and `weak`, by decision 213. Native backend in Lucid, LLVM release backend, plain types stored inline, literal types, compile-time evaluation.
+macOS, by decision 205. Text from a `list[byte]` in `std`, so the Lucid compiler takes the `std` files held inside the backend in place of `LUCID_STD`, by decision 226. The Lucid compiler for every command, then deleting the Rust front end, by decisions 214 and 219. `shared` and `weak`, by decision 213. Native backend in Lucid, LLVM release backend, plain types stored inline, literal types, compile-time evaluation.

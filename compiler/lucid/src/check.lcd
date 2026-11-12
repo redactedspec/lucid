@@ -4,6 +4,7 @@
 # has already joined the modules into one tree.
 
 use ./ast
+use ./backend
 use ./diag
 use ./mir
 use ./resolve
@@ -1989,9 +1990,10 @@ task check_foreign(change self: Checker, def: ast.TaskDef, signature: Signature)
                 problem = "another module declares this symbol with a different form"
         if problem is empty
             self.symbols[name] = ForeignForm(params: param_tys, returns: returns)
-            # ponytail: the Rust checker looks the symbol up in the C library
-            # for E0904. The Lucid compiler cannot until the backend's C ABI,
-            # by decision 217, so it reports none.
+            if not std and not backend.has_symbol(name)
+                let message = "cannot find the foreign task `{name}`"
+                let note = "it must be in the C library, or in `kernel32` on Windows"
+                let missing = self.note("E0904", message, span, note)
     if problem is not empty
         let poison = self.note("E0331", "`{name}` cannot be `extern`", span, problem)
 

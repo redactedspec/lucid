@@ -105,7 +105,7 @@ export const milestones: Milestone[] = [
       { text: 'Type checker in Lucid', done: true },
       { text: '`derive` and the monomorphizer in Lucid', done: true },
       { text: 'Ownership pass, `--costs`, and `--unsafe` in Lucid', done: true },
-      { text: 'Rust backend behind a small C ABI: the Lucid compiler runs `check`, `run`, and `build`', done: false },
+      { text: 'Rust backend behind a small C ABI: the Lucid compiler runs `check`, `run`, and `build`', done: true },
       { text: 'Fixed point of three builds, and the bootstrap path', done: false },
     ],
   },
