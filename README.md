@@ -1,6 +1,15 @@
-# Lucid
+# The Lucid Programming Language
 
-A general-purpose, compiled programming language that reads like plain English, runs close to Rust and C++ speed, and is safe by default. It is designed to be written equally well by humans and AI agents.
+Lucid is a compiled language that reads like plain English, needs no
+garbage collector or lifetime annotations, and is memory safe outside
+`unsafe` blocks. It was designed from the start to be written by AI agents
+as well as by people.
+
+[Agent guide](docs/agent-guide.md) · [Language](docs/language.md) ·
+[Grammar](docs/grammar.md) · [Memory model](docs/memory-model.md) ·
+[Security](docs/security.md) · [Standard library](docs/stdlib-and-web.md) ·
+[Errors](docs/errors.md) · [Examples](examples/) ·
+[lucidlang.dev](https://lucidlang.dev)
 
 ```lucid
 task greet(name: text) -> text
@@ -12,35 +21,179 @@ for person in people
     print greet(person)
 ```
 
-**Status:** early. The lexer and parser cover the full grammar. `lucid run` runs numbers of every size, booleans, text, lists, maps, sets, `type`, `choice`, `match`, unions with narrowing, generics, traits, `any` values, errors with `try` and `else`, `test` blocks with `expect`, foreign calls in `unsafe` blocks, modules, packages with path dependencies and permissions, the first `std` modules, lambdas, nested tasks, task values, `change` and `take` parameters, control flow, and recursive tasks, bit operators, and threads with `spawn`, `channel`, and `lock`, with type checking, overflow traps with stack traces, and reference counting. `lucid build` makes a standalone program on Windows and Linux, and `lucid build --target web` makes a `.js` file that runs the same programs in a browser or Node, with `std.dom` for interactive pages. `lucid fmt`, itself written in Lucid, gives code one layout. M6, the browser, is done: [examples/web](examples/web) is a to-do page written only in Lucid. M7, threads and servers, is done: bit operators, counts safe across threads, a stack limit per thread, `spawn`, channels and locks with a deadlock trap, TCP sockets in `std.net`, an HTTP/1.1 server and a client with TLS in `std.http`, and escaped pages from `std.html`. [examples/website.lcd](examples/website.lcd) serves a page and JSON to 64 clients at once in a load test. M8, the ecosystem, added text search and `trim` in the prelude, only reachable tasks compiled, which more than halves the size of a built server, Linux x86-64, where `run`, `test`, and `build` pass every test, `std.crypto`, with SHA-2, HMAC, random bytes, and Argon2id passwords, and `std.sql`, SQLite with a `sql` type that only text literals make, so a value goes in only through a `?` mark, the orphan rule, so a package adds tasks with `self` only to its own types, and a registry: `lucid package` publishes a library as static files, and `lucid run` fetches dependencies by minimal version selection and pins them in `lucid.lock`, through a client written in Lucid, and `lucid lsp`, a language server with diagnostics, formatting, go to definition, and hover. M8 is done, and the [version 1.0 promise](docs/vision.md#version-10-promise) holds from here. M9, a front end written in Lucid, is done: `LUCID_DUMP` prints each compiler stage as text, so each Lucid stage can be compared with the Rust one, and the lexer, parser, resolver, type checker, monomorphizer, and ownership pass in Lucid match the Rust ones on every file in the repository. The Lucid compiler hands its program to the Rust code generator through a small C ABI, so it runs `check`, `run`, and `build`, and passes the golden tests of those commands. It builds itself, and a second build from that output is byte-identical. M10 readies version 1.0.0 for release. Progress is in [docs/roadmap.md](docs/roadmap.md).
+A block is four spaces of indent. A `task` is a function. There are no
+semicolons, no braces around blocks, no colons after `if`. `lucid run
+hello.lcd` compiles that file to machine code and runs it, and `lucid build`
+writes a standalone program for Windows or Linux, or a `.js` file for a
+browser.
 
-## Docs
+## Why Lucid
 
-Read in this order:
+* **Values, not references.** `var b = a` gives `b` its own copy of `a`,
+  as far as the program can tell. The compiler makes that cheap: a value
+  used for the last time moves, a shared buffer is copied only when it is
+  written, and a buffer held once is written in place. Nothing dangles,
+  because nothing points, so there is no lifetime syntax to learn.
+* **No null, no exceptions, no silent overflow.** A value that may be
+  missing has type `T?` and must be tested before use. A task that can fail
+  says so in its signature, and the caller must handle the error or pass
+  it on with `try`. Integer overflow traps in every build.
+* **One way to write most things.** There is one loop over a collection,
+  one way to join text, one layout, and `lucid fmt` has no options. An
+  agent has fewer choices to get wrong, and a diff shows only what changed.
+* **Tools that speak JSON.** `check`, `build`, `test`, `fix`, `explain`,
+  and `context` all take `--json`. Every compile error has a stable code,
+  and `lucid explain E0326` prints its cause, an example, and the fix.
+* **Packages ask for their powers.** A dependency cannot touch files, the
+  network, or the environment unless `lucid.toml` grants it, and it cannot
+  use `unsafe` unless that is granted too.
+* **Threads without data races.** `spawn`, `channel`, and `lock` are the
+  only ways to share work. A value sent to another thread is marked, and
+  its reference counts turn atomic only then.
+* **Native and web from one source.** Code generation uses Cranelift for
+  machine code and emits WebAssembly for the browser. The
+  [to-do page](examples/web) is written only in Lucid.
 
-| Doc | Purpose |
-| --- | --- |
-| [vision.md](docs/vision.md) | Goals, non-goals, and how to resolve trade-offs |
-| [language.md](docs/language.md) | The language reference (normative) |
-| [grammar.md](docs/grammar.md) | Formal grammar (normative) |
-| [memory-model.md](docs/memory-model.md) | Inferred ownership: the core technical bet |
-| [security.md](docs/security.md) | Safety guarantees and package permissions |
-| [agents.md](docs/agents.md) | What makes Lucid agent-friendly, as checkable rules |
-| [errors.md](docs/errors.md) | Every error code, with cause, example, and fix |
-| [agent-guide.md](docs/agent-guide.md) | Everything that runs today, in one file for agents |
-| [stdlib-and-web.md](docs/stdlib-and-web.md) | Standard library, servers, and browser output |
-| [compiler.md](docs/compiler.md) | Compiler architecture and toolchain |
-| [roadmap.md](docs/roadmap.md) | Milestones with exit criteria |
-| [decisions.md](docs/decisions.md) | Decision log and open questions |
-| [research.md](docs/research.md) | Evidence behind each decision, and its gaps |
-| [claude-code.md](docs/claude-code.md) | How Claude Code is used to build Lucid |
+It is not free. Task signatures need types. Shared data pays for reference
+counts that Rust would not have. On five benchmarks Lucid ran between 0.62x
+and 3.38x the time of `rustc -O`, met the targets of
+[vision.md](docs/vision.md) on four, and is slowest where LLVM vectorizes
+and Cranelift does not ([numbers](docs/research.md#m4-benchmarks)). In a
+50-task benchmark, an agent with the [guide](docs/agent-guide.md) passed
+44 tasks on the first attempt in Lucid, against 49 in Python and 46 in
+TypeScript, and all 50 after repair.
 
-[website/](website/) is the public site, lucidlang.dev: a static Astro site with the user docs. It is live at https://lucidlang.dev, deployed by Cloudflare Pages from `main`. See [website/README.md](website/README.md).
+## A closer look
 
-[examples/](examples/) holds target programs. They become the first compiler tests.
+### Errors are values
+
+```lucid
+choice ParseError
+    Empty
+    Bad(line: int)
+
+task error_message(self: ParseError) -> text
+    return match self
+        Empty -> "empty input"
+        Bad(line) -> "bad line {line}"
+
+task parse(source: text) -> int or ParseError
+    if source is empty
+        return Empty
+    return source.len()
+
+task twice(source: text) -> int or ParseError
+    let size = try parse(source)    # hands the error to the caller
+    return size * 2
+
+print twice("") else 0              # or give a fallback
+```
+
+An error that nobody looks at does not compile. `try` is the only early
+exit that is not `return`, and it is visible at the call.
+
+### Changing a value is visible at the call
+
+```lucid
+task add_all(take items: list[int], extra: int) -> list[int]
+    items.push(extra)
+    return items
+
+let numbers = [1, 2, 3]
+let more = add_all(numbers, 4)   # last use of numbers: moved, no copy
+```
+
+A parameter is a read-only view unless it says `change` or `take`, and the
+caller writes the same word. While a value is passed as `change`, nothing
+else may read or write it; the compiler rejects `swap(change a, change a)`
+and a loop that pushes onto the list it walks. `lucid check --costs` shows
+each place where a copy-on-write can copy. The full rules are in the
+[memory model](docs/memory-model.md).
+
+### Threads
+
+```lucid
+task worker(jobs: channel[int], total: lock[int])
+    while true
+        let job = jobs.receive()
+        if job is none
+            break
+        total.update(n => n + job * job)
+```
+
+A thread that takes a lock it already holds traps, and so does a program
+whose threads are all waiting, instead of hanging. `std.net` and `std.http` build on these
+for servers; [website.lcd](examples/website.lcd) serves a page to 64
+clients at once.
+
+## Status
+
+Version 1.0.0. The compiler, written in Rust, implements the whole
+language as [language.md](docs/language.md) defines it, and passes every
+test on Windows and on Linux x86-64. A second front end, written in Lucid
+under `compiler/lucid/`, matches the Rust one stage by stage and compiles
+itself to a byte-identical result. macOS is not supported yet.
+
+From 1.0 on, a program that builds keeps building and behaving the same
+under every 1.x release. [vision.md](docs/vision.md#version-10-promise)
+says exactly what that covers. `shared` and `weak` references are planned
+and not part of the promise.
+
+## Building from source
+
+You need Rust and, for `lucid build`, the MSVC linker on Windows or `cc`
+on Linux.
+
+```sh
+cargo build --release
+target/release/lucid run examples/hello.lcd
+```
+
+The binary carries the standard library and the runtime, so it can be
+copied anywhere. `cargo test` runs the unit and golden tests. How the
+compiler is put together, and how a release is made, is in
+[compiler.md](docs/compiler.md).
+
+## Documentation
+
+For people writing Lucid:
+
+* [Agent guide](docs/agent-guide.md): everything that runs today, by
+  example, in one file. Despite the name it is the quickest way in for
+  anyone.
+* [Language](docs/language.md) and [grammar](docs/grammar.md): the exact
+  rules. Where the compiler and these disagree, one of them has a bug.
+* [Memory model](docs/memory-model.md): values, `change`, `take`, and what
+  the compiler does with them.
+* [Security](docs/security.md): what safe code cannot do, `unsafe`, and
+  package permissions.
+* [Standard library and the web](docs/stdlib-and-web.md).
+* [Errors](docs/errors.md): every error code, with an example and a fix.
+* [Tools for agents](docs/agents.md): the rules a feature must pass, and
+  every command's JSON.
+
+For people working on Lucid:
+
+* [Vision](docs/vision.md): what Lucid is for, and how to settle a
+  trade-off.
+* [Compiler](docs/compiler.md): the pipeline, each pass, and the release
+  steps.
+* [Roadmap](docs/roadmap.md): milestones and what is left.
+* [Decisions](docs/decisions.md) and [research](docs/research.md): why
+  each choice was made, and the evidence, kept as written at the time.
+* [Claude Code](docs/claude-code.md): how this repository is worked on.
+  Lucid is designed and built by Claude, with its owner directing.
+
+The public site, [lucidlang.dev](https://lucidlang.dev), is built from
+[website/](website/).
 
 ## License
 
-Lucid is licensed under either of the [MIT license](LICENSE-MIT) or the [Apache License, Version 2.0](LICENSE-APACHE), at your option. A program built with Lucid may use any license.
+Lucid is licensed under either of the [MIT license](LICENSE-MIT) or the
+[Apache License, Version 2.0](LICENSE-APACHE), at your option. A program
+built with Lucid may use any license.
 
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in Lucid by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in Lucid by you, as defined in the Apache-2.0
+license, shall be dual licensed as above, without any additional terms or
+conditions.
