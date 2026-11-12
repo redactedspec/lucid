@@ -905,18 +905,21 @@ fn version_prints_one_line() {
     assert_eq!(text(&lucid(&repo(), &["--version", "--json"]).stdout), "{\"version\":\"1.0.0\"}\n");
 }
 
-/// Runs `lucid` with its output pipes closed, and returns the exit code.
+/// Runs `lucid` with output pipes whose read ends close before it starts,
+/// so no write can land in a pipe buffer first, and returns the exit code.
 fn exit_with_closed_pipes(dir: &Path, args: &[&str]) -> Option<i32> {
-    let mut child = Command::new(LUCID)
+    let (out_reader, out_writer) = std::io::pipe().expect("cannot make a pipe");
+    let (err_reader, err_writer) = std::io::pipe().expect("cannot make a pipe");
+    drop(out_reader);
+    drop(err_reader);
+    Command::new(LUCID)
         .args(args)
         .current_dir(dir)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("cannot start lucid");
-    drop(child.stdout.take());
-    drop(child.stderr.take());
-    child.wait().expect("cannot wait for lucid").code()
+        .stdout(out_writer)
+        .stderr(err_writer)
+        .status()
+        .expect("cannot run lucid")
+        .code()
 }
 
 #[test]
