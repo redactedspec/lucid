@@ -126,7 +126,27 @@ Built in M9, by decisions 214 to 226, in the order of `roadmap.md`: the dumps, a
   cmp stage1/lucid stage2/lucid
   ```
 
-  On Windows the programs end in `.exe`. A built compiler reads its backend library from `target/`, by decision 226, so it runs only in the checkout that built it. After the first release, `compiler/lucid/stage0.txt` pins its version and hashes, and the steps start from that binary.
+  On Windows the programs end in `.exe`. A built compiler reads its backend library from `target/`, by decision 226, so it runs only in the checkout that built it. The `compiler/lucid/stage0.txt` pin waits until the Rust front end is deleted, by decision 229.
+
+## Release
+
+A release ships the Rust `lucid`, built in release mode, for Windows and for Linux x86-64, by decision 229. The binary holds `std`, the runtime, the WebAssembly runtime, and `docs/errors.md`, so it needs no other file. `lucid build` needs the MSVC linker on Windows and `cc` on Linux, as under "`lucid build`". The Linux binary needs a glibc no older than the one it was built against. The Lucid compiler in `compiler/lucid/` does not ship, since it reads its backend library from `target/`.
+
+The owner decides when to release, and pushes. The steps, from a clean checkout of `main`, with `VERSION` the new version:
+
+1. Set `version = "VERSION"` in `compiler/Cargo.toml`, `backend/Cargo.toml`, and `runtime/Cargo.toml`, by decision 227, and commit with the docs that name the version.
+2. On Windows, run `cargo fmt --check`, `cargo clippy --all-targets`, `cargo test`, and `cargo test --release`. Each must pass. The release run is the one that compares stage 1 of the fixed point. Then, in `website/`, run `npm run check:examples`, `npm run check:links`, and `npm run build`.
+3. In WSL, copy the tree into the Linux file system, and run the same `cargo test` and `cargo test --release` there:
+
+   ```sh
+   git ls-files -co --exclude-standard | tar -cf /tmp/lucid.tar -T -   # from the checkout, in Git Bash
+   mkdir ~/lucid-VERSION && tar -xf /mnt/c/.../lucid.tar -C ~/lucid-VERSION   # in WSL
+   ```
+
+4. Check that `target/release/lucid --version` prints `lucid VERSION` on each system.
+5. Record the SHA-256 of each binary, with `sha256sum target/release/lucid.exe` on Windows and `sha256sum target/release/lucid` in WSL, and the host each was built on: the Rust version, and the glibc version from `ldd --version` on Linux.
+6. Make an annotated tag `vVERSION` on the release commit, whose message holds the hashes and hosts of step 5. These are the release notes.
+7. The owner pushes `main` and the tag, which deploys the site, and publishes the two binaries beside their hashes.
 
 ## Pipeline
 

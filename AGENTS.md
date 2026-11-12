@@ -42,7 +42,7 @@ Docs describe what is true now. Mark planned items as planned, and remove claims
 
 ## Commands
 
-`cargo test` runs unit and golden tests. The website builds apart from cargo: see `website/README.md`, and run `npm run check:examples` there after a change to the language or to the site's docs. It needs `node`, and the build needs `rustup target add wasm32-unknown-unknown`. Other commands are in `docs/compiler.md`.
+`cargo test` runs unit and golden tests. The website builds apart from cargo: see `website/README.md`, and run `npm run check:examples` there after a change to the language or to the site's docs. It needs `node`, and the build needs `rustup target add wasm32-unknown-unknown`. Other commands, and the release steps, are in `docs/compiler.md`.
 
 ## Commits
 
