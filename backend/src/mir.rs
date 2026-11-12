@@ -345,6 +345,13 @@ pub struct Types {
     ids: Vec<Ty>,
 }
 
+impl From<Vec<Ty>> for Types {
+    /// The table as `all` gave it, for `dump::read`.
+    fn from(ids: Vec<Ty>) -> Types {
+        Types { ids }
+    }
+}
+
 impl Types {
     /// Every member of a union, in tag order.
     pub fn all(&self) -> &[Ty] {

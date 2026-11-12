@@ -388,6 +388,8 @@ fn stage_dumps_are_stable() {
                         Some("printed nothing".to_string())
                     } else if first.stdout != second.stdout {
                         Some("differs between two runs".to_string())
+                    } else if matches!(stage, "owned" | "naive") && first.status.success() {
+                        read_back(&text(&first.stdout))
                     } else {
                         None
                     };
@@ -408,6 +410,23 @@ fn stage_dumps_are_stable() {
 "
         )
     );
+}
+
+/// What the backend reads from an `owned` dump, by decision 216, written
+/// again, must be the dump. `stdout` ends with the `--json` diagnostics.
+fn read_back(stdout: &str) -> Option<String> {
+    let dump = stdout.strip_suffix("[]\n").expect("a dump with no diagnostics");
+    // E0901, which `check` leaves out, stops the dump.
+    if dump.is_empty() {
+        return None;
+    }
+    match lucid_backend::dump::read(dump) {
+        Ok((program, source)) if lucid_backend::dump::program(&program, Some(&source)) == dump => {
+            None
+        }
+        Ok(_) => Some("reads back as a different program".to_string()),
+        Err(problem) => Some(format!("does not read back: {problem}")),
+    }
 }
 
 /// The browser examples build for the web. The build goes to a temporary

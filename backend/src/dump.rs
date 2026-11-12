@@ -462,6 +462,518 @@ fn two(out: &mut Out, name: &str, value: &mir::Expr, a: &mir::Expr, b: &mir::Exp
     nest_values(head(out, name, value), &[a, b]);
 }
 
+/// Reads what `program` writes with a `Source`: the `owned` dump, which the
+/// Lucid front end hands the backend, by decision 216. Names and types are
+/// leaked, as `check.rs` leaks them. Text that `program` cannot write is an
+/// error, never a guess.
+pub fn read(text: &str) -> Result<(mir::Program, Source), String> {
+    let mut atoms = Atoms { text, at: 0 };
+    let source = read_source(&mut atoms)?;
+    let program = read_program(&mut atoms)?;
+    match atoms.next()? {
+        None => Ok((program, source)),
+        Some(extra) => Err(format!("text after the program: `{extra}`")),
+    }
+}
+
+/// The atoms of a dump in order. Indentation and line breaks are space. A
+/// quoted atom keeps its quotes, so `"-"` is a text, not an absent value.
+struct Atoms<'t> {
+    text: &'t str,
+    at: usize,
+}
+
+impl<'t> Atoms<'t> {
+    fn next(&mut self) -> Result<Option<&'t str>, String> {
+        let bytes = self.text.as_bytes();
+        let mut start = self.at;
+        while start < bytes.len() && bytes[start].is_ascii_whitespace() {
+            start += 1;
+        }
+        if start == bytes.len() {
+            self.at = start;
+            return Ok(None);
+        }
+        let mut end = start;
+        if bytes[start] == b'"' {
+            end += 1;
+            loop {
+                match bytes.get(end) {
+                    None => return Err("a text with no closing quote".into()),
+                    Some(b'\\') => end += 2,
+                    Some(b'"') => break end += 1,
+                    Some(_) => end += 1,
+                }
+            }
+        } else {
+            while end < bytes.len() && !bytes[end].is_ascii_whitespace() {
+                end += 1;
+            }
+        }
+        self.at = end.min(bytes.len());
+        Ok(Some(&self.text[start..self.at]))
+    }
+
+    fn atom(&mut self) -> Result<&'t str, String> {
+        self.next()?.ok_or_else(|| "the dump ends too soon".into())
+    }
+
+    /// True, and past it, if the next atom is `-`.
+    fn absent(&mut self) -> Result<bool, String> {
+        let at = self.at;
+        if self.next()? == Some("-") {
+            return Ok(true);
+        }
+        self.at = at;
+        Ok(false)
+    }
+
+    fn word(&mut self, want: &str) -> Result<(), String> {
+        match self.atom()? {
+            got if got == want => Ok(()),
+            got => Err(format!("expected `{want}`, found `{got}`")),
+        }
+    }
+
+    fn number<N: std::str::FromStr>(&mut self) -> Result<N, String> {
+        let atom = self.atom()?;
+        atom.parse().map_err(|_| format!("expected a number, found `{atom}`"))
+    }
+
+    fn flag(&mut self) -> Result<bool, String> {
+        match self.atom()? {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            got => Err(format!("expected `true` or `false`, found `{got}`")),
+        }
+    }
+
+    fn text(&mut self) -> Result<String, String> {
+        let atom = self.atom()?;
+        let Some(inner) = atom.strip_prefix('"').and_then(|a| a.strip_suffix('"')) else {
+            return Err(format!("expected a text, found `{atom}`"));
+        };
+        let bad = || "a bad escape in a text".to_string();
+        let mut out = String::with_capacity(inner.len());
+        let mut chars = inner.chars();
+        while let Some(c) = chars.next() {
+            if c != '\\' {
+                out.push(c);
+                continue;
+            }
+            match chars.next() {
+                Some('\\') => out.push('\\'),
+                Some('"') => out.push('"'),
+                Some('n') => out.push('\n'),
+                Some('r') => out.push('\r'),
+                Some('t') => out.push('\t'),
+                Some('u') => {
+                    let code = chars.as_str().strip_prefix('{').and_then(|r| r.split_once('}'));
+                    let (hex, after) = code.ok_or_else(bad)?;
+                    let c = u32::from_str_radix(hex, 16).ok().and_then(char::from_u32);
+                    out.push(c.ok_or_else(bad)?);
+                    chars = after.chars();
+                }
+                _ => return Err(bad()),
+            }
+        }
+        Ok(out)
+    }
+
+    fn name(&mut self) -> Result<&'static str, String> {
+        Ok(self.text()?.leak())
+    }
+
+    fn span(&mut self) -> Result<Span, String> {
+        Ok(Span { start: self.number()?, end: self.number()? })
+    }
+
+    fn ty(&mut self) -> Result<Ty, String> {
+        let one = |atoms: &mut Self| atoms.ty().map(mir::inner);
+        Ok(match self.atom()? {
+            "int" => Ty::Int,
+            "float" => Ty::Float,
+            "bool" => Ty::Bool,
+            "byte" => Ty::Byte,
+            "i8" => Ty::I8,
+            "i16" => Ty::I16,
+            "i32" => Ty::I32,
+            "u16" => Ty::U16,
+            "u32" => Ty::U32,
+            "u64" => Ty::U64,
+            "f32" => Ty::F32,
+            "none" => Ty::None,
+            "pointer" => Ty::Pointer,
+            "text" => Ty::Text,
+            "socket" => Ty::Socket,
+            "database" => Ty::Database,
+            "sql" => Ty::Sql,
+            "error" => Ty::Error,
+            "list" => Ty::List(one(self)?),
+            "map" => Ty::Map(one(self)?, one(self)?),
+            "set" => Ty::Set(one(self)?),
+            "spawned" => Ty::Spawned(one(self)?),
+            "channel" => Ty::Channel(one(self)?),
+            "lock" => Ty::Lock(one(self)?),
+            "data" => Ty::Data(self.name()?, self.number()?, self.tys()?.leak()),
+            "union" => Ty::Union(self.tys()?.leak()),
+            "any" => Ty::Any(self.name()?),
+            "task" => Ty::Task(self.tys()?.leak(), one(self)?),
+            "param" => Ty::Param(self.name()?, self.number()?),
+            got => return Err(format!("expected a type, found `{got}`")),
+        })
+    }
+
+    fn tys(&mut self) -> Result<Vec<Ty>, String> {
+        let count: usize = self.number()?;
+        (0..count).map(|_| self.ty()).collect()
+    }
+
+    fn ints(&mut self) -> Result<Vec<usize>, String> {
+        let count: usize = self.number()?;
+        (0..count).map(|_| self.number()).collect()
+    }
+}
+
+fn read_source(atoms: &mut Atoms) -> Result<Source, String> {
+    atoms.word("Source")?;
+    let count: usize = atoms.number()?;
+    let grant = |atoms: &mut Atoms| match atoms.atom()? {
+        "all" => Ok(Grant::All),
+        "list" => {
+            let count: usize = atoms.number()?;
+            Ok(Grant::List((0..count).map(|_| atoms.text()).collect::<Result<_, _>>()?))
+        }
+        got => Err(format!("expected a grant, found `{got}`")),
+    };
+    let grants = if atoms.absent()? {
+        None
+    } else {
+        let count: usize = atoms.number()?;
+        Some((0..count).map(|_| grant(atoms)).collect::<Result<_, _>>()?)
+    };
+    let mut source = Source { text: atoms.text()?, grants, ..Source::default() };
+    for _ in 0..count {
+        atoms.word("File")?;
+        let path = atoms.name()?;
+        source.files.push(crate::diag::SourceFile { path, start: atoms.number()? });
+    }
+    Ok(source)
+}
+
+fn read_program(atoms: &mut Atoms) -> Result<mir::Program, String> {
+    atoms.word("Program")?;
+    let (datas, tasks, tests): (usize, usize, usize) =
+        (atoms.number()?, atoms.number()?, atoms.number()?);
+    let types = mir::Types::from(atoms.tys()?);
+    let datas = (0..datas).map(|_| read_shape(atoms)).collect::<Result<_, _>>()?;
+    let tasks = (0..tasks).map(|_| read_task(atoms)).collect::<Result<_, _>>()?;
+    let main = read_task(atoms)?;
+    let test = |atoms: &mut Atoms| {
+        atoms.word("Test")?;
+        let name = atoms.text()?;
+        Ok::<_, String>(mir::TestCase { name, task: atoms.number()?, span: atoms.span()? })
+    };
+    let tests = (0..tests).map(|_| test(atoms)).collect::<Result<_, _>>()?;
+    Ok(mir::Program {
+        tasks,
+        tests,
+        unsafe_sites: Vec::new(),
+        main,
+        types,
+        datas,
+        methods: Default::default(),
+        refs: Vec::new(),
+    })
+}
+
+fn read_shape(atoms: &mut Atoms) -> Result<mir::Shape, String> {
+    atoms.word("Shape")?;
+    let choice = atoms.flag()?;
+    let count: usize = atoms.number()?;
+    let mut variants = Vec::with_capacity(count);
+    for _ in 0..count {
+        atoms.word("Variant")?;
+        let name = atoms.text()?;
+        let count: usize = atoms.number()?;
+        let field = |atoms: &mut Atoms| Ok::<_, String>((atoms.text()?, atoms.ty()?));
+        let fields = (0..count).map(|_| field(atoms)).collect::<Result<Vec<_>, _>>()?;
+        let default = |atoms: &mut Atoms| {
+            if atoms.absent()? { Ok(None) } else { expr(atoms).map(Some) }
+        };
+        let defaults = (0..count).map(|_| default(atoms)).collect::<Result<_, _>>()?;
+        variants.push(mir::ShapeVariant { name, fields, defaults });
+    }
+    Ok(mir::Shape { variants, choice })
+}
+
+fn read_task(atoms: &mut Atoms) -> Result<mir::Task, String> {
+    atoms.word("Task")?;
+    let (name, span) = (atoms.name()?, atoms.span()?);
+    let (params, type_params, returns) = (atoms.number()?, atoms.number()?, atoms.ty()?);
+    let (locals, captures) = (atoms.tys()?, atoms.tys()?);
+    let (change, take, borrowed) = (atoms.ints()?, atoms.ints()?, atoms.ints()?);
+    let count = atoms.number()?;
+    let body = stmts(atoms, count)?;
+    Ok(mir::Task {
+        name,
+        params,
+        type_params,
+        returns,
+        locals,
+        body,
+        span,
+        captures,
+        change,
+        take,
+        borrowed,
+    })
+}
+
+fn stmts(atoms: &mut Atoms, count: usize) -> Result<Vec<mir::Stmt>, String> {
+    (0..count).map(|_| stmt(atoms)).collect()
+}
+
+fn stmt(atoms: &mut Atoms) -> Result<mir::Stmt, String> {
+    use mir::Stmt as S;
+    Ok(match atoms.atom()? {
+        "Set" => S::Set(atoms.number()?, expr(atoms)?),
+        "Bind" => S::Bind(atoms.number()?, expr(atoms)?),
+        "Update" => {
+            let (local, op) = (atoms.number()?, debug_named(atoms.atom()?, &UPDATES)?);
+            let (span, count) = (atoms.span()?, atoms.number()?);
+            S::Update { local, op, args: exprs(atoms, count)?, span }
+        }
+        "Clear" => S::Clear(atoms.number()?),
+        "Block" => {
+            let count = atoms.number()?;
+            S::Block(stmts(atoms, count)?)
+        }
+        "If" => {
+            let (count, otherwise): (usize, usize) = (atoms.number()?, atoms.number()?);
+            let mut branches = Vec::with_capacity(count);
+            for _ in 0..count {
+                atoms.word("Branch")?;
+                let body = atoms.number()?;
+                branches.push((expr(atoms)?, stmts(atoms, body)?));
+            }
+            S::If { branches, otherwise: stmts(atoms, otherwise)? }
+        }
+        "While" => {
+            let body = atoms.number()?;
+            S::While { condition: expr(atoms)?, body: stmts(atoms, body)? }
+        }
+        "For" => {
+            let (local, inclusive, body) = (atoms.number()?, atoms.flag()?, atoms.number()?);
+            let (start, end) = (expr(atoms)?, expr(atoms)?);
+            S::For { local, start, end, inclusive, body: stmts(atoms, body)? }
+        }
+        "Return" => S::Return(expr(atoms)?),
+        "Exit" => S::Exit(expr(atoms)?),
+        "Print" => S::Print(expr(atoms)?),
+        "Expr" => S::Expr(expr(atoms)?),
+        "Fail" => {
+            let span = atoms.span()?;
+            S::Fail(expr(atoms)?, span)
+        }
+        "Break" => S::Break,
+        "Continue" => S::Continue,
+        "Unreachable" => S::Unreachable,
+        "PrintText" => S::PrintText(atoms.text()?),
+        "Placeholder" => S::Placeholder(atoms.span()?),
+        "Trap" => S::Trap(atoms.name()?, atoms.span()?),
+        got => return Err(format!("expected a statement, found `{got}`")),
+    })
+}
+
+const UPDATES: [mir::Update; 10] = {
+    use mir::Update as U;
+    [
+        U::ListPush,
+        U::ListSet,
+        U::ListSwap,
+        U::MapSet,
+        U::MapRemove,
+        U::FieldSet,
+        U::UnionSet,
+        U::ListPop,
+        U::Take,
+        U::Put,
+    ]
+};
+
+const OPERATORS: [mir::BinaryOp; 24] = {
+    use mir::BinaryOp as B;
+    [
+        B::Fallback,
+        B::Or,
+        B::And,
+        B::Eq,
+        B::Ne,
+        B::Lt,
+        B::Le,
+        B::Gt,
+        B::Ge,
+        B::In,
+        B::NotIn,
+        B::Range,
+        B::RangeInclusive,
+        B::Add,
+        B::Sub,
+        B::Mul,
+        B::Div,
+        B::FloorDiv,
+        B::Rem,
+        B::BitAnd,
+        B::BitOr,
+        B::BitXor,
+        B::Shl,
+        B::Shr,
+    ]
+};
+
+const HASHES: [mir::HashOp; 3] = [mir::HashOp::Int, mir::HashOp::Text, mir::HashOp::Sum];
+
+/// The item of `all` whose `Debug` name `program` wrote.
+fn debug_named<T: Copy + std::fmt::Debug>(word: &str, all: &[T]) -> Result<T, String> {
+    let found = all.iter().find(|item| format!("{item:?}") == word);
+    found.copied().ok_or_else(|| format!("expected an operation, found `{word}`"))
+}
+
+fn read_keys(atoms: &mut Atoms) -> Result<mir::KeyTasks, String> {
+    if atoms.absent()? { Ok(None) } else { Ok(Some((atoms.number()?, atoms.number()?))) }
+}
+
+fn exprs(atoms: &mut Atoms, count: usize) -> Result<Vec<mir::Expr>, String> {
+    (0..count).map(|_| expr(atoms)).collect()
+}
+
+fn slots_of(atoms: &mut Atoms, count: usize) -> Result<Vec<(usize, mir::Expr)>, String> {
+    let slot = |atoms: &mut Atoms| {
+        atoms.word("Slot")?;
+        Ok((atoms.number()?, expr(atoms)?))
+    };
+    (0..count).map(|_| slot(atoms)).collect()
+}
+
+fn expr(atoms: &mut Atoms) -> Result<mir::Expr, String> {
+    use mir::ExprKind as E;
+    let name = atoms.atom()?;
+    let (ty, span) = (atoms.ty()?, atoms.span()?);
+    let b = |atoms: &mut Atoms| expr(atoms).map(Box::new);
+    let kind = match name {
+        "Int" => E::Int(atoms.number()?),
+        "Float" => E::Float(atoms.number()?),
+        "Bool" => E::Bool(atoms.flag()?),
+        "None" => E::None,
+        "Local" => E::Local(atoms.number()?),
+        "Change" => E::Change(atoms.number()?),
+        "Capture" => E::Capture(atoms.number()?),
+        "Move" => E::Move(atoms.number()?),
+        "Text" => E::Text(atoms.text()?),
+        "Call" => {
+            let (task, args, count) = (atoms.number()?, atoms.tys()?.leak(), atoms.number()?);
+            E::Call(task, args, exprs(atoms, count)?)
+        }
+        "CallValue" => {
+            let count = atoms.number()?;
+            E::CallValue(b(atoms)?, exprs(atoms, count)?)
+        }
+        "Closure" => {
+            let (task, args) = (atoms.number()?, atoms.tys()?.leak());
+            let (counted, count) = (atoms.number()?, atoms.number()?);
+            E::Closure { task, args, counted, fields: slots_of(atoms, count)? }
+        }
+        "New" => {
+            let (tag, counted, count) = (atoms.number()?, atoms.number()?, atoms.number()?);
+            E::New { tag, counted, fields: slots_of(atoms, count)? }
+        }
+        "Join" | "ListOf" => {
+            let count = atoms.number()?;
+            let values = exprs(atoms, count)?;
+            if name == "Join" { E::Join(values) } else { E::ListOf(values) }
+        }
+        "Foreign" | "Method" => {
+            let (symbol, count) = (atoms.name()?, atoms.number()?);
+            let values = exprs(atoms, count)?;
+            if name == "Foreign" { E::Foreign(symbol, values) } else { E::Method(symbol, values) }
+        }
+        "MapOf" => {
+            let count: usize = atoms.number()?;
+            let keys = read_keys(atoms)?;
+            let entry = |atoms: &mut Atoms| {
+                atoms.word("Entry")?;
+                Ok((expr(atoms)?, expr(atoms)?))
+            };
+            E::MapOf((0..count).map(|_| entry(atoms)).collect::<Result<_, String>>()?, keys)
+        }
+        "SetOf" => {
+            let keys = read_keys(atoms)?;
+            E::SetOf(b(atoms)?, keys)
+        }
+        "Field" => {
+            let slot = atoms.number()?;
+            E::Field(b(atoms)?, slot)
+        }
+        "TagIn" => {
+            let tags = atoms.ints()?;
+            E::TagIn(b(atoms)?, tags)
+        }
+        "Member" => {
+            let (variant, field) = (atoms.number()?, atoms.number()?);
+            E::Member { value: b(atoms)?, variant, field }
+        }
+        "Holds" => {
+            let tys = atoms.tys()?;
+            E::Holds(b(atoms)?, tys)
+        }
+        "Temp" => {
+            let local = atoms.number()?;
+            E::Temp(local, b(atoms)?)
+        }
+        "Binary" | "Wrapping" => {
+            let op = debug_named(atoms.atom()?, &OPERATORS)?;
+            let (left, right) = (b(atoms)?, b(atoms)?);
+            if name == "Binary" { E::Binary(op, left, right) } else { E::Wrapping(op, left, right) }
+        }
+        "Hash" => E::Hash(debug_named(atoms.atom()?, &HASHES)?, b(atoms)?, b(atoms)?),
+        "Seq" => {
+            let count = atoms.number()?;
+            E::Seq(stmts(atoms, count)?, b(atoms)?)
+        }
+        "Neg" => E::Neg(b(atoms)?),
+        "Sqrt" => E::Sqrt(b(atoms)?),
+        "Not" => E::Not(b(atoms)?),
+        "Convert" => E::Convert(b(atoms)?),
+        "ToText" => E::ToText(b(atoms)?),
+        "TextQuote" => E::TextQuote(b(atoms)?),
+        "TextLen" => E::TextLen(b(atoms)?),
+        "ListPointer" => E::ListPointer(b(atoms)?),
+        "TextIsEmpty" => E::TextIsEmpty(b(atoms)?),
+        "TextByteLen" => E::TextByteLen(b(atoms)?),
+        "TextBytes" => E::TextBytes(b(atoms)?),
+        "Len" => E::Len(b(atoms)?),
+        "Tag" => E::Tag(b(atoms)?),
+        "Wrap" => E::Wrap(b(atoms)?),
+        "View" => E::View(b(atoms)?),
+        "Retain" => E::Retain(b(atoms)?),
+        "TextCharAt" => E::TextCharAt(b(atoms)?, b(atoms)?),
+        "ListGet" => E::ListGet(b(atoms)?, b(atoms)?),
+        "ListHas" => E::ListHas(b(atoms)?, b(atoms)?),
+        "MapGet" => E::MapGet(b(atoms)?, b(atoms)?),
+        "MapHas" => E::MapHas(b(atoms)?, b(atoms)?),
+        "MapNext" => E::MapNext(b(atoms)?, b(atoms)?),
+        "MapKey" => E::MapKey(b(atoms)?, b(atoms)?),
+        "MapValue" => E::MapValue(b(atoms)?, b(atoms)?),
+        "MapFind" => E::MapFind(b(atoms)?, b(atoms)?),
+        "If" => E::If(b(atoms)?, b(atoms)?, b(atoms)?),
+        "TextSlice" => E::TextSlice(b(atoms)?, b(atoms)?, b(atoms)?),
+        "ListSlice" => E::ListSlice(b(atoms)?, b(atoms)?, b(atoms)?),
+        got => return Err(format!("expected a value, found `{got}`")),
+    };
+    Ok(mir::Expr { kind, ty, span })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
