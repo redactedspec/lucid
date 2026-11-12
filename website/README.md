@@ -49,61 +49,23 @@ npm run check:links       # every internal link in dist/ resolves
 
 ## Deployment
 
-Live since 2026-11-08, on the Cloudflare Pages free plan.
+Cloudflare Pages builds and publishes the site from `main` of this
+repository, with `website/` as the root directory, `npm run build` as the
+command, and `dist` as the output. It needs no token or secret. Every
+push to `main` is live within minutes, so run the checks under
+"Commands" first.
 
-| Part | Value |
-| --- | --- |
-| Production URL | https://lucidlang.dev, the only address the site names |
-| Pages address | `lucid-ah0.pages.dev`. It serves the same build, and its pages give `https://lucidlang.dev` as canonical |
-| Registrar | Porkbun, with nameservers pointed at Cloudflare |
-| DNS | Cloudflare, zone `lucidlang.dev` on the same account as the Pages project |
-| TLS | Cloudflare certificate. `http://` redirects to `https://` with a 301 |
-| `www` | Redirects to `https://lucidlang.dev` with a 301. See "Custom domain" below |
-| Source | `main` of `redactedspec/lucid`, root directory `website/` |
+`site` in `astro.config.mjs` is `https://lucidlang.dev`. Canonical links,
+`og:url`, `og:image`, the sitemap, and `robots.txt` all build from it.
+Never write any other address of the site in the site or its docs.
 
-**Deploys are automatic.** Every push to `main` builds and publishes the site, so a pushed commit that changes `website/` or the files it reads is public within minutes. By Cloudflare's default, a push to another branch makes a preview deploy at its own `pages.dev` address. Run the checks under "Commands" before pushing.
+The build reads `../docs/errors.md`, `../docs/agent-guide.md`, and
+`../examples/`, since Pages clones the whole repository. `public/_headers`
+sets content types for the install scripts, the release list, and the
+agent guide.
 
-**Production URLs.** `site` in `astro.config.mjs` is `https://lucidlang.dev`. Canonical links, `og:url`, `og:image`, the sitemap at `/sitemap-index.xml`, and `robots.txt` all build from it, or name it directly. Never write the `pages.dev` address in the site or its docs.
+## Installers
 
-**Checked live on 2026-11-08** with `curl`: `/`, `/docs/`, `/downloads/`, and `/docs/installation/` give 200 with canonical and `og:url` on `lucidlang.dev`. The sitemap lists only `lucidlang.dev` URLs. `/install.sh` is `text/plain` and exits with "no public release" status, `/agent-guide.md` is `text/markdown`, an unknown path gives 404, and `_headers` security headers are present.
-
-### Setup
-
-How the project was created, checked against the Cloudflare Pages docs on 2026-11-08. In the dashboard: Workers & Pages, Create application, Pages, Import an existing Git repository. Pick this repository, then Begin setup:
-
-| Setting | Value |
-| --- | --- |
-| Production branch | `main` |
-| Framework preset | Astro, or None: the fields below are what matter |
-| Root directory | `website` |
-| Build command | `npm run build` |
-| Build output directory | `dist` |
-| Environment variables | none. `.node-version` pins Node 22.23.4, the v3 build image's default |
-
-Then Save and Deploy. The site is fully static, so the free plan covers it, and the build needs no token or secret.
-
-The build reads `../docs/errors.md` and `../docs/agent-guide.md`, and `../examples/`. The root directory only sets where the build runs, and the repository is cloned whole: the live diagnostics page and `/agent-guide.md` prove those reads work on Cloudflare.
-
-`public/_headers` sets content types for the install scripts and the agent guide. `dist/404.html` is served for unknown paths.
-
-**Custom domain.** Cloudflare requires the apex domain `lucidlang.dev` to be a zone on the same Cloudflare account, so the domain was added to Cloudflare and its Porkbun nameservers pointed there. Then, in the Pages project: Custom domains, Set up a domain, `lucidlang.dev`. Cloudflare added the DNS record, and reports the domain Active with SSL.
-
-**www.** `www.lucidlang.dev` redirects to the apex with the Cloudflare redirect rule `Redirect www to apex`, on the free plan:
-
-| Field | Value |
-| --- | --- |
-| Match | `http.host eq "www.lucidlang.dev"` |
-| Destination | `concat("https://lucidlang.dev", http.request.uri.path)` |
-| Status | 301 |
-| Preserve query string | on |
-
-Checked on 2026-11-08: `curl -I https://www.lucidlang.dev/docs/?q=1` gives `301` with `Location: https://lucidlang.dev/docs/?q=1`, and `http://www.lucidlang.dev/` gives `301` to `https://lucidlang.dev/`.
-
-## Planned install design
-
-Not built. Installers go live only with a real release.
-
-- A release publishes `https://lucidlang.dev/releases.json`: for each version, each supported target (`x86_64-windows`, later `x86_64-linux`), the HTTPS URL of its archive, and its SHA-256.
-- `install.sh` and `install.ps1` read that file, pick the target, download over HTTPS, and stop with a clear message if the platform is unsupported, the download fails, or the hash differs. They run nothing they download.
-- They install to a user directory with no administrator rights: `~/.lucid/bin`, or `%LOCALAPPDATA%\Lucid\bin`. They print the line to add it to `PATH`, and change no shell profile by themselves.
-- Running one again installs the latest version over the old one, and does nothing if it is current.
+`public/install.sh` and `public/install.ps1` read `public/releases.txt`,
+and follow decision 233 in `docs/decisions.md`. A release adds its lines
+to `releases.txt`, as the release steps in `docs/compiler.md` say.
