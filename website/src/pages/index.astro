@@ -15,7 +15,8 @@ const inCode: Record<string, string> = {
   agents: 'lucid check --json main.lcd',
 };
 
-const current = milestones.find((m) => m.status === 'active') ?? milestones.at(-1)!;
+const current = milestones.find((m) => m.status === 'active') ?? milestones.filter((m) => m.status === 'done').at(-1)!;
+const milestonesDone = milestones.filter((m) => m.status === 'done').length;
 const stepsDone = current.steps!.filter((s) => s.done).length;
 const label = { done: 'Done', active: 'In progress', planned: 'Planned' } as const;
 
@@ -72,9 +73,9 @@ const commands = [
   <section class="section status" aria-labelledby="status-title">
     <div class="container status-grid">
       <div class="reading">
-        <h2 id="status-title">Eleven milestones done. Version 1.0.0 is out.</h2>
+        <h2 id="status-title">Version 1.0.0 is out.</h2>
         <p class="figure"><span class="measured big">{stepsDone}/{current.steps!.length}</span></p>
-        <p class="caption">{current.id} steps done. The source is public and builds with <code>cargo</code>; binaries come next.</p>
+        <p class="caption">{current.id} steps done, and {milestonesDone} milestones done in all. <a class="link" href="/downloads/">Install 1.0.0</a> on Windows or Linux.</p>
         <a href="/roadmap/" class="link">Read the roadmap</a>
       </div>
       <ol class="trail">
@@ -93,7 +94,7 @@ const commands = [
     <div class="container start">
       <div class="head">
         <h2 id="start-title">A handful of commands.</h2>
-        <p>Every command also speaks JSON with <code>--json</code>. Binaries are not published yet. The <a class="link" href="https://github.com/redactedspec/lucid">source is on GitHub</a>.</p>
+        <p>Every command also speaks JSON with <code>--json</code>. <a class="link" href="/downloads/">Install it</a> with one command, or build from the <a class="link" href="https://github.com/redactedspec/lucid">source on GitHub</a>.</p>
       </div>
       <div class="table-wrap">
         <table class="table commands">

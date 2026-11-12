@@ -21,7 +21,7 @@ const current = (href: string) => (path.startsWith(href) ? 'page' : undefined);
         {nav.map((item) => <li><a href={item.href} aria-current={current(item.href)}>{item.label}</a></li>)}
       </ul>
     </nav>
-    <a href="/downloads/" class="status desktop">1.0.0, from source</a>
+    <a href="/downloads/" class="status desktop">Download 1.0.0</a>
 
     <details class="mobile">
       <summary aria-label="Menu">

@@ -2,26 +2,68 @@
 import Base from '../layouts/Base.astro';
 import Terminal from '../components/Terminal.astro';
 
+const release = 'https://github.com/redactedspec/lucid/releases/tag/v1.0.0';
+const download = 'https://github.com/redactedspec/lucid/releases/download/v1.0.0/';
+const archives = [
+  { name: 'Windows x86-64', file: 'lucid-1.0.0-windows-x86_64.zip', sha: '8e2c79dcbaf59149a53b8a34b64943c2aaf1d59882dc666c7801ff3d7e0d85ca', needs: 'Windows 10 or later. `lucid build` needs Visual Studio Build Tools with the Windows SDK.' },
+  { name: 'Linux x86-64', file: 'lucid-1.0.0-linux-x86_64.tar.gz', sha: 'fb786390d525fe2b42ada68a7bfb61d914d174b4cc0c524224b56be37a59eaff', needs: 'glibc 2.39 or newer: Ubuntu 24.04, Debian 13, Fedora 40, Arch. `lucid build` needs `cc`.' },
+];
 const platforms = [
-  { name: 'Windows x86-64', state: 'Works in development', tag: 'done', detail: '`lucid run`, `test`, `check`, `build` to `.exe`, and `build --target web`.' },
-  { name: 'Linux x86-64', state: 'Works in development', tag: 'done', detail: '`run`, `test`, and `build`, checked under WSL.' },
-  { name: 'Browser and Node', state: 'Works as an output target', tag: 'done', detail: '`lucid build --target web` writes a `.js` file that runs anywhere WebAssembly does.' },
-  { name: 'macOS', state: 'Deferred', tag: 'planned', detail: 'No milestone yet.' },
+  { name: 'Windows x86-64', state: 'Released', tag: 'done', detail: '`lucid run`, `test`, `check`, `build` to `.exe`, and `build --target web`.' },
+  { name: 'Linux x86-64', state: 'Released', tag: 'done', detail: 'The same commands. Older glibc: build from source.' },
+  { name: 'Browser and Node', state: 'Output target', tag: 'done', detail: '`lucid build --target web` writes a `.js` file that runs anywhere WebAssembly does.' },
+  { name: 'macOS', state: 'Deferred', tag: 'planned', detail: 'No milestone yet. Build from source is not supported either.' },
 ];
 const code = (s: string) => s.replace(/`([^`]+)`/g, '<code>$1</code>');
 ---
 <Base
   title="Downloads"
-  description="Lucid 1.0.0 builds from source. Supported platforms, what works today, and how the installers will work once binaries are published."
+  description="Download Lucid 1.0.0 for Windows and Linux x86-64, with one-line installers that check every archive's SHA-256."
 >
   <div class="container">
     <header class="page-head">
-      <h1>Build 1.0.0 from source.</h1>
-      <p>Version 1.0.0 is tagged, and the <a class="link" href="https://github.com/redactedspec/lucid">source is on GitHub</a>. There are no published binaries yet, so for now you build it with <code>cargo</code>, as <a class="link" href="/docs/installation/">Installation</a> shows.</p>
+      <h1>Lucid 1.0.0.</h1>
+      <p>Released for Windows and Linux on x86-64. One command installs it into your user directory, with no administrator rights. The <a class="link" href={release}>release notes</a> list what was built and how.</p>
     </header>
 
+    <section class="block split" aria-labelledby="install-title">
+      <div class="prose">
+        <h2 id="install-title">Install</h2>
+        <p>Each script reads the release list at <a class="link" href="/releases.txt"><code>lucidlang.dev/releases.txt</code></a>, downloads the archive for your system over HTTPS, and checks its SHA-256 before it touches anything.</p>
+        <ul>
+          <li>It installs into <code>~/.lucid/bin</code> on Linux, and <code>%LOCALAPPDATA%\Lucid\bin</code> on Windows.</li>
+          <li>It runs nothing it downloads, and changes no shell profile or environment variable. It prints the line that puts <code>lucid</code> on your <code>PATH</code>.</li>
+          <li>It stops with a clear message on an unsupported system, a failed download, or a bad checksum, and installs nothing.</li>
+          <li>Run it again to update. When you are current, it does nothing.</li>
+        </ul>
+      </div>
+      <div class="terms">
+        <Terminal title="Windows, PowerShell" lines={[{ cmd: 'irm https://lucidlang.dev/install.ps1 | iex' }, { out: 'Installed lucid 1.0.0 in C:\\Users\\you\\AppData\\Local\\Lucid\\bin.' }]} />
+        <Terminal title="Linux, sh" lines={[{ cmd: 'curl -fsSL https://lucidlang.dev/install.sh | sh' }, { out: 'Installed lucid 1.0.0 in /home/you/.lucid/bin.' }]} />
+      </div>
+    </section>
+
+    <section class="block" aria-labelledby="archives-title">
+      <h2 id="archives-title">Archives</h2>
+      <p class="lead">Or unpack one by hand. Each holds the <code>lucid</code> binary, the README, and both licenses. The binary carries the standard library and the runtime, so it needs no other file.</p>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th scope="col">Archive</th><th scope="col">SHA-256</th><th scope="col">Needs</th></tr></thead>
+          <tbody>
+            {archives.map((a) => (
+              <tr>
+                <th scope="row"><a class="link" href={download + a.file}>{a.name}</a></th>
+                <td><code class="hash">{a.sha}</code></td>
+                <td set:html={code(a.needs)} />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="block" aria-labelledby="platforms-title">
-      <h2 id="platforms-title">Where it runs today</h2>
+      <h2 id="platforms-title">Platforms</h2>
       <div class="table-wrap">
         <table class="table">
           <thead><tr><th scope="col">Platform</th><th scope="col">State</th><th scope="col">What works</th></tr></thead>
@@ -38,29 +80,9 @@ const code = (s: string) => s.replace(/`([^`]+)`/g, '<code>$1</code>');
       </div>
     </section>
 
-    <section class="block split" aria-labelledby="install-title">
-      <div class="prose">
-        <h2 id="install-title">Installers, once there are binaries</h2>
-        <p>These two commands are reserved. Today each script prints that no binaries are published and stops with an error. It downloads nothing.</p>
-        <p>The real installers will:</p>
-        <ul>
-          <li>read the release list published on <code>lucidlang.dev</code>, with no hard-coded download URL,</li>
-          <li>download over HTTPS only, and check the SHA-256 of each archive before using it,</li>
-          <li>stop with a clear message on an unsupported system, a failed download, or a bad checksum,</li>
-          <li>install into your user directory, with no administrator rights,</li>
-          <li>run nothing they download, and change no shell profile without asking,</li>
-          <li>update in place when run again, and do nothing when already current.</li>
-        </ul>
-      </div>
-      <div class="terms">
-        <Terminal title="Windows, PowerShell" lines={[{ cmd: 'irm https://lucidlang.dev/install.ps1 | iex' }, { out: 'Lucid has no published binaries yet.' }]} />
-        <Terminal title="Linux, sh" lines={[{ cmd: 'curl -fsSL https://lucidlang.dev/install.sh | sh' }, { out: 'Lucid has no published binaries yet.' }]} />
-      </div>
-    </section>
-
     <section class="block until" aria-labelledby="follow-title">
-      <h2 id="follow-title">Until then</h2>
-      <p>Build from source, read the <a class="link" href="/docs/">documentation</a>, or follow the <a class="link" href="/roadmap/">roadmap</a>.</p>
+      <h2 id="follow-title">Next</h2>
+      <p>Start with <a class="link" href="/docs/">Getting started</a>, or build from source as <a class="link" href="/docs/installation/">Installation</a> shows. The source is on <a class="link" href="https://github.com/redactedspec/lucid">GitHub</a>.</p>
     </section>
   </div>
 </Base>
@@ -77,5 +99,7 @@ const code = (s: string) => s.replace(/`([^`]+)`/g, '<code>$1</code>');
   .terms { display: grid; gap: var(--space-md); min-width: 0; }
   .until p { color: var(--color-muted); font-size: var(--text-lead); max-width: 52ch; }
   .until h2 { margin-bottom: var(--space-md); }
+  .lead { color: var(--color-muted); max-width: 60ch; margin-bottom: var(--space-lg); }
+  .hash { font-size: var(--text-sm, 0.85em); word-break: break-all; }
   @media (max-width: 60rem) { .split { grid-template-columns: minmax(0, 1fr); gap: var(--space-xl); } }
 </style>

@@ -1,34 +1,34 @@
 ---
 title: Installation
-description: Release status of the Lucid compiler, supported platforms, and what a build from source needs.
+description: Install Lucid 1.0.0 on Windows or Linux, or build it from source.
 ---
 
-:::note[Build from source]
-Version 1.0.0 is tagged, and the source is at [github.com/redactedspec/lucid](https://github.com/redactedspec/lucid). There are no Lucid binaries to download yet, so build it with `cargo` as shown below. [Downloads](/downloads/) will list binaries when they exist.
-:::
+## Install
 
-## Platforms
-
-| Platform | State |
-| --- | --- |
-| Windows x86-64 | Works in development: `run`, `test`, `check`, `build`, and `build --target web` |
-| Linux x86-64 | Works in development: `run`, `test`, `check`, `build`, and `build --target web` |
-| Browser and Node | An output target: `lucid build --target web` |
-| macOS | Deferred, with no milestone |
-
-## Planned installers
-
-These commands are reserved for when binaries are published. Today each script prints that there are none and stops with an error, without downloading anything.
+Lucid 1.0.0 is released for Windows and Linux on x86-64. One command installs it into your user directory:
 
 ```sh
 # Windows, PowerShell
 irm https://lucidlang.dev/install.ps1 | iex
 
-# Linux
+# Linux, glibc 2.39 or newer
 curl -fsSL https://lucidlang.dev/install.sh | sh
 ```
 
-Once binaries exist, the installers will read the published release list, download over HTTPS, check each archive's SHA-256, and install into a user directory with no administrator rights.
+The script reads the release list at [`lucidlang.dev/releases.txt`](/releases.txt), downloads the archive over HTTPS, and checks its SHA-256 before installing. `lucid` goes in `~/.lucid/bin` on Linux, or `%LOCALAPPDATA%\Lucid\bin` on Windows. The script changes no shell profile or environment variable; it prints the line that puts `lucid` on your `PATH`. Run it again to update.
+
+To install somewhere else, set `LUCID_HOME` first. To install by hand, take an archive from [Downloads](/downloads/), check it against `SHA256SUMS` from the [release](https://github.com/redactedspec/lucid/releases/tag/v1.0.0), and put the binary anywhere on your `PATH`. It carries the standard library and the runtime, so it needs no other file.
+
+`lucid run`, `check`, and `test` need nothing else. `lucid build` needs a linker: on Windows, Visual Studio Build Tools with the Windows SDK; on Linux, a C compiler as `cc`, such as gcc.
+
+## Platforms
+
+| Platform | State |
+| --- | --- |
+| Windows x86-64 | Released: `run`, `test`, `check`, `build`, and `build --target web` |
+| Linux x86-64 | Released, for glibc 2.39 or newer. On an older glibc, build from source |
+| Browser and Node | An output target: `lucid build --target web` |
+| macOS | Deferred, with no milestone |
 
 ## Building from source
 

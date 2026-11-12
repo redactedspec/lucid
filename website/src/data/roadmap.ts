@@ -125,6 +125,27 @@ export const milestones: Milestone[] = [
       { text: 'Version 1.0.0 tagged, and this site deployed', done: true },
     ],
   },
+  {
+    id: 'M11',
+    title: 'Binaries and installers',
+    status: 'done',
+    summary: 'Archives for Windows and Linux on GitHub, and one-line installers that check each SHA-256.',
+    exit: 'The commands on the downloads page install `lucid 1.0.0` on Windows and Linux.',
+    steps: [
+      { text: 'Archives and SHA256SUMS on the v1.0.0 release', done: true },
+      { text: 'The release list, releases.txt', done: true },
+      { text: 'install.sh and install.ps1, checked on both systems', done: true },
+      { text: 'Downloads and Installation pages', done: true },
+    ],
+  },
+  {
+    id: 'M12',
+    title: 'Editor support',
+    status: 'planned',
+    summary: 'A VS Code extension, with highlighting and the `lucid lsp` language server.',
+    exit: 'Not designed yet.',
+    steps: [],
+  },
 ];
 
 export const later =

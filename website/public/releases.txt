@@ -1,0 +1,4 @@
+# Lucid releases, newest first. Read by install.sh and install.ps1.
+# Each line: VERSION PLATFORM URL SHA256, where SHA256 is the archive's.
+1.0.0 linux-x86_64 https://github.com/redactedspec/lucid/releases/download/v1.0.0/lucid-1.0.0-linux-x86_64.tar.gz fb786390d525fe2b42ada68a7bfb61d914d174b4cc0c524224b56be37a59eaff
+1.0.0 windows-x86_64 https://github.com/redactedspec/lucid/releases/download/v1.0.0/lucid-1.0.0-windows-x86_64.zip 8e2c79dcbaf59149a53b8a34b64943c2aaf1d59882dc666c7801ff3d7e0d85ca

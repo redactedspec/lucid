@@ -6,7 +6,7 @@ description: Write, run, check, test, and build a first Lucid program.
 Lucid is a general-purpose, compiled language that reads like plain English. Programs compile to native code through Cranelift, or to WebAssembly for the browser. Ownership is inferred, so you write no lifetimes, and there is no garbage collector.
 
 :::note[Version 1.0.0]
-Lucid 1.0.0 builds from source; binaries are not published yet. See [Installation](/docs/installation/) for how to build it, and the [roadmap](/roadmap/).
+Lucid 1.0.0 is released for Windows and Linux on x86-64. See [Installation](/docs/installation/) to install it.
 :::
 
 ## A first program
