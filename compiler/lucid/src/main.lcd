@@ -3,8 +3,9 @@
 # one by its dump, by decision 215. Built so far: `check` with
 # `LUCID_DUMP=tokens` or `ast`, which lexes and parses one file, with no
 # imports, `resolved`, which loads the whole program, `checked`, which also
-# type checks it, and `mir`, which also monomorphizes it. See "Self-hosting"
-# in docs/compiler.md.
+# type checks it, `mir`, which also monomorphizes it, and `owned`, which
+# also runs the ownership pass. Also `check --costs` and `check --unsafe`.
+# See "Self-hosting" in docs/compiler.md.
 
 use std.args
 use std.env
@@ -14,7 +15,9 @@ use ./check
 use ./diag
 use ./dump
 use ./lexer
+use ./mir
 use ./mono
+use ./ownership
 use ./parser
 use ./resolve
 
@@ -26,17 +29,23 @@ task error_message(self: Stop) -> text
     return self.message
 
 task usage() -> Stop
-    return Stop(message: "usage: lucid check [--json] PATH, with LUCID_DUMP=tokens, ast, resolved, checked, or mir")
+    return Stop(message: "usage: lucid check [--json] [--costs | --unsafe] PATH, or with LUCID_DUMP=tokens, ast, resolved, checked, mir, or owned")
 
 task main() -> none or Stop
     let words = args.all()
     if words.len() == 0 or words[0] != "check"
         return usage()
     var json = false
+    var costs = false
+    var sites = false
     var path = ""
     for word in words[1..words.len()]
         if word == "--json"
             json = true
+        else if word == "--costs" and not sites
+            costs = true
+        else if word == "--unsafe" and not costs
+            sites = true
         else if path is empty and not word.starts_with("-")
             path = word
         else
@@ -44,11 +53,15 @@ task main() -> none or Stop
     let stage = env.get("LUCID_DUMP") else ""
     if path is empty
         return usage()
-    if stage == "resolved"
+    if sites
+        try unsafe_sites(path, json)
+    else if costs
+        try check_costs(path, json)
+    else if stage == "resolved"
         let found = resolve.load(path, false)
         print dump.resolved(found)
         try finish(found.source, found.diags, json)
-    else if stage == "checked" or stage == "mir"
+    else if stage == "checked" or stage == "mir" or stage == "owned"
         let found = resolve.load(path, false)
         var diags = found.diags
         let file = found.file
@@ -56,9 +69,12 @@ task main() -> none or Stop
             let checked = check.check(file, found, true)
             diags = checked.diags
             var program = checked.program
-            if stage == "mir" and diags is empty
+            if stage != "checked" and diags is empty
                 diags = mono.run(change program, true)
-            if diags is empty
+            if stage == "owned" and diags is empty
+                ownership.run(change program, env.get("LUCID_NAIVE") is none)
+                print dump.owned(program, found)
+            else if diags is empty
                 print dump.program(program)
             # `check` reports errors in the program. An unbuilt feature is
             # not one.
@@ -72,6 +88,48 @@ task main() -> none or Stop
         try dump_syntax(path, stage, json)
     else
         return usage()
+
+# `lucid check --costs`: each place where the program pays for a count or a
+# copy. It needs the ownership pass, so an unbuilt feature stays an error.
+task check_costs(path: text, json: bool) -> none or Stop
+    let found = resolve.load(path, false)
+    var diags = found.diags
+    let file = found.file
+    if diags is empty and file is ast.File
+        let checked = check.check(file, found, true)
+        diags = checked.diags
+        var program = checked.program
+        if diags is empty
+            diags = mono.run(change program, true)
+        if diags is empty
+            ownership.run(change program, env.get("LUCID_NAIVE") is none)
+            show(ownership.render_costs(found.source, ownership.costs(program), json))
+            return none
+    try finish(found.source, diags, json)
+
+# `lucid check --unsafe`: each `unsafe` block and `extern` task, in file
+# order.
+task unsafe_sites(path: text, json: bool) -> none or Stop
+    let found = resolve.load(path, false)
+    var diags = found.diags
+    var sites: list[mir.UnsafeSite] = []
+    let file = found.file
+    if diags is empty and file is ast.File
+        let checked = check.check(file, found, true)
+        # As in `check`: an unbuilt feature is not an error in the program.
+        for d in checked.diags
+            if d.code != "E0901"
+                diags.push(d)
+        sites = checked.program.unsafe_sites
+    if diags is empty
+        show(ownership.render_unsafe(found.source, sites, json))
+        return none
+    try finish(found.source, diags, json)
+
+# Prints text that ends with a line break, if it is not empty.
+task show(out: text)
+    if out is not empty
+        print out[0..out.len() - 1]
 
 # `LUCID_DUMP=tokens` or `ast` under `lucid check`: one file, with no imports.
 task dump_syntax(path: text, stage: text, json: bool) -> none or Stop

@@ -119,26 +119,9 @@ task token(change out: Out, item: lexer.Token)
 public task resolved(found: resolve.Resolved) -> text
     var out = new_out()
     let source = found.source
-    out.line("Source")
-    out.count(source.files.len())
-    let grants = found.grants
-    if grants is none
-        out.atom("-")
-    else
-        out.count(grants.len())
-        for grant in grants
-            match grant
-                All -> out.atom("all")
-                Listed(items) ->
-                    out.atom("list")
-                    out.count(items.len())
-                    for item in items
-                        out.text(item)
+    out.source_head(found)
     out.depth += 1
-    for file in source.files
-        out.line("File")
-        out.text(file.path)
-        out.count(file.start)
+    out.files(source)
     for item in found.no_unsafe
         out.line("NoUnsafe")
         out.count(item.start)
@@ -682,6 +665,40 @@ task ints(change self: Out, values: list[int])
     self.count(values.len())
     for value in values
         self.count(value)
+
+task source_head(change self: Out, found: resolve.Resolved)
+    self.line("Source")
+    self.count(found.source.files.len())
+    let grants = found.grants
+    if grants is none
+        self.atom("-")
+    else
+        self.count(grants.len())
+        for grant in grants
+            match grant
+                All -> self.atom("all")
+                Listed(items) ->
+                    self.atom("list")
+                    self.count(items.len())
+                    for item in items
+                        self.text(item)
+
+task files(change self: Out, source: diag.Source)
+    for file in source.files
+        self.line("File")
+        self.text(file.path)
+        self.count(file.start)
+
+## The program after the ownership pass, which is what a backend reads. So it
+## holds the files, their text, and the grants.
+public task owned(p: mir.Program, found: resolve.Resolved) -> text
+    var out = new_out()
+    out.source_head(found)
+    out.text(found.source.text)
+    out.depth += 1
+    out.files(found.source)
+    out.depth -= 1
+    return "{out.finish()}\n{program(p)}"
 
 ## The program that the checker gives, or the monomorphizer.
 public task program(p: mir.Program) -> text

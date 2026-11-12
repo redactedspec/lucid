@@ -1,0 +1,1107 @@
+# The ownership pass, `--costs`, and `--unsafe`. Ports ownership.rs, and
+# the site lists of main.rs. Gives every counted value an owner, and makes
+# each count explicit in MIR. See "Counting" in mir.rs.
+#
+# An expression either borrows, or gives a count to what holds it. A value
+# that a borrow needs goes to a hidden `TempExpr`. A place that keeps a value
+# gets a count: a new value's own, a local's through `MoveExpr` if nothing
+# reads that local again, and otherwise a `RetainExpr`.
+#
+# With `moves` off this is the naive stage of docs/memory-model.md: every
+# new value goes to a temporary, and everything that keeps a value retains
+# it. Tests run both ways, since a program must not depend on an
+# optimization.
+#
+# The order of every new local follows the Rust pass, since the dumps show
+# them.
+
+use ./diag
+use ./mir
+
+task skip()
+    return
+
+# A child of a statement: a value, or a list of statements.
+choice Item
+    ValueItem(value: mir.Expr)
+    BodyItem(body: list[mir.Stmt])
+
+# The children of a statement, in the order that mir.rs visits them.
+task items(s: mir.Stmt) -> list[Item]
+    return match s
+        SetStmt(_, value) -> [ValueItem(value: value)]
+        BindStmt(_, value) -> [ValueItem(value: value)]
+        ReturnStmt(value) -> [ValueItem(value: value)]
+        ExitStmt(value) -> [ValueItem(value: value)]
+        FailStmt(value, _) -> [ValueItem(value: value)]
+        PrintStmt(value) -> [ValueItem(value: value)]
+        ExprStmt(value) -> [ValueItem(value: value)]
+        UpdateStmt(_, _, args, _) -> values_items(args)
+        BlockStmt(body) -> [BodyItem(body: body)]
+        IfStmt(branches, otherwise) -> branch_items(branches, otherwise)
+        WhileStmt(condition, body) -> [ValueItem(value: condition), BodyItem(body: body)]
+        ForStmt(_, start, end, _, body) -> [ValueItem(value: start), ValueItem(value: end), BodyItem(body: body)]
+        _ -> []
+
+task values_items(values: list[mir.Expr]) -> list[Item]
+    var out: list[Item] = []
+    for value in values
+        out.push(ValueItem(value: value))
+    return out
+
+task branch_items(branches: list[mir.Branch], otherwise: list[mir.Stmt]) -> list[Item]
+    var out: list[Item] = []
+    for branch in branches
+        out.push(ValueItem(value: branch.condition))
+        out.push(BodyItem(body: branch.body))
+    out.push(BodyItem(body: otherwise))
+    return out
+
+task item_value(item: Item) -> mir.Expr
+    match item
+        ValueItem(value) ->
+            return value
+        BodyItem(_) ->
+            return mir.Expr(kind: mir.NoneExpr, ty: mir.NoneTy, span: diag.span(0, 0))
+
+task item_body(item: Item) -> list[mir.Stmt]
+    match item
+        BodyItem(body) ->
+            return body
+        ValueItem(_) ->
+            return []
+
+# The same statement, with `done` in place of what `items` gave.
+task with_items(s: mir.Stmt, done: list[Item]) -> mir.Stmt
+    match s
+        SetStmt(local, _) ->
+            return mir.SetStmt(local: local, value: item_value(done[0]))
+        BindStmt(local, _) ->
+            return mir.BindStmt(local: local, value: item_value(done[0]))
+        ReturnStmt(_) ->
+            return mir.ReturnStmt(value: item_value(done[0]))
+        ExitStmt(_) ->
+            return mir.ExitStmt(value: item_value(done[0]))
+        FailStmt(_, span) ->
+            return mir.FailStmt(value: item_value(done[0]), span: span)
+        PrintStmt(_) ->
+            return mir.PrintStmt(value: item_value(done[0]))
+        ExprStmt(_) ->
+            return mir.ExprStmt(value: item_value(done[0]))
+        UpdateStmt(local, op, _, span) ->
+            var args: list[mir.Expr] = []
+            for item in done
+                args.push(item_value(item))
+            return mir.UpdateStmt(local: local, op: op, args: args, span: span)
+        BlockStmt(_) ->
+            return mir.BlockStmt(body: item_body(done[0]))
+        IfStmt(branches, _) ->
+            var walked: list[mir.Branch] = []
+            for i in 0..branches.len()
+                walked.push(mir.Branch(condition: item_value(done[2 * i]), body: item_body(done[2 * i + 1])))
+            return mir.IfStmt(branches: walked, otherwise: item_body(done[done.len() - 1]))
+        WhileStmt(_, _) ->
+            return mir.WhileStmt(condition: item_value(done[0]), body: item_body(done[1]))
+        ForStmt(local, _, _, inclusive, _) ->
+            return mir.ForStmt(local: local, start: item_value(done[0]), end: item_value(done[1]), inclusive: inclusive, body: item_body(done[2]))
+        _ ->
+            return s
+
+# Every statement and value inside some code, at any depth, including the
+# statements of a `SeqExpr`.
+type Nodes
+    stmts: list[mir.Stmt] = []
+    exprs: list[mir.Expr] = []
+
+task gather_stmts(change self: Nodes, body: list[mir.Stmt])
+    for s in body
+        self.stmts.push(s)
+        for item in items(s)
+            match item
+                ValueItem(value) ->
+                    self.gather_expr(value)
+                BodyItem(inner) ->
+                    self.gather_stmts(inner)
+
+task gather_expr(change self: Nodes, value: mir.Expr)
+    self.exprs.push(value)
+    match value.kind
+        SeqExpr(setup, inner) ->
+            self.gather_stmts(setup)
+            self.gather_expr(inner)
+        _ ->
+            for part in value.parts()
+                self.gather_expr(part)
+
+task nodes_of(body: list[mir.Stmt]) -> Nodes
+    var nodes = Nodes()
+    nodes.gather_stmts(body)
+    return nodes
+
+task nodes_in(value: mir.Expr) -> Nodes
+    var nodes = Nodes()
+    nodes.gather_expr(value)
+    return nodes
+
+## Gives every counted value of `program` an owner. With `moves` off, this is
+## the naive stage.
+public task run(change program: mir.Program, moves: bool)
+    var tasks = program.tasks
+    program.tasks = []
+    var takes: list[list[int]] = []
+    for i in 0..tasks.len()
+        # A task value's code owns its arguments in both stages, since a
+        # call through a value cannot know what it calls, by decision 183.
+        # Only that code is named `lambda` or has no name and takes any.
+        let name = tasks[i].name
+        let value_code = name == "lambda" or name is empty
+        if not moves and not value_code
+            tasks[i].takes = []
+        takes.push(tasks[i].takes)
+    for i in 0..tasks.len()
+        var t = tasks[i]
+        own_task(change t, takes, moves)
+        tasks[i] = t
+    program.tasks = tasks
+    var main = program.main
+    own_task(change main, takes, moves)
+    program.main = main
+
+task own_task(change t: mir.Task, takes: list[list[int]], moves: bool)
+    if body_exits(t.body)
+        var s = Settle(locals: t.locals, takes: takes)
+        let body = s.stmts(t.body)
+        t.body = body
+        t.locals = s.locals
+    if moves
+        borrow_locals(change t)
+    t.borrowed = bound(t.body)
+    let size = (t.locals.len() + 63) // 64 * 64
+    var o = Owners(moves: moves, params: t.params, borrowed: t.borrowed, owned: t.takes, takes: takes, locals: t.locals, live: bits(size))
+    t.locals = []
+    var body = o.walk(t.body)
+    while moves and o.changed
+        body = o.walk(body)
+    o.rewrite = true
+    body = o.walk(body)
+    t.body = body
+    t.locals = o.locals
+
+# True if a `return`, which a `try` left, sits inside a value of `body`.
+task body_exits(body: list[mir.Stmt]) -> bool
+    for s in body
+        for item in items(s)
+            match item
+                ValueItem(value) ->
+                    if exits_in(value)
+                        return true
+                BodyItem(inner) ->
+                    if body_exits(inner)
+                        return true
+    return false
+
+# True if a `return` sits inside `value`.
+task exits_in(value: mir.Expr) -> bool
+    let nodes = nodes_in(value)
+    for s in nodes.stmts
+        match s
+            ReturnStmt(_) ->
+                return true
+            _ ->
+                skip()
+    return false
+
+# A value that a record, a list, or a `take` parameter keeps has its count
+# outside any local until the keeper is done. So if one of those values can
+# return from the task, it and the ones before it run first, in order, each
+# into a local of its own, which the task's exit releases. If the statement
+# ends normally, it clears them.
+type Settle
+    locals: list[mir.Ty]
+    takes: list[list[int]]
+    # The counted locals made so far for the open statements.
+    made: list[int] = []
+
+type Settled
+    setup: list[mir.Stmt]
+    values: list[mir.Expr]
+
+task settle(change self: Settle, values: list[mir.Expr]) -> Settled
+    var count = 0
+    for i in 0..values.len()
+        if exits_in(values[i])
+            count = i + 1
+    var setup: list[mir.Stmt] = []
+    var out = values
+    for i in 0..count
+        let value = values[i]
+        # A slot number holds no count and runs nothing, and must stay a
+        # number.
+        match value.kind
+            IntExpr(_) ->
+                continue
+            _ ->
+                skip()
+        self.locals.push(value.ty)
+        let local = self.locals.len() - 1
+        if value.ty.is_counted()
+            self.made.push(local)
+        out[i] = mir.Expr(kind: mir.LocalExpr(local: local), ty: value.ty, span: value.span)
+        setup.push(mir.SetStmt(local: local, value: value))
+    return Settled(setup: setup, values: out)
+
+task stmts(change self: Settle, body: list[mir.Stmt]) -> list[mir.Stmt]
+    var out: list[mir.Stmt] = []
+    for s in body
+        let start = self.made.len()
+        var done = self.stmt_parts(s)
+        var setup: list[mir.Stmt] = []
+        match done
+            UpdateStmt(local, op, args, span) ->
+                let settled = self.settle(args)
+                setup = settled.setup
+                done = mir.UpdateStmt(local: local, op: op, args: settled.values, span: span)
+            _ ->
+                skip()
+        if setup is not empty or self.made.len() > start
+            setup.push(done)
+            for i in start..self.made.len()
+                setup.push(mir.ClearStmt(local: self.made[i]))
+            while self.made.len() > start
+                let gone = self.made.pop()
+            done = mir.BlockStmt(body: setup)
+        out.push(done)
+    return out
+
+task stmt_parts(change self: Settle, s: mir.Stmt) -> mir.Stmt
+    var done: list[Item] = []
+    for item in items(s)
+        match item
+            ValueItem(value) ->
+                done.push(ValueItem(value: self.expr(value)))
+            BodyItem(body) ->
+                done.push(BodyItem(body: self.stmts(body)))
+    return with_items(s, done)
+
+task expr(change self: Settle, value: mir.Expr) -> mir.Expr
+    var v = value
+    match value.kind
+        SeqExpr(setup, inner) ->
+            let done = self.stmts(setup)
+            let walked = self.expr(inner)
+            v.kind = mir.SeqExpr(setup: done, inner: walked)
+        _ ->
+            var walked: list[mir.Expr] = []
+            for part in value.parts()
+                walked.push(self.expr(part))
+            if walked is not empty
+                v = value.with_parts(walked)
+    # The parts that the value keeps, by position in `parts`.
+    var picked: list[int] = []
+    let parts = v.parts()
+    match v.kind
+        CallExpr(id, _, values) ->
+            if self.takes[id] is not empty
+                for i in 0..values.len()
+                    if not is_change(values[i])
+                        picked.push(i)
+        CallValueExpr(_, _) ->
+            picked = all_of(parts)
+        ListOfExpr(_) ->
+            picked = all_of(parts)
+        JoinExpr(_) ->
+            picked = all_of(parts)
+        MapOfExpr(_, _) ->
+            picked = all_of(parts)
+        NewExpr(_, _, _) ->
+            picked = all_of(parts)
+        ClosureExpr(_, _, _, _) ->
+            picked = all_of(parts)
+        _ ->
+            skip()
+    if picked is empty
+        return v
+    var chosen: list[mir.Expr] = []
+    for i in picked
+        chosen.push(parts[i])
+    let settled = self.settle(chosen)
+    if settled.setup is empty
+        return v
+    var placed = parts
+    for i in 0..picked.len()
+        placed[picked[i]] = settled.values[i]
+    let done = v.with_parts(placed)
+    return mir.Expr(kind: mir.SeqExpr(setup: settled.setup, inner: done), ty: v.ty, span: v.span)
+
+task all_of(values: list[mir.Expr]) -> list[int]
+    var out: list[int] = []
+    for i in 0..values.len()
+        out.push(i)
+    return out
+
+task is_change(value: mir.Expr) -> bool
+    return match value.kind
+        ChangeExpr(_) -> true
+        _ -> false
+
+task is_return(s: mir.Stmt) -> bool
+    return match s
+        ReturnStmt(_) -> true
+        _ -> false
+
+# The locals that `BindStmt` sets, in order.
+task bound(body: list[mir.Stmt]) -> list[int]
+    var out: list[int] = []
+    for s in nodes_of(body).stmts
+        match s
+            BindStmt(local, _) ->
+                insert_sorted(change out, local)
+            _ ->
+                skip()
+    return out
+
+# Adds `value` to the sorted `values`, unless it is there.
+task insert_sorted(change values: list[int], value: int)
+    var at = values.len()
+    while at > 0 and values[at - 1] > value
+        at -= 1
+    if at > 0 and values[at - 1] == value
+        return
+    values.push(value)
+    var i = values.len() - 1
+    while i > at
+        values[i] = values[i - 1]
+        i -= 1
+    values[at] = value
+
+# Finds locals that need no count, and gives them `BindStmt`. Such a local
+# only ever holds a path into a read parameter, or into another such local,
+# and nothing changes it. The caller keeps a read parameter alive and fixed
+# for the whole call, so what it holds stays valid.
+task borrow_locals(change t: mir.Task)
+    var can: list[bool] = []
+    for local in 0..t.locals.len()
+        can.push(local >= t.params and t.locals[local].is_counted())
+    let nodes = nodes_of(t.body)
+    var changed = true
+    while changed
+        changed = false
+        for value in nodes.exprs
+            match value.kind
+                ChangeExpr(local) ->
+                    if can[local]
+                        can[local] = false
+                        changed = true
+                _ ->
+                    skip()
+        for s in nodes.stmts
+            var struck = -1
+            match s
+                SetStmt(local, value) ->
+                    if can[local] and not is_path(value, can, t)
+                        struck = local
+                UpdateStmt(local, _, _, _) ->
+                    struck = local
+                BindStmt(local, _) ->
+                    struck = local
+                _ ->
+                    skip()
+            if struck >= 0 and can[struck]
+                can[struck] = false
+                changed = true
+    var any_bound = false
+    for flag in can
+        any_bound = any_bound or flag
+    if any_bound
+        t.body = bind_stmts(t.body, can)
+
+# True if `value` is a path into something that stays valid.
+task is_path(value: mir.Expr, can: list[bool], t: mir.Task) -> bool
+    match value.kind
+        LocalExpr(local) ->
+            if local < t.params
+                return local not in t.changes and local not in t.takes
+            return can[local]
+        FieldExpr(inner, _) ->
+            return is_path(inner, can, t)
+        ListGetExpr(inner, _) ->
+            return is_path(inner, can, t)
+        _ ->
+            return false
+
+# Rewrites what `borrow_locals` left.
+task bind_stmts(body: list[mir.Stmt], can: list[bool]) -> list[mir.Stmt]
+    var out: list[mir.Stmt] = []
+    for s in body
+        var done: list[Item] = []
+        for item in items(s)
+            match item
+                ValueItem(value) ->
+                    done.push(ValueItem(value: bind_expr(value, can)))
+                BodyItem(inner) ->
+                    done.push(BodyItem(body: bind_stmts(inner, can)))
+        let walked = with_items(s, done)
+        match walked
+            SetStmt(local, value) ->
+                if can[local]
+                    out.push(mir.BindStmt(local: local, value: value))
+                else
+                    out.push(walked)
+            ClearStmt(local) ->
+                if can[local]
+                    out.push(mir.BlockStmt(body: []))
+                else
+                    out.push(walked)
+            _ ->
+                out.push(walked)
+    return out
+
+task bind_expr(value: mir.Expr, can: list[bool]) -> mir.Expr
+    match value.kind
+        SeqExpr(setup, inner) ->
+            var v = value
+            v.kind = mir.SeqExpr(setup: bind_stmts(setup, can), inner: bind_expr(inner, can))
+            return v
+        _ ->
+            let parts = value.parts()
+            if parts is empty
+                return value
+            var walked: list[mir.Expr] = []
+            for part in parts
+                walked.push(bind_expr(part, can))
+            return value.with_parts(walked)
+
+# A set of locals, as flags.
+task bits(size: int) -> list[bool]
+    var out: list[bool] = []
+    for i in 0..size
+        out.push(false)
+    return out
+
+# True for an expression that makes a new value, which comes with a count.
+task is_new(value: mir.Expr) -> bool
+    return match value.kind
+        TextExpr(_) -> true
+        ToTextExpr(_) -> true
+        TextQuoteExpr(_) -> true
+        JoinExpr(_) -> true
+        CallExpr(_, _, _) -> true
+        CallValueExpr(_, _) -> true
+        ForeignExpr(_, _) -> true
+        ClosureExpr(_, _, _, _) -> true
+        TextSliceExpr(_, _, _) -> true
+        ListSliceExpr(_, _, _) -> true
+        TextCharAtExpr(_, _) -> true
+        TextBytesExpr(_) -> true
+        ListOfExpr(_) -> true
+        MapOfExpr(_, _) -> true
+        SetOfExpr(_, _) -> true
+        NewExpr(_, _, _) -> true
+        _ -> false
+
+# True for a value in static data. Its count never matters, so a borrow
+# needs no owner for it, and a place may keep it with no `RetainExpr`.
+task is_static(value: mir.Expr) -> bool
+    return match value.kind
+        TextExpr(_) -> true
+        NewExpr(_, _, fields) -> fields is empty
+        _ -> false
+
+# Counts each read of a local, including `ChangeExpr` and `UpdateStmt`.
+task count_reads(change reads: map[int, int], value: mir.Expr)
+    let nodes = nodes_in(value)
+    for e in nodes.exprs
+        match e.kind
+            LocalExpr(local) ->
+                count_read(change reads, local)
+            ChangeExpr(local) ->
+                count_read(change reads, local)
+            _ ->
+                skip()
+    for s in nodes.stmts
+        match s
+            UpdateStmt(local, _, _, _) ->
+                count_read(change reads, local)
+            _ ->
+                skip()
+
+task count_read(change reads: map[int, int], local: int)
+    if local in reads
+        reads[local] = reads[local] + 1
+    else
+        reads[local] = 1
+
+task reads_of(value: mir.Expr) -> map[int, int]
+    var reads: map[int, int] = {}
+    count_reads(change reads, value)
+    return reads
+
+# What is live at a `break` and at a `continue` of an open loop.
+type LoopExit
+    after: list[bool]
+    head: list[bool]
+
+type Owners
+    moves: bool
+    params: int
+    # The locals that hold no count, in order.
+    borrowed: list[int]
+    # The `take` parameters of this task, whose count it holds on entry.
+    owned: list[int]
+    takes: list[list[int]]
+    locals: list[mir.Ty]
+    # False while finding which locals are live at the head of each loop.
+    rewrite: bool = false
+    # Locals read before they are written, from this point on. The walk runs
+    # backward, one statement at a time.
+    live: list[bool]
+    exits: list[LoopExit] = []
+    # What is live at the head of each loop, by order of walking.
+    heads: list[list[bool]] = []
+    next_loop: int = 0
+    changed: bool = false
+    # What the statement in progress reads, and how often.
+    reads: map[int, int] = {}
+    # True if that statement may move a local that it reads once, and that
+    # nothing reads after it. A local read twice in one statement may be
+    # borrowed by the other read, and that borrow must stay valid to the
+    # end.
+    moving: bool = false
+    # The temporaries of the statement in progress.
+    temps: list[int] = []
+
+task live_has(self: Owners, local: int) -> bool
+    return local < self.live.len() and self.live[local]
+
+task mark(change self: Owners, local: int)
+    if local < self.live.len()
+        self.live[local] = true
+
+task unmark(change self: Owners, local: int)
+    if local < self.live.len()
+        self.live[local] = false
+
+task mark_all(change self: Owners, other: list[bool])
+    for i in 0..other.len()
+        if other[i]
+            self.live[i] = true
+
+task clear_live(change self: Owners)
+    let size = self.live.len()
+    self.live = bits(size)
+
+# Walks the whole task once. Each loop head starts from what the last walk
+# found, so repeating until nothing changes finds what is live. Nested loops
+# cost one walk per level of depth, not 2^depth.
+task walk(change self: Owners, body: list[mir.Stmt]) -> list[mir.Stmt]
+    self.changed = false
+    self.next_loop = 0
+    self.clear_live()
+    return self.flow(body)
+
+# Statements run forward, so a walk of what is live runs backward.
+task flow(change self: Owners, body: list[mir.Stmt]) -> list[mir.Stmt]
+    var out = body
+    var i = body.len()
+    while i > 0
+        i -= 1
+        let start = self.temps.len()
+        var done = self.flow_stmt(body[i])
+        if self.temps.len() > start and not is_return(done)
+            var block = [done]
+            var j = self.temps.len()
+            while j > start
+                j -= 1
+                block.push(mir.ClearStmt(local: self.temps[j]))
+            done = mir.BlockStmt(body: block)
+        while self.temps.len() > start
+            let gone = self.temps.pop()
+        if self.rewrite
+            out[i] = done
+    return out
+
+task flow_stmt(change self: Owners, s: mir.Stmt) -> mir.Stmt
+    match s
+        SetStmt(local, value) ->
+            self.unmark(local)
+            self.start(reads_of(value))
+            var v = value
+            if self.rewrite
+                v = self.append(local, v)
+                v = self.give(v)
+            self.finish()
+            return mir.SetStmt(local: local, value: v)
+        BindStmt(local, value) ->
+            self.unmark(local)
+            let v = self.borrow_one(value)
+            return mir.BindStmt(local: local, value: v)
+        ReturnStmt(value) ->
+            self.clear_live()
+            let v = self.give_one(value)
+            return mir.ReturnStmt(value: v)
+        ExitStmt(value) ->
+            self.clear_live()
+            let v = self.borrow_one(value)
+            return mir.ExitStmt(value: v)
+        FailStmt(value, span) ->
+            self.clear_live()
+            let v = self.borrow_one(value)
+            return mir.FailStmt(value: v, span: span)
+        PrintStmt(value) ->
+            let v = self.borrow_one(value)
+            return mir.PrintStmt(value: v)
+        ExprStmt(value) ->
+            let v = self.borrow_one(value)
+            return mir.ExprStmt(value: v)
+        UpdateStmt(local, op, args, span) ->
+            var reads: map[int, int] = {}
+            count_read(change reads, local)
+            for arg in args
+                count_reads(change reads, arg)
+            self.start(reads)
+            let walked = self.update_args(op, args)
+            self.finish()
+            return mir.UpdateStmt(local: local, op: op, args: walked, span: span)
+        ClearStmt(local) ->
+            self.unmark(local)
+            return s
+        BlockStmt(body) ->
+            let walked = self.flow(body)
+            return mir.BlockStmt(body: walked)
+        IfStmt(branches, otherwise) ->
+            let after = self.live
+            let other = self.flow(otherwise)
+            var done = branches
+            var i = branches.len()
+            while i > 0
+                i -= 1
+                let next = self.live
+                self.live = after
+                let then_body = self.flow(branches[i].body)
+                self.mark_all(next)
+                let condition = self.borrow_one(branches[i].condition)
+                done[i] = mir.Branch(condition: condition, body: then_body)
+            return mir.IfStmt(branches: done, otherwise: other)
+        WhileStmt(condition, body) ->
+            let head = self.enter_loop()
+            let walked = self.flow(body)
+            let after = self.leave_loop()
+            self.mark_all(after)
+            let c = self.borrow_one(condition)
+            self.end_loop(head)
+            return mir.WhileStmt(condition: c, body: walked)
+        ForStmt(local, start, end, inclusive, body) ->
+            let head = self.enter_loop()
+            let walked = self.flow(body)
+            let after = self.leave_loop()
+            self.mark_all(after)
+            self.end_loop(head)
+            let e = self.borrow_one(end)
+            let a = self.borrow_one(start)
+            return mir.ForStmt(local: local, start: a, end: e, inclusive: inclusive, body: walked)
+        BreakStmt ->
+            let found = self.exits[self.exits.len() - 1].after
+            self.live = found
+            return s
+        ContinueStmt ->
+            let found = self.exits[self.exits.len() - 1].head
+            self.live = found
+            return s
+        PlaceholderStmt(_) ->
+            self.clear_live()
+            return s
+        TrapStmt(_, _) ->
+            self.clear_live()
+            return s
+        UnreachableStmt ->
+            self.clear_live()
+            return s
+        _ ->
+            return s
+
+# Sets up the body of a loop, whose end flows to the loop's head.
+task enter_loop(change self: Owners) -> int
+    let head = self.next_loop
+    self.next_loop += 1
+    if head == self.heads.len()
+        let size = self.live.len()
+        self.heads.push(bits(size))
+    let found = self.heads[head]
+    self.exits.push(LoopExit(after: self.live, head: found))
+    self.live = found
+    return head
+
+# Gives what is live after the loop.
+task leave_loop(change self: Owners) -> list[bool]
+    let last = self.exits.pop()
+    if last is LoopExit
+        return last.after
+    return []
+
+task end_loop(change self: Owners, head: int)
+    if self.heads[head] != self.live
+        let found = self.live
+        self.heads[head] = found
+        self.changed = true
+
+task give_one(change self: Owners, value: mir.Expr) -> mir.Expr
+    self.start(reads_of(value))
+    var v = value
+    if self.rewrite
+        v = self.give(value)
+    self.finish()
+    return v
+
+task borrow_one(change self: Owners, value: mir.Expr) -> mir.Expr
+    self.start(reads_of(value))
+    var v = value
+    if self.rewrite
+        v = self.expr(value)
+    self.finish()
+    return v
+
+# Starts one statement. `self.live` holds what is live after it.
+task start(change self: Owners, reads: map[int, int])
+    self.reads = reads
+    self.moving = self.rewrite and self.moves
+
+# Ends one statement, with `self.live` as what is live before it.
+task finish(change self: Owners)
+    self.moving = false
+    let reads = self.reads
+    self.reads = {}
+    for local in reads
+        self.mark(local)
+
+task update_args(change self: Owners, op: text, args: list[mir.Expr]) -> list[mir.Expr]
+    if not self.rewrite
+        return args
+    var out: list[mir.Expr] = []
+    for arg in args
+        # `MapRemove` only looks at its key, and `Put` hands back a count
+        # that the local already holds.
+        if op == "MapRemove" or op == "Put"
+            out.push(self.expr(arg))
+        else
+            out.push(self.give(arg))
+    return out
+
+task read_once(self: Owners, local: int) -> bool
+    return local in self.reads and self.reads[local] == 1
+
+task can_move(self: Owners, local: int) -> bool
+    return self.moving and local >= self.params and self.read_once(local) and not self.live_has(local) and local not in self.borrowed
+
+# The local that `value` reads, or -1.
+task local_of(value: mir.Expr) -> int
+    return match value.kind
+        LocalExpr(local) -> local
+        _ -> -1
+
+# `value` with its first part, a join of `local`, as a move of it.
+task move_first(value: mir.Expr, local: int) -> mir.Expr
+    match value.kind
+        JoinExpr(parts) ->
+            var moved = parts
+            moved[0] = mir.Expr(kind: mir.MoveExpr(local: local), ty: parts[0].ty, span: parts[0].span)
+            var out = value
+            out.kind = mir.JoinExpr(values: moved)
+            return out
+        _ ->
+            return value
+
+# The first part of a join, or -1 if `value` is no join of a local.
+task join_first(value: mir.Expr) -> int
+    match value.kind
+        JoinExpr(parts) ->
+            if parts is empty
+                return -1
+            return local_of(parts[0])
+        _ ->
+            return -1
+
+# `t = "{t}..."` moves `t` into the join, so the text may grow in place, by
+# decision 222. The `SetStmt` writes `t` next, and a local that `SetStmt`
+# writes holds its own count: a `change` parameter holds the caller's, and a
+# local that `Take` filled holds the slot's.
+task append(self: Owners, local: int, value: mir.Expr) -> mir.Expr
+    if self.moving and self.read_once(local) and join_first(value) == local
+        return move_first(value, local)
+    return value
+
+# Makes `value` give a count to what keeps it.
+task give(change self: Owners, value: mir.Expr) -> mir.Expr
+    if not value.ty.is_counted()
+        return self.expr(value)
+    # A `take` parameter is read once, by the move that starts its task.
+    let read = local_of(value)
+    if read >= 0 and read in self.owned
+        return value
+    var v = value
+    if self.moves
+        let first = join_first(v)
+        if first >= 0 and self.can_move(first)
+            v = move_first(v, first)
+        if is_new(v)
+            return self.parts_of(v)
+        match v.kind
+            LocalExpr(local) ->
+                if self.can_move(local)
+                    v.kind = mir.MoveExpr(local: local)
+                    return v
+            IfExpr(condition, yes, otherwise) ->
+                let c = self.expr(condition)
+                let a = self.give(yes)
+                let b = self.give(otherwise)
+                v.kind = mir.IfExpr(condition: c, yes: a, otherwise: b)
+                return v
+            SeqExpr(setup, inner) ->
+                let s = self.nested(setup)
+                let i = self.give(inner)
+                v.kind = mir.SeqExpr(setup: s, inner: i)
+                return v
+            _ ->
+                skip()
+    let walked = self.expr(v)
+    return mir.Expr(kind: mir.RetainExpr(inner: walked), ty: v.ty, span: v.span)
+
+# Statements inside an expression. What they hold may be read later in the
+# same statement, so they move nothing.
+task nested(change self: Owners, body: list[mir.Stmt]) -> list[mir.Stmt]
+    let moving = self.moving
+    self.moving = false
+    let out = self.visit_stmts(body)
+    self.moving = moving
+    return out
+
+# Lowers the parts of `value`, giving a count to each one it keeps.
+task parts_of(change self: Owners, value: mir.Expr) -> mir.Expr
+    var v = value
+    match value.kind
+        SeqExpr(setup, inner) ->
+            let s = self.nested(setup)
+            let i = self.expr(inner)
+            v.kind = mir.SeqExpr(setup: s, inner: i)
+            return v
+        _ ->
+            skip()
+    let parts = value.parts()
+    if parts is empty
+        return value
+    var keeps: list[bool] = []
+    match value.kind
+        CallExpr(id, _, values) ->
+            for i in 0..values.len()
+                keeps.push(i in self.takes[id])
+        CallValueExpr(_, _) ->
+            # A task value takes every argument, by decision 183.
+            keeps = bits(parts.len())
+            for i in 1..parts.len()
+                keeps[i] = true
+        ListOfExpr(_) ->
+            keeps = all_kept(parts.len())
+        MapOfExpr(_, _) ->
+            keeps = all_kept(parts.len())
+        NewExpr(_, _, _) ->
+            keeps = all_kept(parts.len())
+        ClosureExpr(_, _, _, _) ->
+            keeps = all_kept(parts.len())
+        _ ->
+            keeps = bits(parts.len())
+    var walked: list[mir.Expr] = []
+    for i in 0..parts.len()
+        if keeps[i]
+            walked.push(self.give(parts[i]))
+        else
+            walked.push(self.expr(parts[i]))
+    return value.with_parts(walked)
+
+task all_kept(size: int) -> list[bool]
+    var out: list[bool] = []
+    for i in 0..size
+        out.push(true)
+    return out
+
+# Statements inside an expression, with no walk of what is live.
+task visit_stmts(change self: Owners, body: list[mir.Stmt]) -> list[mir.Stmt]
+    var out: list[mir.Stmt] = []
+    for s in body
+        match s
+            SetStmt(local, value) ->
+                let v = self.give(value)
+                out.push(mir.SetStmt(local: local, value: v))
+            ReturnStmt(value) ->
+                let v = self.give(value)
+                out.push(mir.ReturnStmt(value: v))
+            UpdateStmt(local, op, args, span) ->
+                let walked = self.update_args(op, args)
+                out.push(mir.UpdateStmt(local: local, op: op, args: walked, span: span))
+            _ ->
+                var done: list[Item] = []
+                for item in items(s)
+                    match item
+                        ValueItem(value) ->
+                            done.push(ValueItem(value: self.expr(value)))
+                        BodyItem(inner) ->
+                            done.push(BodyItem(body: self.visit_stmts(inner)))
+                out.push(with_items(s, done))
+    return out
+
+# Lowers a value that is only borrowed.
+task expr(change self: Owners, value: mir.Expr) -> mir.Expr
+    let v = self.parts_of(value)
+    if is_new(v) and v.ty.is_counted() and not is_static(v)
+        self.locals.push(v.ty)
+        let local = self.locals.len() - 1
+        self.temps.push(local)
+        return mir.Expr(kind: mir.TempExpr(local: local, inner: v), ty: v.ty, span: v.span)
+    return v
+
+## A place where a program pays for a value being held twice.
+public type Cost
+    start: int
+    kind: text
+    ty: text
+
+# True if `a` sorts before `b`: by place, then kind, then type.
+task before(a: Cost, b: Cost) -> bool
+    if a.start != b.start
+        return a.start < b.start
+    if a.kind != b.kind
+        return a.kind < b.kind
+    return a.ty < b.ty
+
+# Adds `cost` to the sorted `found`, unless it is there.
+task insert_cost(change found: list[Cost], cost: Cost)
+    var at = found.len()
+    while at > 0 and before(cost, found[at - 1])
+        at -= 1
+    if at > 0 and found[at - 1] == cost
+        return
+    found.push(cost)
+    var i = found.len() - 1
+    while i > at
+        found[i] = found[i - 1]
+        i -= 1
+    found[at] = cost
+
+## Lists each `RetainExpr` of `program`, which `run` has lowered. A count on
+## a value that a later write changes is a copy. A derived task has its own
+## code at the span of its first use, so it stays out, since no source line
+## shows it.
+public task costs(program: mir.Program) -> list[Cost]
+    var takes: list[list[int]] = []
+    for t in program.tasks
+        takes.push(t.takes)
+    var found: list[Cost] = []
+    for t in program.tasks
+        task_costs(change found, t, takes)
+    task_costs(change found, program.main, takes)
+    var kept: list[Cost] = []
+    for cost in found
+        var shadowed = false
+        if cost.kind != "copy"
+            for other in found
+                if other.kind == "copy" and other.start == cost.start and other.ty == cost.ty
+                    shadowed = true
+        if not shadowed
+            kept.push(cost)
+    return kept
+
+task task_costs(change found: list[Cost], t: mir.Task, takes: list[list[int]])
+    let nodes = nodes_of(t.body)
+    # Each local that `UpdateStmt` or a `change` argument writes.
+    var written = bits(t.locals.len())
+    for value in nodes.exprs
+        match value.kind
+            ChangeExpr(local) ->
+                written[local] = true
+            _ ->
+                skip()
+    for s in nodes.stmts
+        match s
+            UpdateStmt(local, _, _, _) ->
+                written[local] = true
+            _ ->
+                skip()
+    for value in nodes.exprs
+        if is_retain(value)
+            add_cost(change found, t, "count", value)
+        match value.kind
+            CallExpr(id, _, values) ->
+                for param in 0..values.len()
+                    if param in takes[id] and is_retain(values[param])
+                        add_cost(change found, t, "copy", values[param])
+            CallValueExpr(_, values) ->
+                # A task value takes every argument, by decision 183.
+                for arg in values
+                    if is_retain(arg)
+                        add_cost(change found, t, "copy", arg)
+            _ ->
+                skip()
+    for s in nodes.stmts
+        match s
+            SetStmt(local, value) ->
+                if local >= t.params and written[local] and is_retain(value)
+                    add_cost(change found, t, "copy", value)
+            _ ->
+                skip()
+
+task is_retain(value: mir.Expr) -> bool
+    return match value.kind
+        RetainExpr(_) -> true
+        _ -> false
+
+task add_cost(change found: list[Cost], t: mir.Task, kind: text, value: mir.Expr)
+    if value.span != t.span
+        insert_cost(change found, Cost(start: value.span.start, kind: kind, ty: value.ty.name()))
+
+## Renders `costs` the way `lucid check` renders errors.
+public task render_costs(source: diag.Source, costs: list[Cost], json: bool) -> text
+    let lines = diag.lines(source)
+    var items: list[text] = []
+    for cost in costs
+        let at = lines.place(cost.start)
+        # `std` ships with the compiler, so its sites are not the program's
+        # to fix.
+        if at.file.starts_with("@std/")
+            continue
+        let meaning = if cost.kind == "copy" then "is held twice, so the next write copies it" else "gets one more count here"
+        let ty = diag.plain(cost.ty)
+        if json
+            items.push("{{\"kind\":\"{cost.kind}\",\"type\":{diag.json_string(ty)},\"file\":{diag.json_string(at.file)},\"line\":{at.line},\"column\":{at.column}}}")
+        else
+            items.push("{at.file}:{at.line}:{at.column}: {cost.kind}: this `{ty}` {meaning}\n")
+    return listing(items, json)
+
+## Renders each `unsafe` block and `extern` task, in file order, but those
+## of `std`, which are not the program's to audit.
+public task render_unsafe(source: diag.Source, sites: list[mir.UnsafeSite], json: bool) -> text
+    var sorted: list[mir.UnsafeSite] = []
+    for site in sites
+        sorted.push(site)
+        var i = sorted.len() - 1
+        while i > 0 and sorted[i - 1].span.start > site.span.start
+            sorted[i] = sorted[i - 1]
+            i -= 1
+        sorted[i] = site
+    let lines = diag.lines(source)
+    var items: list[text] = []
+    for site in sorted
+        let at = lines.place(site.span.start)
+        if at.file.starts_with("@std/")
+            continue
+        if json
+            items.push("{{\"kind\":\"{site.kind}\",\"file\":{diag.json_string(at.file)},\"line\":{at.line},\"column\":{at.column}}}")
+        else
+            items.push("{at.file}:{at.line}:{at.column}: unsafe: {site.kind}\n")
+    return listing(items, json)
+
+# Text lines one after another, or JSON items in a list.
+task listing(items: list[text], json: bool) -> text
+    var out = ""
+    for i in 0..items.len()
+        if json and i > 0
+            out = "{out},"
+        out = "{out}{items[i]}"
+    return if json then "[{out}]\n" else out

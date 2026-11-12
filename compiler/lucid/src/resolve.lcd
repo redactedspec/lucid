@@ -466,7 +466,7 @@ task read_lock(change self: Loader, path: text)
             self.lock[parts[0]] = Locked(version: parts[1], hash: parts[2])
             continue
         if base < 0
-            base = self.source.add_file(path, content.bytes())
+            base = self.source.add_text(path, content)
         let span = diag.span(base + start, base + start + kept.bytes().len())
         var d = diag.new("E0338", "a line of `lucid.lock` must be `NAME VERSION SHA256`", span)
         d.notes.push("delete the line, and the next command writes it again")
@@ -552,7 +552,7 @@ task load_file(change self: Loader, path: text, run: bool) -> ast.File?
         self.modules[last].key = [file_stem(entry, windows)]
     # The prelude is a file of its own, so that a trap in its code has a place.
     let text = prelude()
-    let base = self.source.add_file("@std/prelude.lcd", text.bytes())
+    let base = self.source.add_text("@std/prelude.lcd", text)
     return join(self.modules, base, text, library, change self.diags)
 
 # Reports each registry dependency that `lucid.lock` and the cache do not
@@ -653,8 +653,8 @@ public task read_into(change source: diag.Source, change diags: list[diag.Diagno
                 let base = source.add_file(path, bytes[0..valid])
                 diags.push(diag.new("E0002", "file is not valid UTF-8", diag.span(base + valid, base + valid)))
                 return ReadFile(base: -1, bytes: [], text: "")
-            let base = source.add_file(path, bytes)
             let content = fs.read_text(real) else ""
+            let base = source.add_text(path, content)
             return ReadFile(base: base, bytes: bytes, text: content)
         e: fs.FileError ->
             let gone = source.add_file(path, [])

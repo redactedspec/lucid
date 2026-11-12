@@ -50,6 +50,9 @@ public type SourceFile
 public type Source
     bytes: list[byte]
     files: list[SourceFile]
+    # The same files as text, which only `add_text` keeps, for the `owned`
+    # dump.
+    text: text = ""
 
 ## A source of one file.
 public task one(path: text, bytes: list[byte]) -> Source
@@ -66,6 +69,12 @@ public task add_file(change self: Source, path: text, bytes: list[byte]) -> int
     for b in bytes
         self.bytes.push(b)
     self.bytes.push(10)
+    return start
+
+## Adds a file of valid text, as `add_file` does, and keeps its text.
+public task add_text(change self: Source, path: text, content: text) -> int
+    let start = self.add_file(path, content.bytes())
+    self.text = "{self.text}{content}\n"
     return start
 
 ## The position in `files` of the file that holds a byte offset.
