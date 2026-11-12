@@ -769,6 +769,15 @@ Decisions 214 to 220. Researched 2026-11-08.
 
 Sources: [Perfectly Reproducible, Verified Go Toolchains](https://go.dev/blog/rebuild), [verifying Go reproducible builds](https://www.agwa.name/blog/post/verifying_go_reproducible_builds), [rustc-dev-guide: what bootstrapping does](https://rustc-dev-guide.rust-lang.org/building/bootstrapping/what-bootstrapping-does.html), [msvcpp-normalize-pe technical details](https://msvcpp-normalize-pe.readthedocs.io/en/latest/technical-details.html), [lld-link /Brepro review](https://reviews.llvm.org/D46966?id=147146), [Intel forum on reproducible builds](https://community.intel.com/t5/Intel-Fortran-Compiler/Reproducible-build/m-p/1227457), [Goodbye to the C++ Implementation of Zig](https://ziglang.org/news/goodbye-cpp/), [Zig reproduced without binaries](https://git.jakstys.lt/motiejus/jakstys.lt/src/commit/6f435ec11db80dcf4f795bf1d7f6339a125f48ed/content/log/2024/zig-reproduced-without-binaries.md).
 
+## Release (M10)
+
+Decisions 227 to 230. Written 2026-11-12.
+
+- **Version flags.** From memory, not read for this entry: `rustc --version`, `cargo --version`, `node --version`, and `python --version` each print the version on one line, and Go uses the subcommand `go version`. Level: None, judgment from common practice.
+- **Linux program size.** Measured at M8 step 5: a built Linux program is about 6 MB, of which code is 363 KB, and the rest is debug sections. Native traces use the program's call-site tables, and the runtime holds no DWARF reader, checked by search 2026-11-12. That `--strip-debug` keeps the symbol table is from memory of the GNU `ld` manual. Level: Measured size, the flag from memory, to be measured at the build step.
+- **Backend library.** Measured 2026-11-12: the release backend library is 77 MB on Windows, at `target/release/build/lucid_backend-*/out/backend/release/lucid_backend.lib`, and the release `lucid.exe` is 37 MB. So holding the library inside every `lucid` would triple its size for a use only the compiler's own build needs, which supports decision 229.
+- **Firefox frames.** Not checked: Firefox is not installed on the owner's machine, nor in WSL, on 2026-11-12. See decision 230.
+
 ## Open research
 
 | Topic | Needed by |

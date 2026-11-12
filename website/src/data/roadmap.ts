@@ -109,6 +109,22 @@ export const milestones: Milestone[] = [
       { text: 'Fixed point of three builds, and the bootstrap path', done: true },
     ],
   },
+  {
+    id: 'M10',
+    title: 'Release readiness',
+    status: 'active',
+    summary: 'Version 1.0.0: a deep review and its fixes, a version flag, smaller Linux programs, a Firefox check of the web loader, and written release steps.',
+    exit: '`lucid --version` prints `lucid 1.0.0` on Windows and Linux, and every test passes on both.',
+    steps: [
+      { text: 'Deep review of the M9 work, and its fixes', done: false },
+      { text: 'Version 1.0.0 and `lucid --version`', done: false },
+      { text: 'Linux programs without debug sections', done: false },
+      { text: 'Web loader checked in Firefox', done: false },
+      { text: 'Release steps, with a hash of each binary', done: false },
+      { text: 'License review', done: false },
+      { text: 'First public release', done: false },
+    ],
+  },
 ];
 
 export const later =

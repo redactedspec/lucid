@@ -148,6 +148,20 @@ Started after the version 1.0 promise. Designed by decisions 214 to 220, see "Se
 
 **Exit:** the Lucid-written compiler builds itself. A second build from that output is byte-identical.
 
+## M10: Release readiness
+
+Started after M9. Designed by decisions 227 to 230. No language change. Build in this order:
+
+- [ ] `/code-review ultra` over the M9 commits and the M5 commits held for it, run by the owner, then fixes
+- [ ] Version 1.0.0 in every crate, and `lucid --version`, by decision 227
+- [ ] Linux programs linked without debug sections, by decision 228
+- [ ] The web loader checked in Firefox, by decision 230. Installing Firefox needs the owner's approval
+- [ ] Release steps in `compiler.md`: build on Windows and in WSL, run every test, and record the SHA-256 of each binary, by decision 229
+- [ ] License review, by the owner, before any public release
+- [ ] Push to `origin`, which deploys the site, by the owner
+
+**Exit:** `lucid --version` prints `lucid 1.0.0` on Windows and Linux, every test passes on both, and each finding of the ultra review is fixed or answered in `decisions.md`.
+
 ## Later, not planned
 
-macOS, by decision 205. Text from a `list[byte]` in `std`, so the Lucid compiler takes the `std` files held inside the backend in place of `LUCID_STD`, by decision 226. The Lucid compiler for every command, then deleting the Rust front end, by decisions 214 and 219. `shared` and `weak`, by decision 213. Native backend in Lucid, LLVM release backend, plain types stored inline, literal types, compile-time evaluation.
+macOS, by decision 205. Text from a `list[byte]` in `std`, so the Lucid compiler takes the `std` files held inside the backend in place of `LUCID_STD`, by decision 226. The Lucid compiler for every command, then the `stage0.txt` pin, then deleting the Rust front end, by decisions 214, 219, and 229. Safari, by decision 230. `shared` and `weak`, by decision 213. Native backend in Lucid, LLVM release backend, plain types stored inline, literal types, compile-time evaluation.
