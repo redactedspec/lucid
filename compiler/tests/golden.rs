@@ -1117,7 +1117,7 @@ fn web_runtime_loads() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("cannot start node, which web tests need");
-    let wasm = include_bytes!(env!("LUCID_RT_WASM"));
+    let wasm = lucid_backend::wasm::RUNTIME;
     io::Write::write_all(&mut node.stdin.take().expect("piped"), wasm).expect("cannot write");
     let output = node.wait_with_output().expect("node failed");
     assert!(output.status.success(), "{}", text(&output.stderr));

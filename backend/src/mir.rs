@@ -1,7 +1,6 @@
 //! MIR: typed, structured, and free of names. Both backends read only this.
 //! See "Key decision" in docs/compiler.md.
 
-use crate::ast::BinaryOp;
 use crate::diag::Span;
 use std::collections::HashMap;
 
@@ -66,6 +65,35 @@ pub enum Ty {
     Param(&'static str, usize),
     /// Already reported. Hides follow-on errors, and never reaches a backend.
     Error,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BinaryOp {
+    /// `x else y`
+    Fallback,
+    Or,
+    And,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    In,
+    NotIn,
+    Range,
+    RangeInclusive,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    FloorDiv,
+    Rem,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
 }
 
 /// See `Ty::too_large`.

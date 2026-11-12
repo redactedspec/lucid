@@ -420,34 +420,7 @@ pub enum UnaryOp {
     BitNot,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum BinaryOp {
-    /// `x else y`
-    Fallback,
-    Or,
-    And,
-    Eq,
-    Ne,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-    In,
-    NotIn,
-    Range,
-    RangeInclusive,
-    Add,
-    Sub,
-    Mul,
-    Div,
-    FloorDiv,
-    Rem,
-    BitAnd,
-    BitOr,
-    BitXor,
-    Shl,
-    Shr,
-}
+pub use crate::mir::BinaryOp;
 
 pub enum IsTarget {
     None,

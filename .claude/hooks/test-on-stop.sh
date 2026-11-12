@@ -5,7 +5,7 @@ grep -q '"stop_hook_active": *true' && exit 0
 cd "$CLAUDE_PROJECT_DIR" || exit 0
 # Nothing that tests read has changed since the last commit, untracked files
 # included, so the tests would give what they gave then.
-code="compiler runtime std tests examples tools Cargo.toml Cargo.lock"
+code="backend compiler runtime std tests examples tools Cargo.toml Cargo.lock"
 [ -z "$(git status --porcelain --untracked-files=all -- $code)" ] && exit 0
 # stage_dumps_are_stable takes over a minute, so it runs by hand before a
 # commit that touches compiler/lucid or the dumps. See docs/claude-code.md.

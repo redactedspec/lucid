@@ -767,7 +767,7 @@ impl Loader {
                 let message = format!("`{}` needs the `{permission}` permission", child.name);
                 let note = format!("name it in `allow`, if `{}` may have it", child.name);
                 found.push(Diagnostic::new("E0340", message, dependency.span).note(note));
-            } else if theirs.held() && !own.covers(theirs, permission) {
+            } else if theirs.held() && !manifest::covers(own, theirs, permission) {
                 let message = format!(
                     "`{}` lists more under `{permission}` than `{}` does",
                     child.name, parent.name

@@ -1,10 +1,10 @@
 //! Cranelift backend. Lowers MIR to machine code, and runs it in this process,
 //! or writes an object file for `lucid build`.
 
-use crate::ast::BinaryOp;
 use crate::diag::{Diagnostic, Lines, Source, Span};
-use crate::manifest;
-use crate::mir::{Expr, ExprKind, HashOp, KeyTasks, Local, Program, Stmt, Task, Ty, Update};
+use crate::mir::{
+    BinaryOp, Expr, ExprKind, HashOp, KeyTasks, Local, Program, Stmt, Task, Ty, Update,
+};
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
     AbiParam, Block, FuncRef, GlobalValue, InstBuilder, MemFlagsData, Signature, SourceLoc,
@@ -355,7 +355,7 @@ fn jit(
     let address =
         |(id, offset, line)| (module.get_finalized_function(id) as usize + offset as usize, line);
     lucid_rt::set_call_sites(sites.into_iter().map(address).collect());
-    lucid_rt::set_grants(&manifest::runtime_grants(source.grants.as_deref()));
+    lucid_rt::set_grants(&crate::diag::runtime_grants(source.grants.as_deref()));
     // Leaked on purpose: `entry` points into memory that the module owns.
     std::mem::forget(module);
     Ok((entry, tests))
@@ -413,7 +413,7 @@ pub fn object(program: &Program, source: &Source) -> Result<Vec<u8>, Vec<Diagnos
     let id = module.declare_data("lucid_call_names", Linkage::Export, false, false);
     module.define_data(id.expect(CODEGEN), &description).expect(CODEGEN);
     // As the call names: the trailing byte keeps the data non-empty.
-    let grants = manifest::runtime_grants(source.grants.as_deref());
+    let grants = crate::diag::runtime_grants(source.grants.as_deref());
     let mut description = DataDescription::new();
     description.define([grants.as_bytes(), &[0]].concat().into_boxed_slice());
     let id = module.declare_data("lucid_grants", Linkage::Export, false, false);

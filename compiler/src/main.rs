@@ -5,22 +5,19 @@ mod ast;
 mod check;
 mod context;
 mod derive;
-mod diag;
 mod dump;
 #[cfg(test)]
 mod fuzz;
 mod lexer;
 mod lsp;
 mod manifest;
-mod mir;
 mod mono;
-mod native;
 mod ownership;
 mod parser;
 mod resolve;
-mod wasm;
 
-use diag::{Diagnostic, Source};
+use lucid_backend::diag::{self, Diagnostic, Source};
+use lucid_backend::{mir, native, wasm};
 use resolve::{load, package_files, package_root};
 use std::io::Write;
 use std::process::ExitCode;
@@ -130,7 +127,7 @@ fn cli(args: &[String]) -> ExitCode {
         if dump == Some(dump::Stage::Checked) {
             // The stage ends with the checker, as `resolved` ends with loading.
             if diags.is_empty() {
-                emit(std::io::stdout(), &dump::program(&program, None));
+                emit(std::io::stdout(), &lucid_backend::dump::program(&program, None));
             }
             diags.retain(|d| d.code != "E0901");
             report_errors(&source, &diags, json);
@@ -140,14 +137,14 @@ fn cli(args: &[String]) -> ExitCode {
             diags = mono::run(&mut program, !run);
         }
         if diags.is_empty() && dump == Some(dump::Stage::Mir) {
-            emit(std::io::stdout(), &dump::program(&program, None));
+            emit(std::io::stdout(), &lucid_backend::dump::program(&program, None));
         }
         let owned = dump == Some(dump::Stage::Owned);
         if diags.is_empty() && (run || costs || owned) {
             ownership::run(&mut program, std::env::var_os("LUCID_NAIVE").is_none());
         }
         if diags.is_empty() && owned {
-            emit(std::io::stdout(), &dump::program(&program, Some(&source)));
+            emit(std::io::stdout(), &lucid_backend::dump::program(&program, Some(&source)));
         }
         if costs && diags.is_empty() {
             let found = ownership::costs(&mut program);
@@ -173,7 +170,13 @@ fn cli(args: &[String]) -> ExitCode {
             }
         } else if build && diags.is_empty() {
             match native::object(&program, &source) {
-                Ok(object) => return link(&object, &out_name(path, EXE)),
+                Ok(object) => match lucid_backend::link(&object, &out_name(path, EXE)) {
+                    Ok(()) => return ExitCode::SUCCESS,
+                    Err(problem) => {
+                        emit(std::io::stderr(), &format!("lucid: {problem}\n"));
+                        return ExitCode::FAILURE;
+                    }
+                },
                 Err(errors) => diags = errors,
             }
         } else if run && diags.is_empty() {
@@ -234,102 +237,6 @@ fn write_script(script: &str, name: &str) -> ExitCode {
         Err(e) => {
             emit(std::io::stderr(), &format!("lucid: cannot write `{name}`: {e}\n"));
             ExitCode::FAILURE
-        }
-    }
-}
-
-/// Links an object file from `native::object` with the embedded runtime, into
-/// `exe`. A failure here is in the system, not the program, so it has no code.
-fn link(object: &[u8], exe: &str) -> ExitCode {
-    const RUNTIME: &[u8] = include_bytes!(env!("LUCID_RT_LIB"));
-    let fail = |problem: String| {
-        emit(std::io::stderr(), &format!("lucid: {problem}\n"));
-        ExitCode::FAILURE
-    };
-    // On Linux, `lucid build app` from the parent of `app/` names the
-    // program after the directory it would overwrite.
-    if std::path::Path::new(exe).is_dir() {
-        return fail(format!("cannot write the program to `{exe}`: a directory has that name"));
-    }
-    let mut command = match linker() {
-        Ok(command) => command,
-        Err(problem) => return fail(problem.into()),
-    };
-    let dir = match stage() {
-        Ok(dir) => dir,
-        Err(e) => return fail(format!("cannot make a staging directory: {e}")),
-    };
-    let (object_file, runtime_file) = if cfg!(windows) {
-        (dir.join("main.obj"), dir.join("lucid_rt.lib"))
-    } else {
-        (dir.join("main.o"), dir.join("liblucid_rt.a"))
-    };
-    let linked = std::fs::write(&object_file, object)
-        .and_then(|()| std::fs::write(&runtime_file, RUNTIME))
-        .and_then(|()| {
-            if cfg!(windows) {
-                command.args(["/NOLOGO", "/SUBSYSTEM:CONSOLE"]);
-                command.arg(format!("/STACK:{}", lucid_rt::EXE_STACK_BYTES));
-                command.arg(format!("/OUT:{exe}"));
-            } else {
-                // Drops the sections that the program never reaches, such as
-                // SQLite in a program that never opens a database.
-                command.arg("-Wl,--gc-sections").arg("-o").arg(exe);
-            }
-            command.arg(&object_file).arg(&runtime_file);
-            command.args(env!("LUCID_RT_LIBS").split_whitespace()).output()
-        });
-    let _ = std::fs::remove_dir_all(&dir);
-    match linked {
-        Ok(output) if output.status.success() => ExitCode::SUCCESS,
-        Ok(output) => {
-            let said =
-                String::from_utf8_lossy(&output.stdout) + String::from_utf8_lossy(&output.stderr);
-            fail(format!("linking failed:\n{said}"))
-        }
-        Err(e) => fail(format!("cannot link: {e}")),
-    }
-}
-
-#[cfg(windows)]
-fn linker() -> Result<std::process::Command, &'static str> {
-    find_msvc_tools::find_tool("x86_64-pc-windows-msvc", "link.exe")
-        .map(|tool| tool.to_command())
-        .ok_or("cannot find the MSVC linker: install Visual Studio Build Tools, with the C++ tools")
-}
-
-/// The system `cc` finds the C start files and libc, by decision 191.
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn linker() -> Result<std::process::Command, &'static str> {
-    Ok(std::process::Command::new("cc"))
-}
-
-/// Only Windows and Linux on x86-64 are targets, by decision 205.
-#[cfg(not(any(windows, all(target_os = "linux", target_arch = "x86_64"))))]
-fn linker() -> Result<std::process::Command, &'static str> {
-    Err("`lucid build` works only on Windows and Linux x86-64")
-}
-
-/// Makes a new directory with a random name for `link`, that only this user
-/// can open, by decision 191. It must not exist yet, so no one else can have
-/// planted files in it.
-fn stage() -> std::io::Result<std::path::PathBuf> {
-    use std::hash::{BuildHasher, RandomState};
-    let builder = std::fs::DirBuilder::new();
-    #[cfg(unix)]
-    let builder = {
-        let mut builder = builder;
-        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-        builder
-    };
-    let mut tries = 0;
-    loop {
-        // Each `RandomState` has new keys, seeded from the system.
-        let name = format!("lucid-build-{:016x}", RandomState::new().hash_one(std::process::id()));
-        let dir = std::env::temp_dir().join(name);
-        match builder.create(&dir) {
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && tries < 8 => tries += 1,
-            made => return made.map(|()| dir),
         }
     }
 }
@@ -634,7 +541,8 @@ fn fmt(rest: &[&str]) -> ExitCode {
 /// file in a new private directory, so the same checks run. The error is what
 /// `lucid fmt` printed.
 fn format_text(text: &str) -> Result<String, String> {
-    let dir = stage().map_err(|e| format!("cannot make a staging directory: {e}"))?;
+    let dir =
+        lucid_backend::stage().map_err(|e| format!("cannot make a staging directory: {e}"))?;
     let file = dir.join("document.lcd");
     let formatted = std::fs::write(&file, text)
         .and_then(|()| {
@@ -997,20 +905,5 @@ mod tests {
         assert!(!kept(b"let a = [1, 2] # nte\n"), "a comment changed");
         assert!(!kept(b"let a = [12] # note\n"), "two tokens joined");
         assert!(!kept(b"let a = [1, 2] # not\xC3\n"), "bytes not UTF-8");
-    }
-
-    /// By decision 191, each build stages in a new directory of its own.
-    #[test]
-    fn staging_is_new_and_private() {
-        let (one, two) = (stage().unwrap(), stage().unwrap());
-        assert_ne!(one, two);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&one).unwrap().permissions().mode();
-            assert_eq!(mode & 0o777, 0o700);
-        }
-        std::fs::remove_dir(one).unwrap();
-        std::fs::remove_dir(two).unwrap();
     }
 }

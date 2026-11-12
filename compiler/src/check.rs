@@ -3686,7 +3686,8 @@ impl<'a> Checker<'a> {
             self.expected(value, Some(Ty::Error));
             return None;
         };
-        let appends = matches!(op, ast::AssignOp::Set) && ty == Ty::Text && starts_with(value, base, name);
+        let appends =
+            matches!(op, ast::AssignOp::Set) && ty == Ty::Text && starts_with(value, base, name);
         let mut value = match compound(op) {
             Some(op) => {
                 let old = self.slot_of(local, slot, ty, span);

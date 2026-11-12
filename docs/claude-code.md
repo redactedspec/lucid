@@ -62,7 +62,7 @@ Claude cannot run built-in commands. It asks when one is needed.
 
 ## What is enforced now
 
-`.githooks/commit-msg` checks every commit for the rules in `AGENTS.md`. It rejects bad types, long subjects, long body lines, and attribution lines. It also rejects a commit that changes `.rs` files under `compiler/` or `runtime/` with no `.md` file, unless the message has a `Docs: none` footer. After a fresh clone, turn it on:
+`.githooks/commit-msg` checks every commit for the rules in `AGENTS.md`. It rejects bad types, long subjects, long body lines, and attribution lines. It also rejects a commit that changes `.rs` files under `backend/`, `compiler/`, or `runtime/` with no `.md` file, unless the message has a `Docs: none` footer. After a fresh clone, turn it on:
 
 ```sh
 git config core.hooksPath .githooks
@@ -76,7 +76,7 @@ Hooks load when a session starts, so a change to them applies from the next sess
 
 | Feature | What it does |
 | --- | --- |
-| `Stop` hook | `.claude/hooks/test-on-stop.sh` runs `cargo test -q` without `stage_dumps_are_stable`, and blocks the end of a turn on failure, once per stop. It skips the run when `git status` shows no change under `compiler`, `runtime`, `std`, `tests`, `examples`, `tools`, or the Cargo files. The dump test takes over a minute, so run `cargo test --test golden stage_dumps_are_stable` by hand before a commit that touches `compiler/lucid/` or the dumps |
+| `Stop` hook | `.claude/hooks/test-on-stop.sh` runs `cargo test -q` without `stage_dumps_are_stable`, and blocks the end of a turn on failure, once per stop. It skips the run when `git status` shows no change under `backend`, `compiler`, `runtime`, `std`, `tests`, `examples`, `tools`, or the Cargo files. The dump test takes over a minute, so run `cargo test --test golden stage_dumps_are_stable` by hand before a commit that touches `compiler/lucid/` or the dumps |
 | `PostToolUse` hook | `.claude/hooks/format-rust.sh` runs `rustfmt` on edited Rust files |
 | Rust code intelligence | `rust-analyzer` shows errors after edits. It comes from the owner's setup, not this repository |
 | `.claude/rules/front-end.md` | Rules for the lexer and parser, loaded only for those files |

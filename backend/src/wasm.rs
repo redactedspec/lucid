@@ -4,9 +4,10 @@
 //!
 //! A user `extern` and `.pointer()` are E0905 here, by decision 162.
 
-use crate::ast::BinaryOp;
 use crate::diag::{Diagnostic, Lines, Source, Span};
-use crate::mir::{Expr, ExprKind, HashOp, KeyTasks, Local, Program, Stmt, Task, Ty, Update};
+use crate::mir::{
+    BinaryOp, Expr, ExprKind, HashOp, KeyTasks, Local, Program, Stmt, Task, Ty, Update,
+};
 use crate::native::slot_offset;
 use lucid_rt::{CAP_OFFSET, COUNT_OFFSET, LEN_OFFSET, SLOTS_OFFSET, TAG_OFFSET};
 use std::borrow::Cow;
@@ -20,7 +21,7 @@ use wasm_encoder::{
 const OUT_OF_BOUNDS: &str = "list index out of bounds";
 
 /// The runtime, built for `wasm32-unknown-unknown` by `build.rs`.
-const RUNTIME: &[u8] = include_bytes!(env!("LUCID_RT_WASM"));
+pub const RUNTIME: &[u8] = include_bytes!(env!("LUCID_RT_WASM"));
 
 /// What the loader runs. See "Output" in docs/compiler.md.
 const LOADER: &str = include_str!("loader.js");

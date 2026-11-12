@@ -1,5 +1,5 @@
 [workspace]
-members = ["compiler", "runtime"]
+members = ["backend", "compiler", "runtime"]
 resolver = "3"
 
 [profile.dev]

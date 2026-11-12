@@ -81,8 +81,8 @@ pub struct Source {
     /// Files of `std`, and of a program with no `lucid.toml`, have none.
     pub packages: Vec<(usize, usize)>,
     /// The permissions of the root package, one for each of
-    /// `manifest::PERMISSIONS`. `None` for a program with no `lucid.toml`.
-    pub grants: Option<Vec<crate::manifest::Grant>>,
+    /// `PERMISSIONS`. `None` for a program with no `lucid.toml`.
+    pub grants: Option<Vec<Grant>>,
     /// The first `use std.dom`, which only `lucid build --target web` can build.
     pub web_only: Option<Span>,
     /// The first `use std.net` or `use std.http`, which `lucid build --target
@@ -101,6 +101,44 @@ impl Source {
         self.text.push('\n');
         start
     }
+}
+
+/// The permissions of `lucid.toml`, in the order of `Source::grants`.
+pub const PERMISSIONS: &[&str] = &["net", "files", "env", "process", "unsafe"];
+
+/// What one permission gives: everything, or only the listed paths or names.
+/// `false` and an empty list give nothing.
+#[derive(Clone, PartialEq, Debug)]
+pub enum Grant {
+    All,
+    List(Vec<String>),
+}
+
+pub const NOTHING: Grant = Grant::List(Vec::new());
+
+impl Grant {
+    pub fn held(&self) -> bool {
+        *self != NOTHING
+    }
+}
+
+/// The text that `lucid_rt::set_grants` reads: the root package's `files`
+/// and `env` permissions, or nothing for a program with no `lucid.toml`.
+pub fn runtime_grants(grants: Option<&[Grant]>) -> String {
+    let Some(grants) = grants else { return String::new() };
+    let mut text = "package\n".to_string();
+    for (permission, grant) in PERMISSIONS.iter().zip(grants) {
+        match (*permission, grant) {
+            ("files" | "env", Grant::All) => text += &format!("{permission}\n"),
+            ("files" | "env", Grant::List(items)) => {
+                for item in items {
+                    text += &format!("{permission} {item}\n");
+                }
+            }
+            _ => {}
+        }
+    }
+    text
 }
 
 /// The position in `files` of the file that holds a byte offset.

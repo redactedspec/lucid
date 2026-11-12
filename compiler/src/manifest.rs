@@ -5,13 +5,12 @@
 //! array, or an inline table. Anything else is E0338, never a guess.
 
 use crate::diag::{Diagnostic, Span};
+pub use crate::diag::{Grant, NOTHING, PERMISSIONS};
 use crate::lexer::KEYWORDS;
 use std::path::{Component, Path, PathBuf};
 
 /// Deep enough for any manifest, and it keeps hostile input off the stack.
 const MAX_DEPTH: usize = 8;
-
-pub const PERMISSIONS: &[&str] = &["net", "files", "env", "process", "unsafe"];
 
 pub struct Manifest {
     pub name: String,
@@ -23,61 +22,26 @@ pub struct Manifest {
     pub permissions: Vec<Grant>,
 }
 
-/// What one permission gives: everything, or only the listed paths or names.
-/// `false` and an empty list give nothing.
-#[derive(Clone, PartialEq, Debug)]
-pub enum Grant {
-    All,
-    List(Vec<String>),
-}
-
-pub const NOTHING: Grant = Grant::List(Vec::new());
-
-impl Grant {
-    pub fn held(&self) -> bool {
-        *self != NOTHING
-    }
-
-    /// True if this grant gives all that `other` gives. `files` compares paths
-    /// after `.` and `..` are removed, and a path covers all below it.
-    pub fn covers(&self, other: &Grant, permission: &str) -> bool {
-        let (Grant::List(mine), Grant::List(theirs)) = (self, other) else {
-            return *self == Grant::All;
-        };
-        // An empty path, as `.` becomes, is a prefix of every path, so it
-        // covers only paths that stay inside it.
-        let inside =
-            |item: &Path| matches!(item.components().next(), None | Some(Component::Normal(_)));
-        let covered = |item: &String| {
-            mine.iter().any(|own| match permission {
-                "files" => {
-                    let (item, own) = (normal(item), normal(own));
-                    item.starts_with(&own) && (!own.as_os_str().is_empty() || inside(&item))
-                }
-                _ => own == item,
-            })
-        };
-        theirs.iter().all(covered)
-    }
-}
-
-/// The text that `lucid_rt::set_grants` reads: the root package's `files`
-/// and `env` permissions, or nothing for a program with no `lucid.toml`.
-pub fn runtime_grants(grants: Option<&[Grant]>) -> String {
-    let Some(grants) = grants else { return String::new() };
-    let mut text = "package\n".to_string();
-    for (permission, grant) in PERMISSIONS.iter().zip(grants) {
-        match (*permission, grant) {
-            ("files" | "env", Grant::All) => text += &format!("{permission}\n"),
-            ("files" | "env", Grant::List(items)) => {
-                for item in items {
-                    text += &format!("{permission} {item}\n");
-                }
+/// True if this grant gives all that `other` gives. `files` compares paths
+/// after `.` and `..` are removed, and a path covers all below it.
+pub fn covers(own: &Grant, other: &Grant, permission: &str) -> bool {
+    let (Grant::List(mine), Grant::List(theirs)) = (own, other) else {
+        return *own == Grant::All;
+    };
+    // An empty path, as `.` becomes, is a prefix of every path, so it
+    // covers only paths that stay inside it.
+    let inside =
+        |item: &Path| matches!(item.components().next(), None | Some(Component::Normal(_)));
+    let covered = |item: &String| {
+        mine.iter().any(|own| match permission {
+            "files" => {
+                let (item, own) = (normal(item), normal(own));
+                item.starts_with(&own) && (!own.as_os_str().is_empty() || inside(&item))
             }
-            _ => {}
-        }
-    }
-    text
+            _ => own == item,
+        })
+    };
+    theirs.iter().all(covered)
 }
 
 /// A path with `.` removed, and each `..` taken against the part before it.
@@ -654,19 +618,19 @@ mod tests {
     #[test]
     fn grants_cover_lists() {
         let list = |items: &[&str]| Grant::List(items.iter().map(|s| s.to_string()).collect());
-        assert!(list(&["./data"]).covers(&list(&["data/a", "data/b/../c", "./data"]), "files"));
-        assert!(!list(&["./data"]).covers(&list(&["data/../x"]), "files"));
-        assert!(!list(&["./data"]).covers(&list(&["database"]), "files"));
-        assert!(!list(&["data/x"]).covers(&list(&["data"]), "files"));
-        assert!(Grant::All.covers(&list(&["../anything"]), "files"));
+        assert!(covers(&list(&["./data"]), &list(&["data/a", "data/b/../c", "./data"]), "files"));
+        assert!(!covers(&list(&["./data"]), &list(&["data/../x"]), "files"));
+        assert!(!covers(&list(&["./data"]), &list(&["database"]), "files"));
+        assert!(!covers(&list(&["data/x"]), &list(&["data"]), "files"));
+        assert!(covers(&Grant::All, &list(&["../anything"]), "files"));
         for own in [".", "./", "a/.."] {
-            assert!(list(&[own]).covers(&list(&["data", "./x/y", "."]), "files"));
+            assert!(covers(&list(&[own]), &list(&["data", "./x/y", "."]), "files"));
             for outside in ["/etc", "../shared", "x/../.."] {
-                assert!(!list(&[own]).covers(&list(&[outside]), "files"), "{own} {outside}");
+                assert!(!covers(&list(&[own]), &list(&[outside]), "files"), "{own} {outside}");
             }
         }
-        assert!(!list(&["/"]).covers(&Grant::All, "files"));
-        assert!(!list(&["PORT"]).covers(&list(&["PORT", "HOME"]), "env"));
+        assert!(!covers(&list(&["/"]), &Grant::All, "files"));
+        assert!(!covers(&list(&["PORT"]), &list(&["PORT", "HOME"]), "env"));
         assert!(!NOTHING.held() && list(&["x"]).held());
         let (manifest, _) = parse(&format!(
             "{HEAD}[permissions]

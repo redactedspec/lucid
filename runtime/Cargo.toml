@@ -7,7 +7,7 @@ license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
 [dependencies]
 
 [features]
-# The C `main` of a built program. Only `compiler/build.rs` turns it on.
+# The C `main` of a built program. Only `backend/build.rs` turns it on.
 exe = []
 
 # TLS for the `std.http` client, by decision 179. Native targets only.
