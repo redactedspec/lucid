@@ -1,0 +1,1365 @@
+# The monomorphizer, and the derived tasks it builds. Ports mono.rs and
+# derive.rs in one module, since each calls the other, and modules cannot
+# import each other, by E0335.
+#
+# The checker checks a generic body once, with its parameters as opaque
+# types. Unions flatten, so `T?` is `int?` for `T = int?`, and what counts as
+# a union or a counted value is only known here. So the checker records
+# intent, as `WrapExpr`, `ViewExpr`, `MemberExpr`, and `HoldsExpr`, and this
+# pass picks the code for each. No type error can appear here: substitution
+# keeps equal types equal.
+#
+# A derived task shows, compares, or searches a value made of other values.
+# Each is ordinary MIR for one concrete type, so the ownership pass and the
+# backends need nothing new. See decision 69.
+#
+# The order of every step that adds a type to the union table, reserves a
+# task, or adds a local follows the Rust pass, since the dumps show them.
+
+use ./ast
+use ./diag
+use ./mir
+
+# Generic instances and derived tasks past this stop as E0903. See also
+# `too_large`: a size limit alone can fire late when one task makes several
+# larger copies of itself.
+let MAX_INSTANCES = 20000
+
+choice Derived
+    # `x: T`, gives `text`.
+    ShowDerived
+    # `a: T, b: T`, gives `bool`.
+    EqualDerived
+    # `a: T, b: T`, gives a negative `int`, zero, or a positive one.
+    CompareDerived
+    # `value: T, list: list[T]`, gives `bool`.
+    HasDerived
+    # `x: T`, gives `text`, with no quotes on a text that `x` holds directly.
+    ShowAloneDerived
+    # `x: T, state: int`, gives `state` with `x` added.
+    HashDerived
+    # `x: T`, gives its JSON `text`. Only a `type`, `choice`, or union.
+    JsonWriteDerived
+    # `value: Value`, gives `T or JsonError`, in the terms of `std/json.lcd`.
+    JsonReadDerived
+    # A task of the trait of an `any`: runs the one that its value has.
+    # ponytail: a linear test of each type held. A table indexed by tag can
+    # follow if a call measures slow.
+    TaskDerived(name: text)
+
+# A task to build.
+choice Job
+    # A source task, and its type arguments.
+    TaskJob(id: int, args: list[mir.Ty])
+    DerivedJob(kind: Derived, ty: mir.Ty, span: diag.Span)
+
+type Queued
+    slot: int
+    job: Job
+
+# A derived task on an `any`, which `run` builds last.
+type Open
+    slot: int
+    kind: Derived
+    ty: mir.Ty
+    span: diag.Span
+
+type InstanceKey
+    id: int
+    args: list[mir.Ty]
+
+type DerivedKey
+    kind: Derived
+    ty: mir.Ty
+
+type CallKey
+    name: text
+    ty: mir.Ty
+
+# What a `TaskDerived` takes, and gives.
+type CallShape
+    params: list[mir.Ty]
+    returns: mir.Ty
+
+type Found
+    slot: int
+    result: mir.Ty
+
+# The slot of each value of a record, and how many hold counted values.
+type Slots
+    found: list[int]
+    total: int
+
+type Layout
+    slot: int
+    total: int
+
+type FieldInfo
+    name: text
+    ty: mir.Ty
+    slot: int
+
+# The types `Value` and `JsonError` of `std/json.lcd`.
+type JsonTypes
+    value: mir.Ty
+    error: mir.Ty
+
+type Mono
+    source: list[mir.Task]
+    methods: map[text, list[int]]
+    datas: list[mir.Shape]
+    types: mir.Types
+    # A generic task with its type arguments, and its place in `done`.
+    instances: map[InstanceKey, int] = {}
+    # A derived task for a type, and its place in `done`.
+    derived_slots: map[DerivedKey, int] = {}
+    # The types that go in each `any`.
+    boxed: map[mir.Ty, list[mir.Ty]] = {}
+    open: list[Open] = []
+    calls: map[CallKey, CallShape] = {}
+    done: list[mir.Task?] = []
+    # How many generic instances and derived tasks exist.
+    generated: int = 0
+    # Tasks still to build, with their places in `done`.
+    queue: list[Queued] = []
+    diags: list[diag.Diagnostic] = []
+    # The tasks of `std.json` that stand for a derived one, or -1.
+    decode: int
+    encode: int
+    # The type arguments of the task being rewritten.
+    args: list[mir.Ty] = []
+    # The locals of that task, with real types.
+    locals: list[mir.Ty] = []
+    # The slot of each capture of that task.
+    captures: list[int] = []
+
+task skip()
+    return
+
+task node(kind: mir.ExprKind, ty: mir.Ty, span: diag.Span) -> mir.Expr
+    return mir.Expr(kind: kind, ty: ty, span: span)
+
+task call(slot: int, values: list[mir.Expr], ty: mir.Ty, span: diag.Span) -> mir.Expr
+    return node(mir.CallExpr(id: slot, args: [], values: values), ty, span)
+
+task retyped(value: mir.Expr, ty: mir.Ty) -> mir.Expr
+    var out = value
+    out.ty = ty
+    return out
+
+task is_union(ty: mir.Ty) -> bool
+    return match ty
+        UnionTy(_) -> true
+        _ -> false
+
+task is_any(ty: mir.Ty) -> bool
+    return match ty
+        AnyTy(_) -> true
+        _ -> false
+
+task is_list(ty: mir.Ty) -> bool
+    return match ty
+        ListTy(_) -> true
+        _ -> false
+
+task is_task_ty(ty: mir.Ty) -> bool
+    return match ty
+        TaskTy(_, _) -> true
+        _ -> false
+
+## Monomorphizes `program`. A program compiles only what the top level and
+## its tests reach, by decision 190. With `all`, as for a check, every task
+## without type parameters is built, so each one shows its errors.
+public task run(change program: mir.Program, all: bool) -> list[diag.Diagnostic]
+    let source = program.tasks
+    program.tasks = []
+    var decode = -1
+    var encode = -1
+    for id in 0..source.len()
+        if source[id].name == "@std.json.decode"
+            decode = id
+        else if source[id].name == "@std.json.encode"
+            encode = id
+    if decode < 0
+        encode = -1
+    var m = Mono(source: source, methods: program.methods, datas: program.datas, types: program.types, decode: decode, encode: encode)
+    if all
+        for id in 0..source.len()
+            if source[id].type_params == 0
+                let found = m.instance(id, [], source[id].span)
+    var tests = program.tests
+    for i in 0..tests.len()
+        let case = tests[i]
+        tests[i].id = m.instance(case.id, [], case.span)
+    program.tests = tests
+    var main = program.main
+    m.rewrite(change main, [])
+    program.main = main
+    # A task that looks inside an `any` needs every type that goes in one,
+    # and building those tasks can box more. So it is built again until
+    # nothing new appears.
+    var built_open = -1
+    var built_boxed = -1
+    while true
+        while m.queue is not empty and m.diags is empty
+            let next = m.queue.pop()
+            if next is Queued
+                m.build(next)
+        var held = 0
+        for key in m.boxed
+            held += m.boxed[key].len()
+        if m.diags is not empty or (m.open.len() == built_open and held == built_boxed)
+            break
+        built_open = m.open.len()
+        built_boxed = held
+        let count = m.open.len()
+        for index in 0..count
+            let o = m.open[index]
+            let made = m.derive(o.kind, o.ty, o.span)
+            m.done[o.slot] = made
+    program.types = m.types
+    if m.diags is empty
+        var tasks: list[mir.Task] = []
+        for t in m.done
+            if t is mir.Task
+                tasks.push(t)
+        program.tasks = tasks
+    return m.diags
+
+task build(change self: Mono, next: Queued)
+    match next.job
+        TaskJob(id, args) ->
+            var t = self.source[id]
+            self.rewrite(change t, args)
+            self.done[next.slot] = t
+        DerivedJob(kind, ty, span) ->
+            let made = self.derive(kind, ty, span)
+            self.done[next.slot] = made
+
+task instance(change self: Mono, id: int, args: list[mir.Ty], span: diag.Span) -> int
+    if not self.check_size(args, span)
+        return 0
+    let key = InstanceKey(id: id, args: args)
+    if key in self.instances
+        return self.instances[key]
+    let slot = self.reserve(args.len(), span)
+    if slot < 0
+        return 0
+    self.instances[key] = slot
+    self.queue.push(Queued(slot: slot, job: TaskJob(id: id, args: args)))
+    return slot
+
+# The task with a `self` parameter that takes this type, or -1. The checker
+# keeps receivers from overlapping, so one fits at most.
+task method(change self: Mono, name: text, ty: mir.Ty, span: diag.Span) -> int
+    let found = self.method_and_result(name, ty, span)
+    if found is Found
+        return found.slot
+    return -1
+
+# Like `method`, with the type that the task returns.
+task method_and_result(change self: Mono, name: text, ty: mir.Ty, span: diag.Span) -> Found?
+    if name not in self.methods
+        return none
+    let ids = self.methods[name]
+    for id in ids
+        let t = self.source[id]
+        let known = self.types.fit(t.locals[0], ty, t.type_params)
+        if known is not none
+            var args: list[mir.Ty] = []
+            for k in known
+                if k is mir.Ty
+                    args.push(k)
+                else
+                    return none
+            let result = self.types.subst(t.returns, args)
+            let slot = self.instance(id, args, span)
+            return Found(slot: slot, result: result)
+    return none
+
+# The derived task of this kind for a type.
+task derived(change self: Mono, kind: Derived, ty: mir.Ty, span: diag.Span) -> int
+    if not self.check_size([ty], span)
+        return 0
+    let key = DerivedKey(kind: kind, ty: ty)
+    if key in self.derived_slots
+        return self.derived_slots[key]
+    let slot = self.reserve(1, span)
+    if slot < 0
+        return 0
+    self.derived_slots[key] = slot
+    if is_any(ty)
+        self.open.push(Open(slot: slot, kind: kind, ty: ty, span: span))
+    else
+        self.queue.push(Queued(slot: slot, job: DerivedJob(kind: kind, ty: ty, span: span)))
+    return slot
+
+# A call to a task of a trait, on the type of the first value.
+task trait_call(change self: Mono, name: text, values: list[mir.Expr], returns: mir.Ty, span: diag.Span) -> mir.Expr
+    let ty = values[0].ty
+    var slot = self.method(name, ty, span)
+    if slot < 0
+        var params: list[mir.Ty] = []
+        for value in values
+            params.push(value.ty)
+        self.calls[CallKey(name: name, ty: ty)] = CallShape(params: params, returns: returns)
+        slot = self.derived(TaskDerived(name: name), ty, span)
+    return call(slot, values, returns, span)
+
+# The types that a union or `any` holds.
+task held(self: Mono, ty: mir.Ty) -> list[mir.Ty]
+    if is_any(ty)
+        if ty in self.boxed
+            return self.boxed[ty]
+        return []
+    return ty.members_of()
+
+# The tasks that a map with this key keeps.
+task key_tasks(change self: Mono, key: mir.Ty, span: diag.Span) -> mir.KeyTasks?
+    if key.is_key()
+        return none
+    let equal = self.written_or(EqualDerived, "equal", key, span)
+    let hash = self.derived(HashDerived, key, span)
+    return mir.KeyTasks(hash: hash, equal: equal)
+
+# Reports E0903 for a type too large to hash. Slot 0 then stands in, and
+# nothing runs, since the error stops the program.
+task check_size(change self: Mono, tys: list[mir.Ty], span: diag.Span) -> bool
+    for ty in tys
+        if ty.too_large()
+            self.too_many(span)
+            return false
+    return true
+
+task too_many(change self: Mono, span: diag.Span)
+    var d = diag.new("E0903", "too many generic instances", span)
+    d.notes.push("a generic task or type keeps asking for a larger type of itself")
+    self.diags.push(d)
+
+# A place in `done`, or -1. A task with no type arguments always gets one.
+task reserve(change self: Mono, count: int, span: diag.Span) -> int
+    if count > 0
+        if self.generated == MAX_INSTANCES
+            self.too_many(span)
+            return -1
+        self.generated += 1
+    self.done.push(none)
+    return self.done.len() - 1
+
+# The slot of each value of a record: counted values take the first slots.
+# So a record needs only their number to know what it holds.
+task slots(counted: list[bool]) -> Slots
+    var total = 0
+    for c in counted
+        if c
+            total += 1
+    var held = 0
+    var plain = total
+    var found: list[int] = []
+    for c in counted
+        if c
+            found.push(held)
+            held += 1
+        else
+            found.push(plain)
+            plain += 1
+    return Slots(found: found, total: total)
+
+task rewrite(change self: Mono, change t: mir.Task, args: list[mir.Ty])
+    self.args = args
+    t.type_params = 0
+    t.returns = self.types.subst(t.returns, args)
+    var locals: list[mir.Ty] = []
+    for ty in t.locals
+        locals.push(self.types.subst(ty, args))
+    self.locals = locals
+    var counted: list[bool] = []
+    for ty in t.captures
+        counted.push(self.types.subst(ty, args).is_counted())
+    self.captures = slots(counted).found
+    t.body = self.stmts(t.body)
+    t.locals = self.locals
+
+# The slot of a field, and how many counted slots its variant has. Field -1
+# asks for the count alone.
+task layout(change self: Mono, data: mir.Ty, variant: int, field: int) -> Layout
+    match data
+        DataTy(_, id, args) ->
+            let fields = self.datas[id].variants[variant].fields
+            var counted: list[bool] = []
+            for f in fields
+                counted.push(self.types.subst(f.ty, args).is_counted())
+            let s = slots(counted)
+            let slot = if field >= 0 and field < s.found.len() then s.found[field] else 0
+            return Layout(slot: slot, total: s.total)
+        _ ->
+            return Layout(slot: 0, total: 0)
+
+# Rewrites a field's default for its type's arguments. A default is a
+# literal, so it reads no local.
+task finish_default(change self: Mono, value: mir.Expr, args: list[mir.Ty]) -> mir.Expr
+    self.args = args
+    return self.expr(value)
+
+# A value as the wider type `to`.
+task wrap(change self: Mono, value: mir.Expr, to: mir.Ty, span: diag.Span) -> mir.Expr
+    if value.ty == to
+        return value
+    # A union goes in an `any` whole, since its trait may be on the union and
+    # not on its members.
+    if is_any(to)
+        var known: list[mir.Ty] = []
+        if to in self.boxed
+            known = self.boxed[to]
+        if not mir.holds(known, value.ty)
+            known.push(value.ty)
+        self.boxed[to] = known
+    else if not is_union(to) or is_union(value.ty)
+        return retyped(value, to)
+    let tag = self.types.tag(value.ty)
+    let counted = if value.ty.is_counted() then 1 else 0
+    let fields = [mir.Slot(slot: 0, value: value)]
+    return node(mir.NewExpr(tag: tag, counted: counted, fields: fields), to, span)
+
+# A union as the narrower type `to`.
+task view(value: mir.Expr, to: mir.Ty, span: diag.Span) -> mir.Expr
+    if value.ty == to or is_union(to) or not is_union(value.ty)
+        return retyped(value, to)
+    return node(mir.FieldExpr(inner: value, slot: 0), to, span)
+
+# A test of what a union holds. With a parameter gone, the value may no
+# longer be a union, and the answer is then known. The value still runs.
+task holds_kind(change self: Mono, value: mir.Expr, members: list[mir.Ty], span: diag.Span) -> mir.ExprKind
+    let args = self.args
+    let found = self.types.subst_all(members, args)
+    if is_union(value.ty)
+        var tags: list[int] = []
+        for m in found
+            for ty in m.members_of()
+                tags.push(self.types.id(ty))
+        return mir.TagInExpr(inner: value, tags: tags)
+    var answer = false
+    for m in found
+        if mir.holds(m.members_of(), value.ty)
+            answer = true
+    let flag = node(mir.BoolExpr(value: answer), mir.BoolTy, span)
+    return mir.SeqExpr(setup: [mir.ExprStmt(value: value)], inner: flag)
+
+task stmts(change self: Mono, body: list[mir.Stmt]) -> list[mir.Stmt]
+    var out: list[mir.Stmt] = []
+    for s in body
+        out.push(self.stmt(s))
+    return out
+
+task stmt(change self: Mono, s: mir.Stmt) -> mir.Stmt
+    let walked = self.stmt_parts(s)
+    match walked
+        PrintStmt(value) ->
+            let ty = value.ty
+            if ty.is_compound() or is_task_ty(ty) or ty == mir.SqlTy or ty.is_handle()
+                return mir.PrintStmt(value: self.shown_alone(value, value.span))
+            return walked
+        ClearStmt(local) ->
+            if not self.locals[local].is_counted()
+                return mir.BlockStmt(body: [])
+            return walked
+        UpdateStmt(local, op, args, span) ->
+            return self.update(local, op, args, span, walked)
+        _ ->
+            return walked
+
+task update(change self: Mono, local: int, op: text, args: list[mir.Expr], span: diag.Span, walked: mir.Stmt) -> mir.Stmt
+    let ty = self.locals[local]
+    if (op == "Take" or op == "Put") and is_list(ty)
+        return walked
+    if op == "FieldSet" or op == "Take" or op == "Put"
+        match args[0].kind
+            IntExpr(field) ->
+                let l = self.layout(ty, 0, field)
+                var first = args[0]
+                first.kind = mir.IntExpr(value: l.slot)
+                var placed = args
+                placed[0] = first
+                return mir.UpdateStmt(local: local, op: op, args: placed, span: span)
+            _ ->
+                return walked
+    if op == "UnionSet"
+        if is_union(ty)
+            return mir.UpdateStmt(local: local, op: "FieldSet", args: args, span: span)
+        # A narrowed union that lost its other members: the local is the
+        # value. See `Place` in check.rs.
+        let value = args[args.len() - 1]
+        match value.kind
+            NoneExpr ->
+                return mir.BlockStmt(body: [])
+            _ ->
+                return mir.SetStmt(local: local, value: value)
+    return walked
+
+task stmt_parts(change self: Mono, s: mir.Stmt) -> mir.Stmt
+    match s
+        SetStmt(local, value) -> return mir.SetStmt(local: local, value: self.expr(value))
+        BindStmt(local, value) -> return mir.BindStmt(local: local, value: self.expr(value))
+        ReturnStmt(value) -> return mir.ReturnStmt(value: self.expr(value))
+        ExitStmt(value) -> return mir.ExitStmt(value: self.expr(value))
+        FailStmt(value, span) -> return mir.FailStmt(value: self.expr(value), span: span)
+        PrintStmt(value) -> return mir.PrintStmt(value: self.expr(value))
+        ExprStmt(value) -> return mir.ExprStmt(value: self.expr(value))
+        UpdateStmt(local, op, args, span) ->
+            var walked: list[mir.Expr] = []
+            for arg in args
+                walked.push(self.expr(arg))
+            return mir.UpdateStmt(local: local, op: op, args: walked, span: span)
+        BlockStmt(body) -> return mir.BlockStmt(body: self.stmts(body))
+        IfStmt(branches, otherwise) ->
+            var walked: list[mir.Branch] = []
+            for branch in branches
+                let condition = self.expr(branch.condition)
+                walked.push(mir.Branch(condition: condition, body: self.stmts(branch.body)))
+            return mir.IfStmt(branches: walked, otherwise: self.stmts(otherwise))
+        WhileStmt(condition, body) ->
+            let c = self.expr(condition)
+            return mir.WhileStmt(condition: c, body: self.stmts(body))
+        ForStmt(local, start, end, inclusive, body) ->
+            let a = self.expr(start)
+            let b = self.expr(end)
+            return mir.ForStmt(local: local, start: a, end: b, inclusive: inclusive, body: self.stmts(body))
+        _ -> return s
+
+task expr_parts(change self: Mono, value: mir.Expr) -> mir.Expr
+    match value.kind
+        SeqExpr(setup, inner) ->
+            let done = self.stmts(setup)
+            let walked = self.expr(inner)
+            var out = value
+            out.kind = mir.SeqExpr(setup: done, inner: walked)
+            return out
+        _ ->
+            let parts = value.parts()
+            if parts is empty
+                return value
+            var walked: list[mir.Expr] = []
+            for part in parts
+                walked.push(self.expr(part))
+            return value.with_parts(walked)
+
+task expr(change self: Mono, value: mir.Expr) -> mir.Expr
+    var v = self.expr_parts(value)
+    let span = v.span
+    let args = self.args
+    v.ty = self.types.subst(v.ty, args)
+    let ty = v.ty
+    match v.kind
+        CallExpr(id, own, values) ->
+            let found = self.types.subst_all(own, args)
+            var slot = 0
+            if id == self.decode
+                slot = self.json_reader(found[0], span)
+            else if id == self.encode
+                slot = self.json_writer(found[0], span)
+            else
+                slot = self.instance(id, found, span)
+            v.kind = mir.CallExpr(id: slot, args: [], values: values)
+        ClosureExpr(id, own, _, fields) ->
+            let found = self.types.subst_all(own, args)
+            var counted: list[bool] = []
+            for f in fields
+                counted.push(f.value.ty.is_counted())
+            let s = slots(counted)
+            var placed: list[mir.Slot] = []
+            for i in 0..fields.len()
+                placed.push(mir.Slot(slot: s.found[i], value: fields[i].value))
+            let made = self.instance(id, found, span)
+            v.kind = mir.ClosureExpr(id: made, args: [], counted: s.total, fields: placed)
+        CaptureExpr(at) ->
+            let record = node(mir.LocalExpr(local: 0), self.locals[0], span)
+            v.kind = mir.FieldExpr(inner: record, slot: self.captures[at])
+        WrapExpr(inner) ->
+            return self.wrap(inner, ty, span)
+        ViewExpr(inner) ->
+            return view(inner, ty, span)
+        HoldsExpr(inner, tys) ->
+            v.kind = self.holds_kind(inner, tys, span)
+        ToTextExpr(inner) ->
+            return self.shown_alone(inner, span)
+        TextQuoteExpr(inner) ->
+            if inner.ty != mir.TextTy and inner.ty != mir.SqlTy
+                return self.shown(inner, span)
+        BinaryExpr(op, left, right) ->
+            if left.ty.is_compound()
+                return self.operate(op, left, right, ty, span)
+        MethodExpr(name, values) ->
+            return self.trait_call(name, values, ty, span)
+        MapOfExpr(entries, _) ->
+            match ty
+                MapTy(key, _) ->
+                    let keys = self.key_tasks(key, span)
+                    v.kind = mir.MapOfExpr(entries: entries, keys: keys)
+                _ -> skip()
+        SetOfExpr(inner, _) ->
+            match ty
+                SetTy(key) ->
+                    let keys = self.key_tasks(key, span)
+                    v.kind = mir.SetOfExpr(inner: inner, keys: keys)
+                _ -> skip()
+        ListHasExpr(item, list) ->
+            if not item.ty.is_key()
+                return self.list_has(item, list, span)
+        MemberExpr(inner, variant, field) ->
+            let l = self.layout(inner.ty, variant, field)
+            v.kind = mir.FieldExpr(inner: inner, slot: l.slot)
+        NewExpr(tag, _, fields) ->
+            let total = self.layout(ty, tag, -1).total
+            var placed: list[mir.Slot] = []
+            for f in fields
+                let l = self.layout(ty, tag, f.slot)
+                placed.push(mir.Slot(slot: l.slot, value: f.value))
+            v.kind = mir.NewExpr(tag: tag, counted: total, fields: placed)
+        _ -> skip()
+    return v
+
+# What a derived task is building.
+type Body
+    locals: list[mir.Ty]
+    span: diag.Span
+
+task make(self: Body, kind: mir.ExprKind, ty: mir.Ty) -> mir.Expr
+    return node(kind, ty, self.span)
+
+task num(self: Body, value: int) -> mir.Expr
+    return self.make(mir.IntExpr(value: value), mir.IntTy)
+
+task flag(self: Body, value: bool) -> mir.Expr
+    return self.make(mir.BoolExpr(value: value), mir.BoolTy)
+
+task lit(self: Body, value: text) -> mir.Expr
+    return self.make(mir.TextExpr(value: value), mir.TextTy)
+
+task read(self: Body, local: int) -> mir.Expr
+    return self.make(mir.LocalExpr(local: local), self.locals[local])
+
+task new_local(change self: Body, ty: mir.Ty) -> int
+    self.locals.push(ty)
+    return self.locals.len() - 1
+
+task cmp(self: Body, op: text, left: mir.Expr, right: mir.Expr) -> mir.Expr
+    return self.make(mir.BinaryExpr(op: op, left: left, right: right), mir.BoolTy)
+
+task plus_one(self: Body, value: mir.Expr) -> mir.Expr
+    return self.make(mir.BinaryExpr(op: "Add", left: value, right: self.num(1)), mir.IntTy)
+
+task hash_of(self: Body, op: text, state: mir.Expr, value: mir.Expr) -> mir.Expr
+    return self.make(mir.HashExpr(op: op, left: state, right: value), mir.IntTy)
+
+# The value at a position in a map.
+task value_at(self: Body, map: int, position: int, ty: mir.Ty) -> mir.Expr
+    return self.make(mir.MapValueExpr(value: self.read(map), at: self.read(position)), ty)
+
+task join_parts(self: Body, parts: list[mir.Expr]) -> mir.Expr
+    return self.make(mir.JoinExpr(values: parts), mir.TextTy)
+
+task size(self: Body, value: mir.Expr) -> mir.Expr
+    return self.make(mir.LenExpr(inner: value), mir.IntTy)
+
+task item_at(self: Body, list: mir.Expr, index: int, ty: mir.Ty) -> mir.Expr
+    return self.make(mir.ListGetExpr(value: list, at: self.read(index)), ty)
+
+task slot_of(self: Body, record: int, slot: int, ty: mir.Ty) -> mir.Expr
+    return self.make(mir.FieldExpr(inner: self.read(record), slot: slot), ty)
+
+task tag_of(self: Body, record: int) -> mir.Expr
+    return self.make(mir.TagExpr(inner: self.read(record)), mir.IntTy)
+
+task has_tag(self: Body, record: int, id: int) -> mir.Expr
+    return self.make(mir.TagInExpr(inner: self.read(record), tags: [id]), mir.BoolTy)
+
+# `if condition: return value`.
+task return_if(self: Body, condition: mir.Expr, value: mir.Expr) -> mir.Stmt
+    let branch = mir.Branch(condition: condition, body: [mir.ReturnStmt(value: value)])
+    return mir.IfStmt(branches: [branch], otherwise: [])
+
+# `if not same: return false`.
+task unless(self: Body, same: mir.Expr) -> mir.Stmt
+    let differ = self.make(mir.NotExpr(inner: same), mir.BoolTy)
+    return self.return_if(differ, self.flag(false))
+
+# `order = value`, then `if order != 0: return order`.
+task decide(self: Body, order: int, value: mir.Expr) -> list[mir.Stmt]
+    let differ = self.cmp("Ne", self.read(order), self.num(0))
+    return [mir.SetStmt(local: order, value: value), self.return_if(differ, self.read(order))]
+
+task if_here(self: Body, record: int, variant: int, body: list[mir.Stmt]) -> mir.Stmt
+    let here = self.cmp("Eq", self.tag_of(record), self.num(variant))
+    return mir.IfStmt(branches: [mir.Branch(condition: here, body: body)], otherwise: [])
+
+# Visits the indexes of `list` in `index`. The body may return.
+task each_item(self: Body, list: int, index: int, body: list[mir.Stmt]) -> mir.Stmt
+    let end = self.size(self.read(list))
+    return mir.ForStmt(local: index, start: self.num(0), end: end, inclusive: false, body: body)
+
+# Visits the keys of a map or set in `map`, with their positions. The body
+# may return.
+task each_key(self: Body, map: int, key: mir.Ty, position: int, held: int, body: list[mir.Stmt]) -> list[mir.Stmt]
+    let first = self.make(mir.MapNextExpr(value: self.read(map), at: self.num(0)), mir.IntTy)
+    let after = self.make(mir.MapNextExpr(value: self.read(map), at: self.plus_one(self.read(position))), mir.IntTy)
+    let at = self.make(mir.MapKeyExpr(value: self.read(map), at: self.read(position)), key)
+    var inner = [mir.SetStmt(local: held, value: at)]
+    for s in body
+        inner.push(s)
+    inner.push(mir.SetStmt(local: position, value: after))
+    let condition = self.cmp("Ge", self.read(position), self.num(0))
+    return [mir.SetStmt(local: position, value: first), mir.WhileStmt(condition: condition, body: inner)]
+
+# The parts that add `parts` to `out`, after a comma unless `position` is 0.
+task comma_then(body: Body, out: int, position: int, parts: list[mir.Expr]) -> list[mir.Expr]
+    let first = body.cmp("Eq", body.read(position), body.num(0))
+    let kind = mir.IfExpr(condition: first, yes: body.lit(""), otherwise: body.lit(", "))
+    var all = [body.read(out), body.make(kind, mir.TextTy)]
+    for part in parts
+        all.push(part)
+    return all
+
+# The text of a value inside a larger value, where text has quotes.
+task shown(change self: Mono, value: mir.Expr, span: diag.Span) -> mir.Expr
+    let ty = value.ty
+    if ty == mir.TextTy or ty == mir.SqlTy
+        return node(mir.TextQuoteExpr(inner: value), mir.TextTy, span)
+    # A task value or a thread shows its type: its code has no text.
+    if is_task_ty(ty) or ty.is_handle()
+        let name = node(mir.TextExpr(value: ty.name()), mir.TextTy, span)
+        return node(mir.SeqExpr(setup: [mir.ExprStmt(value: value)], inner: name), mir.TextTy, span)
+    if ty.is_compound()
+        return self.call_written_or(ShowDerived, "show", [value], mir.TextTy, span)
+    return node(mir.ToTextExpr(inner: value), mir.TextTy, span)
+
+# The text of a value by itself, which `print` and interpolation show. Text
+# has no quotes, even when a union holds it.
+task shown_alone(change self: Mono, value: mir.Expr, span: diag.Span) -> mir.Expr
+    # A query shows as its text, which cannot become a query again.
+    if value.ty == mir.TextTy or value.ty == mir.SqlTy
+        return retyped(value, mir.TextTy)
+    let ty = value.ty
+    var written = false
+    if ty.is_compound()
+        written = self.method("show", ty, span) >= 0
+    var may_hold_text = false
+    for m in ty.members_of()
+        if m == mir.TextTy or m == mir.SqlTy or is_any(m)
+            may_hold_text = true
+    if written or not may_hold_text
+        return self.shown(value, span)
+    let slot = self.derived(ShowAloneDerived, ty, span)
+    return call(slot, [value], mir.TextTy, span)
+
+# `left == right` for any type.
+task equal_values(change self: Mono, left: mir.Expr, right: mir.Expr, span: diag.Span) -> mir.Expr
+    if left.ty == mir.NoneTy
+        return node(mir.BoolExpr(value: true), mir.BoolTy, span)
+    if left.ty.is_compound()
+        return self.call_written_or(EqualDerived, "equal", [left, right], mir.BoolTy, span)
+    return node(mir.BinaryExpr(op: "Eq", left: left, right: right), mir.BoolTy, span)
+
+# A negative `int`, zero, or a positive one. Both values are read twice for a
+# number or text, so they must be plain reads. NaN gives zero.
+task order_of(change self: Mono, left: mir.Expr, right: mir.Expr, span: diag.Span) -> mir.Expr
+    if left.ty.is_compound()
+        return self.call_written_or(CompareDerived, "compare", [left, right], mir.IntTy, span)
+    let less = node(mir.BinaryExpr(op: "Lt", left: left, right: right), mir.BoolTy, span)
+    let more = node(mir.BinaryExpr(op: "Gt", left: left, right: right), mir.BoolTy, span)
+    let one = node(mir.IntExpr(value: 1), mir.IntTy, span)
+    let zero = node(mir.IntExpr(value: 0), mir.IntTy, span)
+    let later = node(mir.IfExpr(condition: more, yes: one, otherwise: zero), mir.IntTy, span)
+    let before = node(mir.IntExpr(value: -1), mir.IntTy, span)
+    return node(mir.IfExpr(condition: less, yes: before, otherwise: later), mir.IntTy, span)
+
+# An operator on values made of other values. `ty` is its result.
+task operate(change self: Mono, op: text, left: mir.Expr, right: mir.Expr, ty: mir.Ty, span: diag.Span) -> mir.Expr
+    var name = ""
+    if op == "Add"
+        name = "add"
+    else if op == "Sub"
+        name = "sub"
+    else if op == "Mul"
+        name = "mul"
+    else if op == "Div"
+        name = "div"
+    if name is not empty
+        let slot = self.method(name, left.ty, span)
+        return call(slot, [left, right], ty, span)
+    if op == "Eq"
+        return self.equal_values(left, right, span)
+    if op == "Ne"
+        let equal = self.equal_values(left, right, span)
+        return node(mir.NotExpr(inner: equal), mir.BoolTy, span)
+    let order = self.order_of(left, right, span)
+    let zero = node(mir.IntExpr(value: 0), mir.IntTy, span)
+    return node(mir.BinaryExpr(op: op, left: order, right: zero), mir.BoolTy, span)
+
+# `state` with `value` added. Nothing is added for a `none`.
+task hash_into(change self: Mono, state: mir.Expr, value: mir.Expr, span: diag.Span) -> mir.Expr
+    let ty = value.ty
+    if ty == mir.NoneTy
+        return state
+    if ty == mir.TextTy
+        return node(mir.HashExpr(op: "Text", left: state, right: value), mir.IntTy, span)
+    if ty.is_compound()
+        let slot = self.derived(HashDerived, ty, span)
+        return call(slot, [value, state], mir.IntTy, span)
+    return node(mir.HashExpr(op: "Int", left: state, right: value), mir.IntTy, span)
+
+# `value in list` for a type that the runtime cannot compare.
+task list_has(change self: Mono, value: mir.Expr, list: mir.Expr, span: diag.Span) -> mir.Expr
+    let slot = self.derived(HasDerived, value.ty, span)
+    return call(slot, [value, list], mir.BoolTy, span)
+
+# A call to `written_or`, on the type of the first argument.
+task call_written_or(change self: Mono, kind: Derived, name: text, args: list[mir.Expr], returns: mir.Ty, span: diag.Span) -> mir.Expr
+    let slot = self.written_or(kind, name, args[0].ty, span)
+    return call(slot, args, returns, span)
+
+# The task for a trait on a type: a hand-written one, or else the derived.
+task written_or(change self: Mono, kind: Derived, name: text, ty: mir.Ty, span: diag.Span) -> int
+    let slot = self.method(name, ty, span)
+    if slot >= 0
+        return slot
+    return self.derived(kind, ty, span)
+
+# Each field of a variant of `ty`: its name, type, and slot.
+task fields_of(change self: Mono, ty: mir.Ty, variant: int) -> list[FieldInfo]
+    var found: list[FieldInfo] = []
+    match ty
+        DataTy(_, id, args) ->
+            let fields = self.datas[id].variants[variant].fields
+            for index in 0..fields.len()
+                let l = self.layout(ty, variant, index)
+                let field = self.types.subst(fields[index].ty, args)
+                found.push(FieldInfo(name: fields[index].name, ty: field, slot: l.slot))
+        _ -> skip()
+    return found
+
+task variant_count(self: Mono, ty: mir.Ty) -> int
+    return match ty
+        DataTy(_, id, _) -> self.datas[id].variants.len()
+        _ -> 0
+
+task variant_name(self: Mono, ty: mir.Ty, variant: int) -> text
+    return match ty
+        DataTy(_, id, _) -> self.datas[id].variants[variant].name
+        _ -> ""
+
+task is_choice_ty(self: Mono, ty: mir.Ty) -> bool
+    return match ty
+        DataTy(_, id, _) -> self.datas[id].is_choice
+        _ -> false
+
+# Builds a derived task.
+task derive(change self: Mono, kind: Derived, ty: mir.Ty, span: diag.Span) -> mir.Task
+    var locals = [ty]
+    var returns = mir.TextTy
+    match kind
+        EqualDerived ->
+            locals = [ty, ty]
+            returns = mir.BoolTy
+        CompareDerived ->
+            locals = [ty, ty]
+            returns = mir.IntTy
+        HasDerived ->
+            locals = [ty, mir.ListTy(item: ty)]
+            returns = mir.BoolTy
+        JsonReadDerived ->
+            let jt = self.json_types()
+            locals = [jt.value]
+            returns = self.types.union([ty, jt.error])
+        HashDerived ->
+            locals = [ty, mir.IntTy]
+            returns = mir.IntTy
+        TaskDerived(name) ->
+            let shape = self.calls[CallKey(name: name, ty: ty)]
+            locals = shape.params
+            returns = shape.returns
+        _ -> skip()
+    let params = locals.len()
+    var body = Body(locals: locals, span: span)
+    var stmts: list[mir.Stmt] = []
+    match kind
+        ShowDerived ->
+            stmts = self.show_body(change body, ty)
+        ShowAloneDerived ->
+            let members = self.held(ty)
+            for member in members
+                let id = self.types.id(member)
+                let value = self.shown_alone(body.slot_of(0, 0, member), span)
+                stmts.push(body.return_if(body.has_tag(0, id), value))
+            stmts.push(mir.UnreachableStmt)
+        EqualDerived ->
+            stmts = self.equal_body(change body, ty)
+        CompareDerived ->
+            stmts = self.compare_body(change body, ty)
+        HashDerived ->
+            stmts = self.hash_body(change body, ty)
+        JsonWriteDerived ->
+            stmts = self.json_write_body(body, ty)
+        JsonReadDerived ->
+            stmts = self.json_read_body(change body, ty, returns)
+        TaskDerived(name) ->
+            let members = self.held(ty)
+            for member in members
+                let id = self.types.id(member)
+                var values = [body.slot_of(0, 0, member)]
+                for local in 1..params
+                    values.push(body.read(local))
+                let called = self.trait_call(name, values, returns, span)
+                stmts.push(body.return_if(body.has_tag(0, id), called))
+            # Every value in an `any` got there through a tag listed above.
+            stmts.push(mir.UnreachableStmt)
+        HasDerived ->
+            let index = body.new_local(mir.IntTy)
+            let item = body.item_at(body.read(1), index, ty)
+            let same = self.equal_values(body.read(0), item, span)
+            let walk = body.each_item(1, index, [body.return_if(same, body.flag(true))])
+            stmts = [walk, mir.ReturnStmt(value: body.flag(false))]
+    return mir.Task(name: "", params: params, type_params: 0, returns: returns, locals: body.locals, body: stmts, span: span)
+
+task show_body(change self: Mono, change body: Body, ty: mir.Ty) -> list[mir.Stmt]
+    let span = body.span
+    match ty
+        ListTy(item) ->
+            let out = body.new_local(mir.TextTy)
+            let index = body.new_local(mir.IntTy)
+            let value = body.item_at(body.read(0), index, item)
+            let shown = self.shown(value, span)
+            let parts = comma_then(body, out, index, [shown])
+            let walk = body.each_item(0, index, [mir.SetStmt(local: out, value: body.join_parts(parts))])
+            let last = body.join_parts([body.read(out), body.lit("]")])
+            return [mir.SetStmt(local: out, value: body.lit("[")), walk, mir.ReturnStmt(value: last)]
+        SetTy(key) ->
+            return self.show_keyed(change body, ty, key)
+        MapTy(key, _) ->
+            return self.show_keyed(change body, ty, key)
+        UnionTy(_) ->
+            return self.show_members(change body, ty)
+        AnyTy(_) ->
+            return self.show_members(change body, ty)
+        DataTy(_, _, _) ->
+            var stmts: list[mir.Stmt] = []
+            let count = self.variant_count(ty)
+            for variant in 0..count
+                let name = self.variant_name(ty, variant)
+                let fields = self.fields_of(ty, variant)
+                var parts = [body.lit(name)]
+                for index in 0..fields.len()
+                    let f = fields[index]
+                    let open = if index == 0 then "(" else ", "
+                    parts.push(body.lit("{open}{f.name}: "))
+                    parts.push(self.shown(body.slot_of(0, f.slot, f.ty), span))
+                if fields is not empty
+                    parts.push(body.lit(")"))
+                let same = body.cmp("Eq", body.tag_of(0), body.num(variant))
+                stmts.push(body.return_if(same, body.join_parts(parts)))
+            stmts.push(mir.ReturnStmt(value: body.lit("")))
+            return stmts
+        _ ->
+            return []
+
+task show_keyed(change self: Mono, change body: Body, ty: mir.Ty, key: mir.Ty) -> list[mir.Stmt]
+    let span = body.span
+    let is_set = match ty
+        SetTy(_) -> true
+        _ -> false
+    let open = if is_set then "set([" else "{{"
+    let close = if is_set then "])" else "}}"
+    let out = body.new_local(mir.TextTy)
+    let count = body.new_local(mir.IntTy)
+    let position = body.new_local(mir.IntTy)
+    let held = body.new_local(key)
+    let key_text = self.shown(body.read(held), span)
+    var parts = [key_text]
+    match ty
+        MapTy(_, value) ->
+            let found = body.value_at(0, position, value)
+            parts.push(body.lit(": "))
+            parts.push(self.shown(found, span))
+        _ -> skip()
+    let joined = comma_then(body, out, count, parts)
+    let inner = [mir.SetStmt(local: out, value: body.join_parts(joined)), mir.SetStmt(local: count, value: body.plus_one(body.read(count)))]
+    var stmts = [mir.SetStmt(local: out, value: body.lit(open)), mir.SetStmt(local: count, value: body.num(0))]
+    for s in body.each_key(0, key, position, held, inner)
+        stmts.push(s)
+    stmts.push(mir.ReturnStmt(value: body.join_parts([body.read(out), body.lit(close)])))
+    return stmts
+
+task show_members(change self: Mono, change body: Body, ty: mir.Ty) -> list[mir.Stmt]
+    let span = body.span
+    var stmts: list[mir.Stmt] = []
+    let members = self.held(ty)
+    for member in members
+        let id = self.types.id(member)
+        let value = self.shown(body.slot_of(0, 0, member), span)
+        stmts.push(body.return_if(body.has_tag(0, id), value))
+    stmts.push(mir.ReturnStmt(value: body.lit("")))
+    return stmts
+
+task equal_body(change self: Mono, change body: Body, ty: mir.Ty) -> list[mir.Stmt]
+    let span = body.span
+    var stmts: list[mir.Stmt] = []
+    match ty
+        ListTy(item) ->
+            stmts.push(body.unless(body.cmp("Eq", body.size(body.read(0)), body.size(body.read(1)))))
+            let index = body.new_local(mir.IntTy)
+            let left = body.item_at(body.read(0), index, item)
+            let right = body.item_at(body.read(1), index, item)
+            let same = self.equal_values(left, right, span)
+            stmts.push(body.each_item(0, index, [body.unless(same)]))
+        SetTy(key) ->
+            self.equal_keyed(change body, ty, key, change stmts)
+        MapTy(key, _) ->
+            self.equal_keyed(change body, ty, key, change stmts)
+        UnionTy(_) ->
+            self.equal_members(change body, ty, change stmts)
+        AnyTy(_) ->
+            self.equal_members(change body, ty, change stmts)
+        DataTy(_, _, _) ->
+            stmts.push(body.unless(body.cmp("Eq", body.tag_of(0), body.tag_of(1))))
+            let count = self.variant_count(ty)
+            for variant in 0..count
+                var inside: list[mir.Stmt] = []
+                let fields = self.fields_of(ty, variant)
+                for f in fields
+                    let left = body.slot_of(0, f.slot, f.ty)
+                    let right = body.slot_of(1, f.slot, f.ty)
+                    let same = self.equal_values(left, right, span)
+                    inside.push(body.unless(same))
+                inside.push(mir.ReturnStmt(value: body.flag(true)))
+                stmts.push(body.if_here(0, variant, inside))
+        _ -> skip()
+    stmts.push(mir.ReturnStmt(value: body.flag(true)))
+    return stmts
+
+task equal_keyed(change self: Mono, change body: Body, ty: mir.Ty, key: mir.Ty, change stmts: list[mir.Stmt])
+    let span = body.span
+    stmts.push(body.unless(body.cmp("Eq", body.size(body.read(0)), body.size(body.read(1)))))
+    let position = body.new_local(mir.IntTy)
+    let held = body.new_local(key)
+    let found = body.new_local(mir.IntTy)
+    let find = body.make(mir.MapFindExpr(value: body.read(1), key: body.read(held)), mir.IntTy)
+    let missing = body.cmp("Lt", body.read(found), body.num(0))
+    var inner = [mir.SetStmt(local: found, value: find), body.return_if(missing, body.flag(false))]
+    match ty
+        MapTy(_, value) ->
+            let left = body.value_at(0, position, value)
+            let same = self.equal_values(left, body.value_at(1, found, value), span)
+            inner.push(body.unless(same))
+        _ -> skip()
+    for s in body.each_key(0, key, position, held, inner)
+        stmts.push(s)
+
+task equal_members(change self: Mono, change body: Body, ty: mir.Ty, change stmts: list[mir.Stmt])
+    let span = body.span
+    stmts.push(body.unless(body.cmp("Eq", body.tag_of(0), body.tag_of(1))))
+    let members = self.held(ty)
+    for member in members
+        let id = self.types.id(member)
+        let same = self.equal_values(body.slot_of(0, 0, member), body.slot_of(1, 0, member), span)
+        stmts.push(body.return_if(body.has_tag(0, id), same))
+
+task compare_body(change self: Mono, change body: Body, ty: mir.Ty) -> list[mir.Stmt]
+    let span = body.span
+    let order = body.new_local(mir.IntTy)
+    var stmts: list[mir.Stmt] = []
+    match ty
+        ListTy(item) ->
+            let short = body.new_local(mir.IntTy)
+            let a_len = body.size(body.read(0))
+            let b_len = body.size(body.read(1))
+            let fewer = body.cmp("Lt", a_len, b_len)
+            let shorter = body.make(mir.IfExpr(condition: fewer, yes: a_len, otherwise: b_len), mir.IntTy)
+            stmts.push(mir.SetStmt(local: short, value: shorter))
+            let index = body.new_local(mir.IntTy)
+            let left = body.item_at(body.read(0), index, item)
+            let right = body.item_at(body.read(1), index, item)
+            let value = self.order_of(left, right, span)
+            let inner = body.decide(order, value)
+            stmts.push(mir.ForStmt(local: index, start: body.num(0), end: body.read(short), inclusive: false, body: inner))
+            let last = self.order_of(body.size(body.read(0)), body.size(body.read(1)), span)
+            stmts.push(mir.ReturnStmt(value: last))
+        DataTy(_, _, _) ->
+            let tags = self.order_of(body.tag_of(0), body.tag_of(1), span)
+            for s in body.decide(order, tags)
+                stmts.push(s)
+            let count = self.variant_count(ty)
+            for variant in 0..count
+                var inside: list[mir.Stmt] = []
+                let fields = self.fields_of(ty, variant)
+                for f in fields
+                    let value = self.order_of(body.slot_of(0, f.slot, f.ty), body.slot_of(1, f.slot, f.ty), span)
+                    for s in body.decide(order, value)
+                        inside.push(s)
+                stmts.push(body.if_here(0, variant, inside))
+            stmts.push(mir.ReturnStmt(value: body.num(0)))
+        _ -> skip()
+    return stmts
+
+# Lengths and tags go in first, so that no two different values read the
+# same. Only equal maps and sets may differ in order, so their entries add
+# up, as CPython's `frozenset` joins its entries with XOR.
+task hash_body(change self: Mono, change body: Body, ty: mir.Ty) -> list[mir.Stmt]
+    let span = body.span
+    let found = self.method_and_result("hash", ty, span)
+    if found is Found
+        let written = body.make(mir.CallExpr(id: found.slot, args: [], values: [body.read(0)]), found.result)
+        return [mir.ReturnStmt(value: self.hash_into(body.read(1), written, span))]
+    let out = body.new_local(mir.IntTy)
+    var stmts: list[mir.Stmt] = []
+    match ty
+        ListTy(item) ->
+            stmts.push(mir.SetStmt(local: out, value: body.hash_of("Int", body.read(1), body.size(body.read(0)))))
+            let index = body.new_local(mir.IntTy)
+            let value = body.item_at(body.read(0), index, item)
+            let hashed = self.hash_into(body.read(out), value, span)
+            stmts.push(body.each_item(0, index, [mir.SetStmt(local: out, value: hashed)]))
+        SetTy(key) ->
+            self.hash_keyed(change body, ty, key, out, change stmts)
+        MapTy(key, _) ->
+            self.hash_keyed(change body, ty, key, out, change stmts)
+        UnionTy(members) ->
+            stmts.push(mir.SetStmt(local: out, value: body.hash_of("Int", body.read(1), body.tag_of(0))))
+            for member in members
+                let id = self.types.id(member)
+                let value = self.hash_into(body.read(out), body.slot_of(0, 0, member), span)
+                stmts.push(body.return_if(body.has_tag(0, id), value))
+        DataTy(_, _, _) ->
+            stmts.push(mir.SetStmt(local: out, value: body.hash_of("Int", body.read(1), body.tag_of(0))))
+            let count = self.variant_count(ty)
+            for variant in 0..count
+                var inside: list[mir.Stmt] = []
+                let fields = self.fields_of(ty, variant)
+                for f in fields
+                    let value = self.hash_into(body.read(out), body.slot_of(0, f.slot, f.ty), span)
+                    inside.push(mir.SetStmt(local: out, value: value))
+                inside.push(mir.ReturnStmt(value: body.read(out)))
+                stmts.push(body.if_here(0, variant, inside))
+        _ -> skip()
+    stmts.push(mir.ReturnStmt(value: body.read(out)))
+    return stmts
+
+task hash_keyed(change self: Mono, change body: Body, ty: mir.Ty, key: mir.Ty, out: int, change stmts: list[mir.Stmt])
+    let span = body.span
+    let sum = body.new_local(mir.IntTy)
+    stmts.push(mir.SetStmt(local: sum, value: body.num(0)))
+    let position = body.new_local(mir.IntTy)
+    let held = body.new_local(key)
+    var entry = self.hash_into(body.num(0), body.read(held), span)
+    match ty
+        MapTy(_, value) ->
+            entry = self.hash_into(entry, body.value_at(0, position, value), span)
+        _ -> skip()
+    let inner = [mir.SetStmt(local: sum, value: body.hash_of("Sum", body.read(sum), entry))]
+    for s in body.each_key(0, key, position, held, inner)
+        stmts.push(s)
+    stmts.push(mir.SetStmt(local: out, value: body.hash_of("Int", body.read(1), body.read(sum))))
+
+# A task of `std/json.lcd`, by name.
+task json_task(change self: Mono, name: text, args: list[mir.Ty], span: diag.Span) -> int
+    let full = "@std.json.{name}"
+    var id = 0
+    for i in 0..self.source.len()
+        if self.source[i].name == full
+            id = i
+            break
+    return self.instance(id, args, span)
+
+task json_types(self: Mono) -> JsonTypes
+    for t in self.source
+        if t.name == "@std.json.wrong"
+            return JsonTypes(value: t.locals[0], error: t.returns)
+    return JsonTypes(value: mir.ErrorTy, error: mir.ErrorTy)
+
+# The task that gives the JSON text of a `ty`.
+task json_writer(change self: Mono, ty: mir.Ty, span: diag.Span) -> int
+    match ty
+        NoneTy -> return self.json_task("write_none", [], span)
+        TextTy -> return self.json_task("write_text", [], span)
+        FloatTy -> return self.json_task("write_float", [], span)
+        F32Ty -> return self.json_task("write_f32", [], span)
+        ListTy(item) -> return self.json_task("write_list", [item], span)
+        SetTy(item) -> return self.json_task("write_set", [item], span)
+        MapTy(_, value) -> return self.json_task("write_map", [value], span)
+        DataTy(_, _, _) -> return self.derived(JsonWriteDerived, ty, span)
+        UnionTy(_) -> return self.derived(JsonWriteDerived, ty, span)
+        _ -> return self.json_task("write_plain", [ty], span)
+
+# The task that reads a `ty` from a JSON tree.
+task json_reader(change self: Mono, ty: mir.Ty, span: diag.Span) -> int
+    match ty
+        ListTy(item) -> return self.json_task("read_list", [item], span)
+        SetTy(item) -> return self.json_task("read_set", [item], span)
+        MapTy(_, value) -> return self.json_task("read_map", [value], span)
+        DataTy(_, _, _) -> return self.derived(JsonReadDerived, ty, span)
+        UnionTy(_) -> return self.derived(JsonReadDerived, ty, span)
+        _ -> return self.json_task("read_{ty.name()}", [], span)
+
+task json_written(change self: Mono, value: mir.Expr, span: diag.Span) -> mir.Expr
+    let slot = self.json_writer(value.ty, span)
+    return call(slot, [value], mir.TextTy, span)
+
+# A `value` of a tree read as a `ty`, which gives `ty or JsonError`.
+task json_read(change self: Mono, value: mir.Expr, ty: mir.Ty, span: diag.Span) -> mir.Expr
+    let jt = self.json_types()
+    let slot = self.json_reader(ty, span)
+    let result = self.types.union([ty, jt.error])
+    return call(slot, [value], result, span)
+
+# A call to a task of `std/json.lcd` that takes no type arguments.
+task json_call(change self: Mono, name: text, args: list[mir.Expr], ty: mir.Ty, span: diag.Span) -> mir.Expr
+    let slot = self.json_task(name, [], span)
+    return call(slot, args, ty, span)
+
+# `value.wrong(wanted)`, as a value of `result`.
+task json_wrong(change self: Mono, body: Body, value: mir.Expr, wanted: text, result: mir.Ty) -> mir.Expr
+    let jt = self.json_types()
+    let found = self.json_call("wrong", [value, body.lit(wanted)], jt.error, body.span)
+    return self.wrap(found, result, body.span)
+
+# A type as an error message at run time names it: with no module.
+task json_wanted(ty: mir.Ty) -> text
+    match ty
+        DataTy(name, _, _) ->
+            return ast.short_name(name)
+        UnionTy(members) ->
+            var names: list[text] = []
+            for m in members
+                names.push(json_wanted(m))
+            return mir.join_texts(names, " or ")
+        _ ->
+            return diag.plain(ty.name())
+
+task json_write_body(change self: Mono, body: Body, ty: mir.Ty) -> list[mir.Stmt]
+    let span = body.span
+    var stmts: list[mir.Stmt] = []
+    let is_choice = self.is_choice_ty(ty)
+    match ty
+        UnionTy(members) ->
+            for member in members
+                let id = self.types.id(member)
+                let written = self.json_written(body.slot_of(0, 0, member), span)
+                stmts.push(body.return_if(body.has_tag(0, id), written))
+        _ ->
+            let count = self.variant_count(ty)
+            for variant in 0..count
+                let fields = self.fields_of(ty, variant)
+                let name = self.variant_name(ty, variant)
+                var parts: list[mir.Expr] = []
+                if is_choice and fields is empty
+                    parts.push(body.lit("\"{name}\""))
+                else
+                    let outer = if is_choice then "{{\"{name}\":" else ""
+                    parts.push(body.lit("{outer}{{"))
+                    for index in 0..fields.len()
+                        let f = fields[index]
+                        let comma = if index == 0 then "" else ","
+                        parts.push(body.lit("{comma}\"{f.name}\":"))
+                        parts.push(self.json_written(body.slot_of(0, f.slot, f.ty), span))
+                    parts.push(body.lit(if is_choice then "}}}}" else "}}"))
+                let same = body.cmp("Eq", body.tag_of(0), body.num(variant))
+                stmts.push(body.return_if(same, body.join_parts(parts)))
+    stmts.push(mir.ReturnStmt(value: body.lit("")))
+    return stmts
+
+task json_read_body(change self: Mono, change body: Body, ty: mir.Ty, result: mir.Ty) -> list[mir.Stmt]
+    let span = body.span
+    var stmts: list[mir.Stmt] = []
+    match ty
+        UnionTy(members) ->
+            for member in members
+                let tags = mir.json_tags(member, self.datas)
+                let test_tags = body.make(mir.TagInExpr(inner: body.read(0), tags: tags), mir.BoolTy)
+                let read = self.json_read(body.read(0), member, span)
+                stmts.push(body.return_if(test_tags, retyped(read, result)))
+            let wrong = self.json_wrong(body, body.read(0), json_wanted(ty), result)
+            stmts.push(mir.ReturnStmt(value: wrong))
+            return stmts
+        _ -> skip()
+    if self.is_choice_ty(ty)
+        let jt = self.json_types()
+        let error_id = self.types.id(jt.error)
+        let wanted = body.lit(json_wanted(ty))
+        let named = self.types.union([mir.TextTy, jt.error])
+        let got = body.new_local(named)
+        let name = body.new_local(mir.TextTy)
+        let inside = body.new_local(jt.value)
+        let asked = self.json_call("variant_name", [body.read(0), wanted], named, span)
+        stmts.push(mir.SetStmt(local: got, value: asked))
+        let failed = self.wrap(view(body.read(got), jt.error, span), result, span)
+        stmts.push(body.return_if(body.has_tag(got, error_id), failed))
+        stmts.push(mir.SetStmt(local: name, value: view(body.read(got), mir.TextTy, span)))
+        let fields_call = self.json_call("variant_fields", [body.read(0)], jt.value, span)
+        stmts.push(mir.SetStmt(local: inside, value: fields_call))
+        let count = self.variant_count(ty)
+        for variant in 0..count
+            let vname = self.variant_name(ty, variant)
+            let here = body.cmp("Eq", body.read(name), body.lit(vname))
+            let step = ".{vname}"
+            # `"Red"` alone, or `{"Circle": {...}}`, and no other form.
+            var whole = inside
+            var tag = 6
+            if self.fields_of(ty, variant) is empty
+                whole = 0
+                tag = 4
+            let fits = body.make(mir.TagInExpr(inner: body.read(whole), tags: [tag]), mir.BoolTy)
+            let unfit = body.make(mir.NotExpr(inner: fits), mir.BoolTy)
+            let wrong = self.json_wrong(body, body.read(0), json_wanted(ty), result)
+            var inner = [body.return_if(unfit, wrong)]
+            for s in self.json_read_fields(change body, ty, variant, inside, step, result)
+                inner.push(s)
+            stmts.push(mir.IfStmt(branches: [mir.Branch(condition: here, body: inner)], otherwise: []))
+        let wrong = self.json_wrong(body, body.read(0), json_wanted(ty), result)
+        stmts.push(mir.ReturnStmt(value: wrong))
+        return stmts
+    let object = body.make(mir.TagInExpr(inner: body.read(0), tags: mir.json_tags(ty, self.datas)), mir.BoolTy)
+    let not_object = body.make(mir.NotExpr(inner: object), mir.BoolTy)
+    let wrong = self.json_wrong(body, body.read(0), json_wanted(ty), result)
+    stmts.push(body.return_if(not_object, wrong))
+    for s in self.json_read_fields(change body, ty, 0, 0, "", result)
+        stmts.push(s)
+    return stmts
+
+# Reads each field of a variant from the object in `object`, and returns the
+# value. A field with a default may be left out.
+task json_read_fields(change self: Mono, change body: Body, ty: mir.Ty, variant: int, object: int, step: text, result: mir.Ty) -> list[mir.Stmt]
+    var stmts: list[mir.Stmt] = []
+    match ty
+        DataTy(_, id, args) ->
+            let span = body.span
+            let jt = self.json_types()
+            let error_id = self.types.id(jt.error)
+            let defaults = self.datas[id].variants[variant].defaults
+            let total = self.layout(ty, variant, -1).total
+            var built: list[mir.Slot] = []
+            let fields = self.fields_of(ty, variant)
+            for i in 0..fields.len()
+                let f = fields[i]
+                let local = body.new_local(f.ty)
+                let field_result = self.types.union([f.ty, jt.error])
+                let got = body.new_local(field_result)
+                let text_name = body.lit(f.name)
+                let tree = self.json_call("field_value", [body.read(object), text_name], jt.value, span)
+                let read = self.json_read(tree, f.ty, span)
+                let missing = view(body.read(got), jt.error, span)
+                let step_text = body.lit("{step}.{f.name}")
+                let at = self.json_call("at", [missing, step_text], jt.error, span)
+                let failed = self.wrap(at, result, span)
+                let reading = [mir.SetStmt(local: got, value: read), body.return_if(body.has_tag(got, error_id), failed), mir.SetStmt(local: local, value: view(body.read(got), f.ty, span))]
+                let default = defaults[i]
+                if default is mir.Expr
+                    let value = self.finish_default(default, args)
+                    let has = self.json_call("field_has", [body.read(object), text_name], mir.BoolTy, span)
+                    let branch = mir.Branch(condition: has, body: reading)
+                    stmts.push(mir.IfStmt(branches: [branch], otherwise: [mir.SetStmt(local: local, value: value)]))
+                else
+                    for s in reading
+                        stmts.push(s)
+                built.push(mir.Slot(slot: f.slot, value: body.read(local)))
+            let made = body.make(mir.NewExpr(tag: variant, counted: total, fields: built), ty)
+            stmts.push(mir.ReturnStmt(value: self.wrap(made, result, span)))
+        _ -> skip()
+    return stmts
