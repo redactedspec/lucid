@@ -22,7 +22,7 @@ use resolve::{load, package_files, package_root};
 use std::io::Write;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--target web] [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\n       lucid fix [--json] [PATH]\n       lucid explain [--json] CODE\n       lucid context [--json] MODULE\n       lucid fmt [--check] [PATH]\n       lucid package [PATH]\n       lucid lsp\nPATH is a file or a package directory, by default the current directory.";
+const USAGE: &str = "usage: lucid run [PATH [ARGUMENTS]]\n       lucid build [--target web] [--json] [PATH]\n       lucid check [--json] [--costs | --unsafe] [PATH]\n       lucid test [--json] [PATH]\n       lucid fix [--json] [PATH]\n       lucid explain [--json] CODE\n       lucid context [--json] MODULE\n       lucid fmt [--check] [PATH]\n       lucid package [PATH]\n       lucid lsp\n       lucid --version [--json]\nPATH is a file or a package directory, by default the current directory.";
 
 /// Set for the child process of `lucid test`, to the place of its first test.
 const TEST_FROM: &str = "LUCID_TEST_FROM";
@@ -48,6 +48,8 @@ fn cli(args: &[String]) -> ExitCode {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let Some((&command, mut rest)) = args.split_first() else { return usage() };
     match (command, rest) {
+        ("--version", []) => return version(false),
+        ("--version", ["--json"]) => return version(true),
         ("explain", [code]) if !code.starts_with('-') => return explain(code, false),
         ("explain", ["--json", code]) => return explain(code, true),
         ("explain", _) => return usage(),
@@ -874,6 +876,16 @@ fn render_tests_json(result: &FileTests) -> Vec<String> {
             )
         })
         .collect()
+}
+
+/// The version comes from `Cargo.toml`, the one place it is written.
+fn version(json: bool) -> ExitCode {
+    let v = env!("CARGO_PKG_VERSION");
+    emit(
+        std::io::stdout(),
+        &if json { format!("{{\"version\":\"{v}\"}}\n") } else { format!("lucid {v}\n") },
+    );
+    ExitCode::SUCCESS
 }
 
 fn usage() -> ExitCode {

@@ -894,6 +894,15 @@ fn bad_usage_exits_2() {
     assert_eq!(lucid(&repo(), &["check", "--nope"]).status.code(), Some(2));
     assert_eq!(lucid(&repo(), &["nope"]).status.code(), Some(2));
     assert_eq!(lucid(&repo(), &["run", "--json", "x.lcd"]).status.code(), Some(2));
+    assert_eq!(lucid(&repo(), &["--version", "x"]).status.code(), Some(2));
+}
+
+#[test]
+fn version_prints_one_line() {
+    let output = lucid(&repo(), &["--version"]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(text(&output.stdout), "lucid 1.0.0\n");
+    assert_eq!(text(&lucid(&repo(), &["--version", "--json"]).stdout), "{\"version\":\"1.0.0\"}\n");
 }
 
 /// Runs `lucid` with its output pipes closed, and returns the exit code.

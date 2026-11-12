@@ -360,6 +360,7 @@ sh try.sh lucid 07                            # in a benchmark workspace: one at
 | `lucid context [--json] MODULE` | Print a compact API | Works for a file, a package directory, which means every file in its `src`, or `std.NAME`. `context.rs` reads tokens, not the tree, so a file with errors still shows its API |
 | `lucid doc` | Generate docs | Planned |
 | `lucid package [PATH]` | Write a library's `.lpk` archive and index line, for upload to a registry | Works. Checks the library first, writes `NAME-VERSION.lpk` to the current directory, and prints the index line. See "Registry" |
+| `lucid --version [--json]` | Print the version | Works: `lucid 1.0.0`, or `{"version":"1.0.0"}` with `--json`. The text is `CARGO_PKG_VERSION`, and every crate has the same version, by decision 227 |
 | `lucid lsp` | A language server on stdin and stdout | Works: diagnostics, formatting, go to definition, and hover. See "`lucid lsp`" under "Ecosystem" |
 
 `run.py` also reports peak memory, on Windows only, with the peak of an empty program taken off the Lucid figure, since `lucid run` holds the compiler. The `LUCID_NAIVE` environment variable turns ownership optimizations off, for tests and for measuring them.

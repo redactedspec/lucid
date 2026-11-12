@@ -30,6 +30,7 @@ Every tool has a stable `--json` output.
 | `lucid context [--json] MODULE` | Compact public API of a file, a package directory, or `std.NAME`: each public header with its `##` doc comments, and the fields, variants, or tasks of a type, choice, or trait, with no bodies. `--json` gives `module`, `line`, `kind`, `name`, `signature`, and `doc` |
 | `lucid doc --json` | Full docs as data |
 | `lucid lsp` | A language server on stdin and stdout, for an editor: diagnostics, formatting, go to definition, and hover with a name's type or declaration and `##` comment. Positions count UTF-16 units. See "Editors" below |
+| `lucid --version [--json]` | `lucid 1.0.0`, or `{"version":"1.0.0"}` with `--json`, from the crate's version, by decision 227 |
 | `lucid check --unsafe` | `unsafe` blocks and `extern` tasks: `file:line:column: unsafe: kind` on stdout, or `kind`, `file`, `line`, and `column` with `--json`. `kind` is `block` or `extern`. `std` stays out |
 | `lucid check --costs` | Copy and reference count sites: `file:line:column: kind: message` on stdout, or `kind`, `type`, `file`, `line`, and `column` with `--json`. A `copy` is a value held twice that a later write changes, which costs O(n) if both holders stay. A `count` costs one count operation. Exit code 0. A program with an error or an unbuilt feature reports that instead, with exit code 1 |
 
