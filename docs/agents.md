@@ -1,42 +1,59 @@
-# Agent-Friendly Design
+# Designing for Agents
 
-"Friendly to agents" must be checkable, or it is only a slogan. Each rule here is a test for proposed features.
+"Easy for agents to write" means nothing unless it can be checked. This
+document turns it into rules a proposed feature must pass, lists the
+tools and the shape of their output, and describes the benchmark that
+measures whether any of it works.
 
 ## Language rules
 
-1. **One way.** Each common job has one idiomatic form. Agents do not have to choose, and output stays consistent.
-2. **Context-free parsing.** Any snippet parses without knowledge of other files.
-3. **Local reasoning.** A task signature tells everything: inputs, mutation (`change`), ownership (`take`), and failure (`or` an error type).
-4. **No hidden control flow.** No exceptions, macros, implicit conversions, or inheritance. Operator overloading is limited to arithmetic, equality, and ordering traits.
-5. **Explicit at call sites.** `change` shows mutation. `try` shows a possible early exit. `spawn` shows concurrency.
-6. **Familiar on purpose.** Prefer forms common in Python and TypeScript, so models have strong priors. New syntax needs a reason.
-7. **Small.** The whole language must fit in one context window. See the token budget in `vision.md`.
-8. **No formatting decisions.** `lucid fmt` has zero options. Diffs show only meaning.
+1. **One way.** Each common job has one idiomatic form. An agent does
+   not have to choose, and output stays consistent.
+2. **Context-free parsing.** Any snippet parses without knowledge of
+   other files.
+3. **Local reasoning.** A task's signature says everything a caller
+   needs: its inputs, what it changes (`change`), what it takes over
+   (`take`), and how it fails (`or` an error type).
+4. **No hidden control flow.** No exceptions, macros, implicit
+   conversions, or inheritance. Operators can be overloaded only for
+   arithmetic, equality, and ordering, through traits.
+5. **Visible at the call.** `change` marks mutation, `try` an early exit,
+   `spawn` a new thread.
+6. **Familiar on purpose.** Where possible, use forms common in Python
+   and TypeScript, which models have seen most. New syntax needs a
+   reason.
+7. **Small.** The whole language must fit in one context window; see the
+   budget in [vision.md](vision.md#measures).
+8. **No layout decisions.** `lucid fmt` has no options, so a diff shows
+   only meaning.
 
-## Tool rules
+## Tools
 
-Every tool has a stable `--json` output.
+Every command has stable `--json` output.
 
-| Command | Purpose for agents |
+| Command | What it gives |
 | --- | --- |
-| `lucid check --json` | Fast diagnostics, no code generation |
-| `lucid build --json` | A standalone executable, or the diagnostics that `lucid check --json` gives |
-| `lucid build --target web` | `NAME.js`, which runs the program in a browser or under `node`. A user `extern` or `.pointer()` there is E0905. `lucid run` of a program with `std.dom` is E0906 |
-| `lucid fix [--json] [PATH]` | Make the fix of each error that has one, in place, and list each as `file:line:column: fixed CODE: description`, or `code`, `description`, `file`, `line`, and `column` with `--json`. If two fixes touch the same text, only the first is made, and a second run makes the next. A lexer error stops checking, so its fixes come a run before those of the checker. `std` is never changed |
-| `lucid explain [--json] CODE` | Cause, example, and fix for an error code, from `errors.md`. `--json` gives `code`, `title`, `cause`, `example`, and `fix` |
-| `lucid test --json` | Per-test results of a file, or of every file in a package's `src`, with values on failure: `name`, `passed`, `file`, `line`, `column`, and `output`, which holds what the test printed and, on failure, the trap message and trace |
-| `lucid fmt [--check] [PATH]` | Put a file, or every file of a package, in the one canonical layout, changing only space and line breaks. `--check` changes nothing, lists each file that would change, and exits with 1 if any would. A file with a lexer error gets its diagnostics and stays as it is |
-| `lucid package [PATH]` | Check a library, write its archive `NAME-VERSION.lpk` to the current directory, and print its line of the registry's index, for upload to a registry |
-| `lucid context [--json] MODULE` | Compact public API of a file, a package directory, or `std.NAME`: each public header with its `##` doc comments, and the fields, variants, or tasks of a type, choice, or trait, with no bodies. `--json` gives `module`, `line`, `kind`, `name`, `signature`, and `doc` |
-| `lucid doc --json` | Full docs as data |
-| `lucid lsp` | A language server on stdin and stdout, for an editor: diagnostics, formatting, go to definition, and hover with a name's type or declaration and `##` comment. Positions count UTF-16 units. See "Editors" below |
-| `lucid --version [--json]` | `lucid 1.0.0`, or `{"version":"1.0.0"}` with `--json`, from the crate's version, by decision 227 |
-| `lucid check --unsafe` | `unsafe` blocks and `extern` tasks: `file:line:column: unsafe: kind` on stdout, or `kind`, `file`, `line`, and `column` with `--json`. `kind` is `block` or `extern`. `std` stays out |
-| `lucid check --costs` | Copy and reference count sites: `file:line:column: kind: message` on stdout, or `kind`, `type`, `file`, `line`, and `column` with `--json`. A `copy` is a value held twice that a later write changes, which costs O(n) if both holders stay. A `count` costs one count operation. Exit code 0. A program with an error or an unbuilt feature reports that instead, with exit code 1 |
+| `lucid check --json` | Diagnostics, quickly, with no code generation |
+| `lucid build --json` | A standalone executable, or the diagnostics `lucid check --json` would give |
+| `lucid build --target web` | `NAME.js`, which runs the program in a browser or under `node`. A user `extern` or `.pointer()` there is E0905. `lucid run` of a program that uses `std.dom` is E0906 |
+| `lucid fix [--json] [PATH]` | Makes the fix of each error that has one, in place, and lists each as `file:line:column: fixed CODE: description`, or as `code`, `description`, `file`, `line`, and `column` with `--json`. If two fixes touch the same text only the first is made; a second run makes the next. A lexer error stops checking, so its fixes come one run before the checker's. `std` is never changed |
+| `lucid explain [--json] CODE` | The cause, an example, and the fix for an error code, from [errors.md](errors.md). `--json` gives `code`, `title`, `cause`, `example`, and `fix` |
+| `lucid test --json` | Results per test, for a file or for every file in a package's `src`: `name`, `passed`, `file`, `line`, `column`, and `output`, which holds what the test printed and, on failure, the trap message and trace |
+| `lucid fmt [--check] [PATH]` | Puts a file, or every file of a package, in the one layout, changing only spaces and line breaks. `--check` changes nothing, lists each file that would change, and exits with 1 if any would. A file with a lexer error gets its diagnostics and is left alone |
+| `lucid package [PATH]` | Checks a library, writes its archive `NAME-VERSION.lpk` to the current directory, and prints its line for the registry's index |
+| `lucid context [--json] MODULE` | The public API of a file, a package directory, or `std.NAME`, compactly: each public header with its `##` doc comment, and the fields, variants, or tasks of a type, choice, or trait, with no bodies. `--json` gives `module`, `line`, `kind`, `name`, `signature`, and `doc` |
+| `lucid doc --json` | The full docs, as data |
+| `lucid lsp` | A language server on stdin and stdout: diagnostics, formatting, go to definition, and hover showing a name's type or declaration and its `##` comment. Positions count UTF-16 units. See "Editors" below |
+| `lucid --version [--json]` | `lucid 1.0.0`, or `{"version":"1.0.0"}`, from the crate's version |
+| `lucid check --unsafe` | Each `unsafe` block and `extern` task, as `file:line:column: unsafe: kind`, or as `kind`, `file`, `line`, and `column` with `--json`. `kind` is `block` or `extern`. `std` is left out |
+| `lucid check --costs` | Each copy and reference-count site, as `file:line:column: kind: message`, or as `kind`, `type`, `file`, `line`, and `column` with `--json`. A `copy` is a value held twice that a later write changes, which costs O(n) if both holders stay. A `count` costs one count operation. Exits with 0. A program with an error or an unbuilt feature reports that instead and exits with 1 |
 
 ## Editors
 
-Point any editor with a language server client at the command `lucid lsp`, for files ending in `.lcd`. It syncs whole documents. No editor extension ships yet, by decision 202, so VS Code, which needs one, has no support. In Neovim 0.11 or later:
+Point any editor with a language server client at `lucid lsp`, for files
+ending in `.lcd`. It syncs whole documents. No editor extension ships yet
+(decision 202), so VS Code, which needs one, is not supported. In Neovim
+0.11 or later:
 
 ```lua
 vim.filetype.add({ extension = { lcd = 'lucid' } })
@@ -44,7 +61,7 @@ vim.lsp.config('lucid', { cmd = { 'lucid', 'lsp' }, filetypes = { 'lucid' }, roo
 vim.lsp.enable('lucid')
 ```
 
-## Diagnostics format
+## Diagnostics
 
 Every diagnostic has this shape:
 
@@ -68,30 +85,59 @@ Every diagnostic has this shape:
 }
 ```
 
-Rules:
+A code never changes meaning once released. The compiler reports every
+error it can find in one run, not only the first, in order of position
+in the source. `column` counts Unicode characters from 1, and
+`end_column` is exclusive.
 
-- Codes never change meaning once released.
-- The compiler reports all errors it can find in one run, not just the first.
-- Each error says what to do next, where a likely fix exists. A fix that is near certain also goes in `fixes`, which `lucid fix` makes, and text output shows it as `  fix: description`. Fixes exist now for E0101, E0106, and E0301 with one close spelling: one edit away per three characters, as in rustc, with no other name at the same distance.
-- Output order is deterministic: by source position.
-- `column` counts Unicode characters, from 1. `end_column` is exclusive.
+Where a likely fix exists, the message says what to do. A fix that is
+nearly certain also goes in `fixes`, where `lucid fix` can make it, and
+text output shows it as `  fix: description`. Fixes exist today for
+E0101, E0106, and E0301 when there is one close spelling: at most one
+edit per three characters, as in rustc, with no other name at the same
+distance.
 
-### Error codes
+A parser error on a line that already has a lexer error is dropped,
+since it is usually a side effect. Type checking runs only on a file with
+no syntax errors. If a file uses a feature that is not built, `lucid run`
+reports only E0901, because the missing feature could supply names and
+types that other errors depend on; `lucid check` then reports nothing
+beyond syntax errors, for the same reason.
 
-A parser error on a line that already has a lexer error is dropped, since it is usually a side effect.
+Every code has a golden test in `tests/fail/` or a test in
+`compiler/tests/golden.rs`. [errors.md](errors.md) lists each code with
+its cause, an example, and a fix, and `lucid explain CODE` prints one
+entry.
 
-Type checking runs only on a file with no syntax errors. If a file uses a feature that is not built, `lucid run` reports only E0901, because that feature could supply the names and types that other errors depend on. For the same reason, `lucid check` then reports nothing beyond syntax errors.
+## The agent guide
 
-Every code has a golden test in `tests/fail/`, or a test in `compiler/tests/golden.rs`. [errors.md](errors.md) lists every code, with its cause, an example, and a fix, and `lucid explain CODE` prints one entry.
+Models have no Lucid in their training data, so the
+[agent guide](agent-guide.md) and the diagnostics carry the whole load.
+The guide is one compact file with everything that runs today, meant to
+be pasted into an agent's context. It lists only what works, and
+features move into it as they are built. A golden test checks that it
+stays under its token budget and that all of its code runs.
 
-## Agent onboarding
+## The benchmark
 
-The repository ships [agent-guide.md](agent-guide.md). It is one compact file with everything that runs today, for pasting into any agent context. It lists only what works, so features move into it as they are built. A golden test checks that it stays under the token budget and that all its code runs.
+A trial of 10 tasks ran at M3, so that a problem with the syntax would
+show up before the language froze. It passed all 10 on the first
+attempt. Its tasks are in `benchmarks/agent-trial/`.
 
-Models have no Lucid training data, so this guide and the diagnostics carry the whole load. Evidence is in [research.md](research.md).
+The full benchmark, in `benchmarks/agent-bench/`, is a fixed set of 50
+tasks, each checked against the output of a Python reference; tasks 01
+to 10 are the trial's. A Lucid agent gets only `agent-guide.md`. The
+same tasks run in Python and TypeScript for comparison. A second Lucid
+arm gets a guide with its warnings removed by `strip_guide.py`, which
+shows which rules go against what models expect, and how far the
+diagnostics alone can carry an agent. `score.py` counts first-attempt
+compiles, first-attempt passes, and repair turns. `prompt.md` holds the
+prompt and the arms, and decision 148 the method.
 
-## Agent benchmark
+The results, and their limits, are in
+[research.md](research.md#m5-agent-benchmark). A failure that repeats is
+treated as a defect in the language or in the diagnostics.
 
-A 10-task trial ran at M3, so that a syntax problem would surface before the language freezes. It passed 10 of 10 on the first attempt, with limits stated in [research.md](research.md). Its tasks are in `benchmarks/agent-trial/`. The full benchmark is built in `benchmarks/agent-bench/`. It has run in full, with results in [research.md](research.md). It is a fixed set of 50 programming tasks, each checked against expected output from a Python reference. Tasks 01 to 10 are the trial's. Lucid agents get only `agent-guide.md`. The benchmark tracks first-attempt compile rate, first-attempt pass rate, and repair turns, with `score.py`. It compares the same tasks in Python and TypeScript. A second Lucid arm uses a guide with its warnings removed by `strip_guide.py`, to show which rules go against what models expect, and to test the diagnostics. `prompt.md` holds the subject prompt and the arms, and decision 148 the method. Treat a repeated failure as a language or diagnostics defect.
-
-Both run as normal Claude Code sessions or subagents, with no API key, and are split over several sessions to fit plan limits. See `docs/claude-code.md`.
+Both the trial and the benchmark run as ordinary Claude Code sessions,
+with no API key, split over several sessions to fit plan limits; see
+[claude-code.md](claude-code.md).
