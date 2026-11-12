@@ -30,11 +30,11 @@ fn main() {
     let wasm = ["--target", "wasm32-unknown-unknown", "--crate-type", "cdylib"];
     let runtime = out.join("runtime");
     let wasm_args = ["-C", "link-arg=--export-table", "-C", "link-arg=--growable-table"];
-    build("../runtime", &runtime, &wasm, &wasm_args, "");
+    build(&runtime, &wasm, &wasm_args);
     let wasm = runtime.join("wasm32-unknown-unknown/release/lucid_rt.wasm");
     let library = ["--features", "exe", "--crate-type", "staticlib"];
     let print = ["--print", "native-static-libs"];
-    let libs = static_libs(&build("../runtime", &runtime, &library, &print, ""));
+    let libs = static_libs(&build(&runtime, &library, &print));
     let name = if windows { "lucid_rt.lib" } else { "liblucid_rt.a" };
     let lib = runtime.join("release").join(name);
     let backend = out.join("backend");
@@ -90,14 +90,8 @@ fn linked_paths(stdout: &str) -> Vec<String> {
 
 /// Builds the runtime's library in release with `cargo rustc`, and gives its
 /// stderr.
-fn build(
-    dir: &str,
-    target: &Path,
-    cargo_args: &[&str],
-    rustc_args: &[&str],
-    inner: &str,
-) -> String {
-    build_with(dir, target, cargo_args, rustc_args, inner).0
+fn build(target: &Path, cargo_args: &[&str], rustc_args: &[&str]) -> String {
+    build_with("../runtime", target, cargo_args, rustc_args, "").0
 }
 
 /// Builds a crate's library in release with `cargo rustc`, and gives its
