@@ -2,7 +2,7 @@
 name = "lucid_backend"
 version = "1.0.0"
 edition = "2024"
-license = "GPL-3.0-or-later"
+license = "MIT OR Apache-2.0"
 
 [features]
 # The C `main` of a built program, in the library that `build.rs` makes for

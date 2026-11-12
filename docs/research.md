@@ -663,16 +663,15 @@ Sources: [Rust reference, Operator expressions](https://doc.rust-lang.org/refere
 
 ## License
 
-Decision 154.
+Decision 232, which supersedes decision 154.
 
-- **The problem.** GCC's exception says GCC may combine its runtime libraries with a compiled program, and that the exception exists to let non-GPL programs use them. Lucid has the same shape: `lucid build` puts `lucid_rt`, `std`, and derived tasks into every program.
-- **Why not GCC's text.** It defines "GCC" as the GNU Compiler Collection, and the document may be copied only verbatim. Using it would need a rewritten exception, which is new legal text.
-- **The Classpath exception.** It permits linking the library with independent modules into an executable under any terms. It speaks of linking, so `LICENSE-EXCEPTION` states that compiling `std` into a program counts, and covers generated code too. That added notice is the owner's grant, and has not had legal review.
-- **Weak ground.** No lawyer read this. Have it checked before the first public release.
+- **The problem.** `lucid build` puts `lucid_rt`, `std`, and derived tasks into every program, so the license of those parts reaches every program built with Lucid. Under the GPL that needed a linking exception, which decision 154 took from Classpath and extended in a notice of its own, with no legal review.
+- **MIT or Apache-2.0.** Both are permissive, so a built program may use any license with no exception text. Apache-2.0 adds an explicit patent grant. Offering either, at the user's option, is the form Rust and most of its crates use: `serde` and `libc` in the cargo registry ship the same `LICENSE-MIT` and `LICENSE-APACHE`, and the files here are copied from `serde` 1.0.229.- **Notices in built programs.** MIT asks that its notice go with "all copies or substantial portions of the Software", and a built program holds runtime code. Rust's standard library has the same licenses and is compiled into every Rust program, and Rust programs ship without its notice in common practice: from memory, not read for this entry.
+- **Weak ground.** No lawyer read this. The owner's license review before the first public release still stands.
 
-Level: **Read** for both exception texts, through SPDX's copies.
+Level: **Read** for the two license texts, through the copies in the cargo registry.
 
-Sources: [GCC Runtime Library Exception 3.1](https://www.gnu.org/licenses/gcc-exception-3.1.html), [SPDX GCC-exception-3.1](https://spdx.org/licenses/GCC-exception-3.1.html), [SPDX Classpath-exception-2.0](https://spdx.org/licenses/Classpath-exception-2.0.html), [GPL version 3](https://www.gnu.org/licenses/gpl-3.0.html).
+Sources: [MIT license, SPDX](https://spdx.org/licenses/MIT.html), [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0), [Rust API guidelines, C-PERMISSIVE](https://rust-lang.github.io/api-guidelines/necessities.html#crate-and-its-dependencies-have-a-permissive-license-c-permissive).
 
 ## WebAssembly
 

@@ -41,4 +41,6 @@ Read in this order:
 
 ## License
 
-Lucid is licensed under the GNU General Public License, version 3 or later: see [LICENSE](LICENSE). The runtime and standard library, which every built program contains, add the Classpath exception in [LICENSE-EXCEPTION](LICENSE-EXCEPTION), so a program built with Lucid may use any license.
+Lucid is licensed under either of the [MIT license](LICENSE-MIT) or the [Apache License, Version 2.0](LICENSE-APACHE), at your option. A program built with Lucid may use any license.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in Lucid by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
