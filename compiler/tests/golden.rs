@@ -367,7 +367,7 @@ fn stage_dumps_are_stable() {
                     // exists, by decision 217.
                     let later = file == "tests/fail/extern_missing.lcd";
                     let lucid_stage = matches!(stage, "tokens" | "ast" | "resolved")
-                        || (stage == "checked" && !later);
+                        || (matches!(stage, "checked" | "mir") && !later);
                     let second_exe = if lucid_stage { &ported } else { Path::new(LUCID) };
                     let (first, second) =
                         (dump(file, stage, Path::new(LUCID)), dump(file, stage, second_exe));
