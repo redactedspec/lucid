@@ -148,7 +148,7 @@ Started after the version 1.0 promise. Designed by decisions 214 to 220, see "Se
 
 **Exit:** the Lucid-written compiler builds itself. A second build from that output is byte-identical.
 
-## M10: Release readiness
+## M10: Release readiness (done)
 
 Started after M9. Designed by decisions 227 to 230. No language change. Build in this order:
 
@@ -158,7 +158,7 @@ Started after M9. Designed by decisions 227 to 230. No language change. Build in
 - [x] The web loader checked in Firefox, by decision 230. Firefox throws `InternalError` on a stack overflow, which the loader now reads too
 - [x] Release steps in `compiler.md`, under "Release": build on Windows and in WSL, run every test, and record the SHA-256 of each binary in the tag, by decision 229
 - [x] License review, by the owner, before any public release
-- [ ] Push to `origin`, which deploys the site, by the owner
+- [x] Push to `origin`, which deploys the site, run by Claude at the owner's request. Version 1.0.0 is tagged `v1.0.0`, with the hash of each binary
 
 **Exit:** `lucid --version` prints `lucid 1.0.0` on Windows and Linux, every test passes on both, and each finding of the ultra review is fixed or answered in `decisions.md`.
 
