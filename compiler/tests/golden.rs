@@ -1760,3 +1760,15 @@ fn language_server_answers_an_editor() {
     send(r#"{"jsonrpc":"2.0","method":"exit"}"#.into());
     assert_eq!(server.wait().expect("cannot wait").code(), Some(0));
 }
+
+/// An empty `LUCID_DUMP` counts as unset, as in the Lucid compiler.
+#[test]
+fn empty_dump_is_unset() {
+    let output = Command::new(LUCID)
+        .current_dir(repo())
+        .args(["check", "examples/hello.lcd"])
+        .env("LUCID_DUMP", "")
+        .output()
+        .expect("cannot start lucid");
+    assert!(output.status.success(), "{}", text(&output.stderr));
+}

@@ -96,7 +96,8 @@ fn cli(args: &[String]) -> ExitCode {
         _ => return usage(),
     };
     let dump = match std::env::var("LUCID_DUMP") {
-        Ok(name) if command == "check" && !costs => match dump::Stage::named(&name) {
+        // Empty counts as unset, as in the Lucid compiler.
+        Ok(name) if command == "check" && !costs && !name.is_empty() => match dump::Stage::named(&name) {
             Some(stage) => Some(stage),
             None => {
                 emit(
