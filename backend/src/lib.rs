@@ -176,10 +176,7 @@ pub fn link(object: &[u8], exe: &str, backend: bool) -> Result<(), String> {
     if std::path::Path::new(exe).is_dir() {
         return Err(format!("cannot write the program to `{exe}`: a directory has that name"));
     }
-    let mut command = match linker() {
-        Ok(command) => command,
-        Err(problem) => return Err(problem.into()),
-    };
+    let mut command = linker()?;
     let dir = match stage() {
         Ok(dir) => dir,
         Err(e) => return Err(format!("cannot make a staging directory: {e}")),
