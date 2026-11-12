@@ -97,17 +97,19 @@ fn cli(args: &[String]) -> ExitCode {
     };
     let dump = match std::env::var("LUCID_DUMP") {
         // Empty counts as unset, as in the Lucid compiler.
-        Ok(name) if command == "check" && !costs && !name.is_empty() => match dump::Stage::named(&name) {
-            Some(stage) => Some(stage),
-            None => {
-                emit(
-                    std::io::stderr(),
-                    "lucid: LUCID_DUMP must be tokens, ast, resolved, checked, mir, or owned
+        Ok(name) if command == "check" && !costs && !name.is_empty() => {
+            match dump::Stage::named(&name) {
+                Some(stage) => Some(stage),
+                None => {
+                    emit(
+                        std::io::stderr(),
+                        "lucid: LUCID_DUMP must be tokens, ast, resolved, checked, mir, or owned
 ",
-                );
-                return ExitCode::FAILURE;
+                    );
+                    return ExitCode::FAILURE;
+                }
             }
-        },
+        }
         _ => None,
     };
     if let Some(stage @ (dump::Stage::Tokens | dump::Stage::Ast)) = dump {
