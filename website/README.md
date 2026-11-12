@@ -9,7 +9,7 @@ The public website for Lucid: a static Astro site, with Starlight for the docs. 
 **Rules.**
 
 - Every claim comes from `docs/` or the compiler, and says what is true now. Planned work is marked planned.
-- No public release exists yet, and the source repository is private. The site says so, and offers no download or install command that cannot work.
+- Version 1.0.0 is tagged and the source repository is public, but no binaries are published. The site says so, and offers no download or install command that cannot work.
 - Content is curated. The site never publishes `docs/research.md`, `docs/decisions.md`, `docs/claude-code.md`, or internal compiler detail. Two files are read straight from `docs/`, since they are written for users: `errors.md`, for the diagnostics page, and `agent-guide.md`, served as `/agent-guide.md`. The Learn page shows the programs in `examples/` as they are.
 - Every `lucid` code block in the docs is a whole program that passes `lucid check`. `npm run check:examples` proves it.
 - No analytics, no tracking, no external fonts or scripts. JavaScript only for search, the theme toggle, the menu, and copy buttons.
@@ -21,12 +21,12 @@ The public website for Lucid: a static Astro site, with Starlight for the docs. 
 | `/` | Hero, code sample, features, status, getting started |
 | `/features` | Each capability, with an example and its limits |
 | `/learn` | A guided path through the docs, and the example programs |
-| `/roadmap` | Milestones M0 to M9, from `docs/roadmap.md` |
+| `/roadmap` | Milestones M0 to M10, from `docs/roadmap.md` |
 | `/downloads` | Release status, supported platforms, the planned install design |
-| `/releases` | Redirects to `/downloads` until a release exists |
+| `/releases` | Redirects to `/downloads` until binaries exist |
 | `/docs/...` | Starlight docs, with search from Pagefind |
 | `/agent-guide.md` | `docs/agent-guide.md`, as plain text |
-| `/install.sh`, `/install.ps1` | Reserved. Each prints that no release exists, and fails |
+| `/install.sh`, `/install.ps1` | Reserved. Each prints that no binaries exist, and fails |
 | `/404` | Not found |
 
 **Design.** Dark first: a graphite ground in three steps, Host Grotesk for reading and Atkinson Hyperlegible Mono for code and compiler output, both self-hosted. Amber marks what a person does (the primary action, the current milestone), and cool blue what the compiler wrote. Tokens are in `src/styles/tokens.css`, and `docs.css` restates them for Starlight. The home page leads with one real diagnostic: `src/examples/shapes.lcd` with one arm removed, and the outputs in `src/data/diagnostic.json`, which `check:examples` compares with the compiler. A Lucid TextMate grammar in `src/lucid.tmLanguage.json` colors code on every page.

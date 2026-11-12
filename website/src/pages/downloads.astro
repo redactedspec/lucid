@@ -12,12 +12,12 @@ const code = (s: string) => s.replace(/`([^`]+)`/g, '<code>$1</code>');
 ---
 <Base
   title="Downloads"
-  description="Lucid has no public release yet. Supported platforms, what works today, and how official installers will work."
+  description="Lucid 1.0.0 builds from source. Supported platforms, what works today, and how the installers will work once binaries are published."
 >
   <div class="container">
     <header class="page-head">
-      <h1>No public release yet.</h1>
-      <p>There are no binaries, and the source repository is private, so nobody outside the project can build it yet.</p>
+      <h1>Build 1.0.0 from source.</h1>
+      <p>Version 1.0.0 is tagged, and the <a class="link" href="https://github.com/redactedspec/lucid">source is on GitHub</a>. There are no published binaries yet, so for now you build it with <code>cargo</code>, as <a class="link" href="/docs/installation/">Installation</a> shows.</p>
     </header>
 
     <section class="block" aria-labelledby="platforms-title">
@@ -40,8 +40,8 @@ const code = (s: string) => s.replace(/`([^`]+)`/g, '<code>$1</code>');
 
     <section class="block split" aria-labelledby="install-title">
       <div class="prose">
-        <h2 id="install-title">Installers, once there is a release</h2>
-        <p>These two commands are reserved. Today each script prints that no release exists and stops with an error. It downloads nothing.</p>
+        <h2 id="install-title">Installers, once there are binaries</h2>
+        <p>These two commands are reserved. Today each script prints that no binaries are published and stops with an error. It downloads nothing.</p>
         <p>The real installers will:</p>
         <ul>
           <li>read the release list published on <code>lucidlang.dev</code>, with no hard-coded download URL,</li>
@@ -53,14 +53,14 @@ const code = (s: string) => s.replace(/`([^`]+)`/g, '<code>$1</code>');
         </ul>
       </div>
       <div class="terms">
-        <Terminal title="Windows, PowerShell" lines={[{ cmd: 'irm https://lucidlang.dev/install.ps1 | iex' }, { out: 'Lucid has no public release yet.' }]} />
-        <Terminal title="Linux, sh" lines={[{ cmd: 'curl -fsSL https://lucidlang.dev/install.sh | sh' }, { out: 'Lucid has no public release yet.' }]} />
+        <Terminal title="Windows, PowerShell" lines={[{ cmd: 'irm https://lucidlang.dev/install.ps1 | iex' }, { out: 'Lucid has no published binaries yet.' }]} />
+        <Terminal title="Linux, sh" lines={[{ cmd: 'curl -fsSL https://lucidlang.dev/install.sh | sh' }, { out: 'Lucid has no published binaries yet.' }]} />
       </div>
     </section>
 
     <section class="block until" aria-labelledby="follow-title">
       <h2 id="follow-title">Until then</h2>
-      <p>Read the <a class="link" href="/docs/">documentation</a>, follow the <a class="link" href="/roadmap/">roadmap</a>, or see what a build from source needs on <a class="link" href="/docs/installation/">Installation</a>.</p>
+      <p>Build from source, read the <a class="link" href="/docs/">documentation</a>, or follow the <a class="link" href="/roadmap/">roadmap</a>.</p>
     </section>
   </div>
 </Base>

@@ -141,10 +141,14 @@ and not part of the promise.
 
 ## Building from source
 
-You need Rust and, for `lucid build`, the MSVC linker on Windows or `cc`
-on Linux.
+You need Rust with the `wasm32-unknown-unknown` target, and, for `lucid
+build`, the MSVC linker on Windows or `cc` on Linux. No binaries are
+published yet.
 
 ```sh
+git clone https://github.com/redactedspec/lucid
+cd lucid
+rustup target add wasm32-unknown-unknown
 cargo build --release
 target/release/lucid run examples/hello.lcd
 ```

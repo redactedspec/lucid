@@ -46,7 +46,7 @@ Docs describe what is true now. Mark planned items as planned, and remove claims
 
 ## Commits
 
-- Commit every finished change locally. No approval is needed. Push to `origin`, the private GitHub repository `redactedspec/lucid`, only when the owner asks: a push to `main` deploys https://lucidlang.dev. Version 1.0.0 was pushed and tagged `v1.0.0`. Never force-push or rewrite pushed history.
+- Commit every finished change locally. No approval is needed. Push to `origin`, the public GitHub repository `redactedspec/lucid`, only when the owner asks: a push to `main` deploys https://lucidlang.dev. Version 1.0.0 was pushed and tagged `v1.0.0`. Never force-push or rewrite pushed history.
 - No `Co-authored-by` or other attribution lines.
 - Strict Conventional Commits. Allowed types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
 - Subject at most 50 characters, imperative mood, lowercase start, no trailing period.

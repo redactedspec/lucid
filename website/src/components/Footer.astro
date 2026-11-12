@@ -18,6 +18,7 @@ const groups = [
       { href: '/roadmap/', label: 'Roadmap' },
       { href: '/downloads/', label: 'Downloads' },
       { href: '/learn/', label: 'Learn' },
+      { href: 'https://github.com/redactedspec/lucid', label: 'Source on GitHub' },
     ],
   },
   {
@@ -33,7 +34,7 @@ const groups = [
   <div class="container grid">
     <div class="brand">
       <Wordmark size={32} />
-      <p>A readable, memory-safe, compiled language. In development, with no public release yet.</p>
+      <p>A readable, memory-safe, compiled language. Version 1.0.0, open source under MIT or Apache-2.0.</p>
     </div>
     {groups.map((group) => (
       <nav aria-label={group.title}>

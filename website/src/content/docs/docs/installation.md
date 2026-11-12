@@ -3,8 +3,8 @@ title: Installation
 description: Release status of the Lucid compiler, supported platforms, and what a build from source needs.
 ---
 
-:::note[No release yet]
-There are no Lucid binaries to download, and the source repository is private. Nothing on this page can be installed by the public yet. [Downloads](/downloads/) will list releases when they exist.
+:::note[Build from source]
+Version 1.0.0 is tagged, and the source is at [github.com/redactedspec/lucid](https://github.com/redactedspec/lucid). There are no Lucid binaries to download yet, so build it with `cargo` as shown below. [Downloads](/downloads/) will list binaries when they exist.
 :::
 
 ## Platforms
@@ -18,7 +18,7 @@ There are no Lucid binaries to download, and the source repository is private. N
 
 ## Planned installers
 
-These commands are reserved for the first release. Today each script prints that no release exists and stops with an error, without downloading anything.
+These commands are reserved for when binaries are published. Today each script prints that there are none and stops with an error, without downloading anything.
 
 ```sh
 # Windows, PowerShell
@@ -28,13 +28,15 @@ irm https://lucidlang.dev/install.ps1 | iex
 curl -fsSL https://lucidlang.dev/install.sh | sh
 ```
 
-When a release exists, the installers will read the published release list, download over HTTPS, check each archive's SHA-256, and install into a user directory with no administrator rights.
+Once binaries exist, the installers will read the published release list, download over HTTPS, check each archive's SHA-256, and install into a user directory with no administrator rights.
 
 ## Building from source
 
-For those with access to the repository. The compiler is a Rust workspace, and it builds with `cargo`:
+The compiler is a Rust workspace, and it builds with `cargo`:
 
 ```sh
+git clone https://github.com/redactedspec/lucid
+cd lucid
 rustup target add wasm32-unknown-unknown
 cargo build --release
 ```
@@ -48,7 +50,7 @@ This writes `target/release/lucid`. The build needs:
 
 ## Editor support
 
-Point any editor with a language server client at the command `lucid lsp`, for files ending in `.lcd`. It syncs whole documents. No editor extension ships yet, by decision 202, so VS Code, which needs one, has no support. In Neovim 0.11 or later:
+Point any editor with a language server client at the command `lucid lsp`, for files ending in `.lcd`. It syncs whole documents. No editor extension ships yet, so VS Code, which needs one, has no support. In Neovim 0.11 or later:
 
 ```lua
 vim.filetype.add({ extension = { lcd = 'lucid' } })
