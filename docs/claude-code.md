@@ -76,7 +76,7 @@ Hooks load when a session starts, so a change to them applies from the next sess
 
 | Feature | What it does |
 | --- | --- |
-| `Stop` hook | `.claude/hooks/test-on-stop.sh` runs `cargo test -q` without `stage_dumps_are_stable`, and blocks the end of a turn on failure, once per stop. It skips the run when `git status` shows no change under `backend`, `compiler`, `runtime`, `std`, `tests`, `examples`, `tools`, or the Cargo files. The dump test takes over a minute, so run `cargo test --test golden stage_dumps_are_stable` by hand before a commit that touches `compiler/lucid/` or the dumps |
+| `Stop` hook | `.claude/hooks/test-on-stop.sh` runs `cargo test -q` without `stage_dumps_are_stable`, and blocks the end of a turn on failure, once per stop, with a 900 s timeout, since a cold build adds the release backend and the Lucid compiler. It skips the run only when nothing under `backend`, `compiler`, `runtime`, `std`, `tests`, `examples`, `tools`, `docs`, or the Cargo files differs from the last clean commit it passed on, which it stamps in `.git/lucid-tested`. A failed `git` call runs the tests. The dump test takes over a minute, so run `cargo test --test golden stage_dumps_are_stable` by hand before a commit that touches `compiler/lucid/` or the dumps |
 | `PostToolUse` hook | `.claude/hooks/format-rust.sh` runs `rustfmt` on edited Rust files |
 | Rust code intelligence | `rust-analyzer` shows errors after edits. It comes from the owner's setup, not this repository |
 | `.claude/rules/front-end.md` | Rules for the lexer and parser, loaded only for those files |
