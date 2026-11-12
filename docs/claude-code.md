@@ -76,7 +76,7 @@ Hooks load when a session starts, so a change to them applies from the next sess
 
 | Feature | What it does |
 | --- | --- |
-| `Stop` hook | `.claude/hooks/test-on-stop.sh` runs `cargo test -q`, and blocks the end of a turn on failure, once per stop |
+| `Stop` hook | `.claude/hooks/test-on-stop.sh` runs `cargo test -q` without `stage_dumps_are_stable`, and blocks the end of a turn on failure, once per stop. It skips the run when `git status` shows no change under `compiler`, `runtime`, `std`, `tests`, `examples`, `tools`, or the Cargo files. The dump test takes over a minute, so run `cargo test --test golden stage_dumps_are_stable` by hand before a commit that touches `compiler/lucid/` or the dumps |
 | `PostToolUse` hook | `.claude/hooks/format-rust.sh` runs `rustfmt` on edited Rust files |
 | Rust code intelligence | `rust-analyzer` shows errors after edits. It comes from the owner's setup, not this repository |
 | `.claude/rules/front-end.md` | Rules for the lexer and parser, loaded only for those files |
