@@ -132,7 +132,7 @@ Designed by decisions 188 to 205, see "Ecosystem" in `compiler.md`. Build in thi
 
 **Exit:** a package that uses a registry package with `std.sql` and `std.crypto` builds and passes `lucid test` on Windows and Linux, and an editor shows its diagnostics through `lucid lsp`.
 
-## M9: Self-hosted front end
+## M9: Self-hosted front end (done)
 
 Started after the version 1.0 promise. Designed by decisions 214 to 220, see "Self-hosting" in `compiler.md`. Port one stage at a time, each checked against its Rust stage by dumps. The Rust front end and driver stay, and `lucid` stays the Rust program, by decision 214. Build in this order:
 
@@ -144,7 +144,7 @@ Started after the version 1.0 promise. Designed by decisions 214 to 220, see "Se
 - [x] `derive` and the monomorphizer in Lucid. `mir` dumps and diagnostics match
 - [x] Ownership pass, `--costs`, and `--unsafe` in Lucid. `owned` dumps match
 - [x] Crate `lucid_backend`, the MIR reader, and the C ABI, by decisions 216, 217, and 226. The Lucid compiler runs `check`, `run`, and `build`, and the golden tests of those commands pass with it
-- [ ] Fixed point and bootstrap path, by decisions 218 and 219: `/Brepro`, the stage test on Windows and in WSL, and the steps in `compiler.md`
+- [x] Fixed point and bootstrap path, by decisions 218 and 219: `/Brepro`, the stage test on Windows and in WSL, and the steps in `compiler.md`
 
 **Exit:** the Lucid-written compiler builds itself. A second build from that output is byte-identical.
 

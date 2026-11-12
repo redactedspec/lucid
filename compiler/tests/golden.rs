@@ -349,6 +349,35 @@ fn all_sources(dir: &str, out: &mut Vec<String>) {
     }
 }
 
+/// The Lucid compiler builds itself, and a second build from that output is
+/// byte-identical, by decision 218. Stage 1 matches only from a release
+/// `lucid`, since a debug one changes counts through runtime calls.
+#[test]
+fn compiler_reaches_fixed_point() {
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("lucid-fixed");
+    let source = repo().join("compiler/lucid");
+    let mut built = vec![fs::read(ported_exe()).expect("no stage 1")];
+    let mut builder = ported_exe().to_path_buf();
+    for stage in [2, 3] {
+        let dir = root.join(format!("stage{stage}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("no stage dir");
+        let output = Command::new(&builder)
+            .args(["build", source.to_str().unwrap()])
+            .current_dir(&dir)
+            .env("LUCID_STD", repo().join("std"))
+            .output()
+            .expect("cannot start the stage");
+        assert!(output.status.success(), "stage {stage}: {}", text(&output.stderr));
+        builder = dir.join(format!("lucid{EXE_SUFFIX}"));
+        built.push(fs::read(&builder).expect("no stage output"));
+    }
+    assert!(built[1] == built[2], "stage 2 and stage 3 differ");
+    if !cfg!(debug_assertions) {
+        assert!(built[0] == built[1], "stage 1 and stage 2 differ");
+    }
+}
+
 /// `LUCID_DUMP` prints each stage of every file in the repository the same way
 /// twice, and never panics, by decision 215. The Lucid compiler is compared
 /// with these dumps as each of its stages lands. `naive` is `owned` with

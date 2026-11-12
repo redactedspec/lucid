@@ -94,7 +94,7 @@ export const milestones: Milestone[] = [
   {
     id: 'M9',
     title: 'Self-hosted front end',
-    status: 'active',
+    status: 'done',
     summary: 'The lexer, parser, checker, and ownership pass ported to Lucid, one stage at a time, each checked against the Rust stage. Code generation stays in Rust.',
     exit: 'The compiler written in Lucid builds itself, and a second build is byte-identical.',
     steps: [
@@ -106,7 +106,7 @@ export const milestones: Milestone[] = [
       { text: '`derive` and the monomorphizer in Lucid', done: true },
       { text: 'Ownership pass, `--costs`, and `--unsafe` in Lucid', done: true },
       { text: 'Rust backend behind a small C ABI: the Lucid compiler runs `check`, `run`, and `build`', done: true },
-      { text: 'Fixed point of three builds, and the bootstrap path', done: false },
+      { text: 'Fixed point of three builds, and the bootstrap path', done: true },
     ],
   },
 ];

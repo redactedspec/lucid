@@ -15,7 +15,7 @@ const inCode: Record<string, string> = {
   agents: 'lucid check --json main.lcd',
 };
 
-const current = milestones.find((m) => m.status === 'active')!;
+const current = milestones.find((m) => m.status === 'active') ?? milestones.at(-1)!;
 const stepsDone = current.steps!.filter((s) => s.done).length;
 const label = { done: 'Done', active: 'In progress', planned: 'Planned' } as const;
 
@@ -72,9 +72,9 @@ const commands = [
   <section class="section status" aria-labelledby="status-title">
     <div class="container status-grid">
       <div class="reading">
-        <h2 id="status-title">Nine milestones done. Self-hosting is next.</h2>
+        <h2 id="status-title">Ten milestones done. The compiler builds itself.</h2>
         <p class="figure"><span class="measured big">{stepsDone}/{current.steps!.length}</span></p>
-        <p class="caption">{current.id} steps done. {current.id} ports the compiler front end to Lucid, one stage at a time.</p>
+        <p class="caption">{current.id} steps done. {current.id} ported the compiler front end to Lucid, one stage at a time.</p>
         <a href="/roadmap/" class="link">Read the roadmap</a>
       </div>
       <ol class="trail">

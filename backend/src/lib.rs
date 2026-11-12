@@ -193,7 +193,9 @@ pub fn link(object: &[u8], exe: &str, backend: bool) -> Result<(), String> {
         .and_then(|()| std::fs::write(&runtime_file, &library))
         .and_then(|()| {
             if cfg!(windows) {
-                command.args(["/NOLOGO", "/SUBSYSTEM:CONSOLE"]);
+                // `/Brepro` writes a hash where the PE timestamp would go,
+                // so two builds match, by decision 218.
+                command.args(["/NOLOGO", "/SUBSYSTEM:CONSOLE", "/Brepro"]);
                 command.arg(format!("/STACK:{}", lucid_rt::EXE_STACK_BYTES));
                 command.arg(format!("/OUT:{exe}"));
             } else {
