@@ -278,6 +278,17 @@ fn jit(
     builder.symbol("lucid_console_read_line", lucid_rt::lucid_console_read_line as *const u8);
     builder.symbol("lucid_console_ended", lucid_rt::lucid_console_ended as *const u8);
     builder.symbol("lucid_console_write", lucid_rt::lucid_console_write as *const u8);
+    builder.symbol("lucid_process_run", lucid_rt::lucid_process_run as *const u8);
+    builder.symbol("lucid_process_out", lucid_rt::lucid_process_out as *const u8);
+    builder.symbol("lucid_process_err", lucid_rt::lucid_process_err as *const u8);
+    builder.symbol("lucid_process_start", lucid_rt::lucid_process_start as *const u8);
+    builder.symbol("lucid_process_write", lucid_rt::lucid_process_write as *const u8);
+    builder.symbol("lucid_process_close_input", lucid_rt::lucid_process_close_input as *const u8);
+    builder.symbol("lucid_process_read_line", lucid_rt::lucid_process_read_line as *const u8);
+    builder.symbol("lucid_process_wait", lucid_rt::lucid_process_wait as *const u8);
+    builder.symbol("lucid_process_kill", lucid_rt::lucid_process_kill as *const u8);
+    builder.symbol("lucid_process_failure", lucid_rt::lucid_process_failure as *const u8);
+    builder.symbol("lucid_process_detail", lucid_rt::lucid_process_detail as *const u8);
     builder.symbol("lucid_text_is_int", lucid_rt::lucid_text_is_int as *const u8);
     builder.symbol("lucid_text_int", lucid_rt::lucid_text_int as *const u8);
     builder.symbol("lucid_text_float", lucid_rt::lucid_text_float as *const u8);

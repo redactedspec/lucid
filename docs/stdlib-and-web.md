@@ -22,14 +22,13 @@ libraries.
 | `std.sql` | SQLite |
 | `std.net` | TCP sockets, and TLS as a client |
 | `std.http` | An HTTP/1.1 server, and a client with TLS |
+| `std.process` | Other programs, run directly with no shell |
 | `std.html` | HTML built with escaping |
 | `std.dom` | Browser pages, in the Elm architecture |
 
-`std.process`, for running other programs, is planned. Its permission
-exists already, and a `use` of it reports E0901.
-
 A package needs a permission for some modules: `files` for `std.fs` and
-`std.sql`, `env` for `std.env`, and `net` for `std.net` and `std.http`.
+`std.sql`, `env` for `std.env`, `net` for `std.net` and `std.http`, and `process` for
+`std.process`.
 See [security.md](security.md#package-permissions).
 
 Text from the system that is not valid UTF-8 has its bad parts replaced,
@@ -70,6 +69,38 @@ on every system, so `"{dir}/{name}"` joins two.
 
 In a package, a path outside those the `files` permission lists gives
 `Failed`, and `exists` gives `false`.
+
+## std.process
+
+A program runs directly, never through a shell, so no argument is read as
+shell syntax. Rust's `std::process::Command` finds the program and, on
+Windows, quotes each argument. An argument to a `.bat` or `.cmd` file
+that cannot be quoted safely gives `Failed`.
+
+| Task | Gives |
+| --- | --- |
+| `process.run(program, args, input: "", seconds: 0)` | `Output or ProcessError`. Waits for the program to end, with `input` on its standard input. With `seconds` above 0, a program that takes longer is killed, and the result is `TimedOut` |
+| `process.start(program, args)` | `Child or ProcessError`, at once |
+| `child.write(content)` | `none or ProcessError`. Writes to its standard input. Add `"\n"` to end a line |
+| `child.close_input()` | Closes its standard input, so it reads the end of its input |
+| `child.read_line()` | `text?`: the next line of its standard output, without its line ending, or `none` once it closes it |
+| `child.wait()` | `int or ProcessError`: closes its standard input, waits for it to end, and gives its exit code |
+| `child.kill()` | `none or ProcessError`. A child that has already ended is not a failure |
+
+An `Output` has `code`, `out`, and `err`, the last two as text, with bytes
+that are not UTF-8 replaced. On Unix, a program ended by a signal has the
+signal's number, negated, as its code. A started child's standard error
+goes to the program's own. A child closes its pipes when no value holds
+it, and is not killed then. `ProcessError` is `NotFound(program)`,
+`TimedOut`, or `Failed(detail)`.
+
+```lucid
+use std.process
+
+match process.run("git", ["status", "--short"], seconds: 10)
+    ran: process.Output -> print ran.out
+    e: process.ProcessError -> print e.error_message()
+```
 
 ## std.time
 
@@ -236,7 +267,8 @@ is one JavaScript file, `NAME.js`, holding a small loader and both
 WebAssembly modules, so a page needs only `<script src="NAME.js">`.
 
 Every feature works there except a user `extern` and `.pointer()`, which
-are E0905. `std.net`, `std.http`, `std.crypto`, and `std.sql` are E0907.
+are E0905. `std.net`, `std.http`, `std.crypto`, `std.sql`, and
+`std.process` are E0907.
 `std.fs` gives `Failed`, `env.get` gives `none`, `args.all()` gives `[]`,
 `console.read_line` gives `none`, `console.write` goes where `print`
 goes, and `time.sleep` traps.

@@ -78,7 +78,7 @@ pub fn std_module(name: &str) -> Option<&'static str> {
     STD_MODULES.iter().find(|(module, _)| *module == name).map(|(_, text)| *text)
 }
 
-const STD_MODULES: [(&str, &str); 12] = [
+const STD_MODULES: [(&str, &str); 13] = [
     ("args", include_str!("../../std/args.lcd")),
     ("console", include_str!("../../std/console.lcd")),
     ("crypto", include_str!("../../std/crypto.lcd")),
@@ -89,6 +89,7 @@ const STD_MODULES: [(&str, &str); 12] = [
     ("http", include_str!("../../std/http.lcd")),
     ("json", include_str!("../../std/json.lcd")),
     ("net", include_str!("../../std/net.lcd")),
+    ("process", include_str!("../../std/process.lcd")),
     ("sql", include_str!("../../std/sql.lcd")),
     ("time", include_str!("../../std/time.lcd")),
 ];
@@ -491,11 +492,6 @@ pub fn parse_file(path: &str) -> (Source, Option<Parsed>, Vec<Diagnostic>) {
 
 fn is_std_module(name: &str) -> bool {
     STD_MODULES.iter().any(|(module, _)| *module == name)
-}
-
-/// A `std` module in the spec but not built yet, whose `use` reports E0901.
-fn is_planned_std_module(name: &str) -> bool {
-    name == "process"
 }
 
 /// True if a file is the `src/lib.lcd` of its package, by any spelling.
@@ -925,8 +921,7 @@ impl Loader {
     }
 
     /// `use std.a` is a module of the standard library, and `use std.a.b` takes
-    /// the name `b` from it. A module not built yet stays in the tree, and
-    /// reports E0901.
+    /// the name `b` from it.
     fn import_std(
         &mut self,
         from: &str,
@@ -951,10 +946,8 @@ impl Loader {
             return None;
         }
         if !is_std_module(&module.text) {
-            if !is_planned_std_module(&module.text) {
-                let message = format!("the standard library has no module `{}`", module.text);
-                self.diags.push(Diagnostic::new("E0334", message, span));
-            }
+            let message = format!("the standard library has no module `{}`", module.text);
+            self.diags.push(Diagnostic::new("E0334", message, span));
             return None;
         }
         let (item, last) = match rest {
@@ -973,6 +966,7 @@ impl Loader {
             "crypto" => Some("std.crypto"),
             "net" => Some("std.net"),
             "http" => Some("std.http"),
+            "process" => Some("std.process"),
             "sql" => Some("std.sql"),
             _ => None,
         } {
@@ -1161,15 +1155,7 @@ fn join(
         let mut renamer =
             Renamer { names, aliases, exports: &exports, keys: &keys, scopes: Vec::new(), diags };
         renamer.stmts(&mut module.stmts);
-        // A `use` of a planned `std` module stays, and reports E0901.
-        module.stmts.retain(|stmt| match &stmt.kind {
-            StmtKind::Use { relative, path, .. } => {
-                !relative
-                    && path[0].text == "std"
-                    && path.get(1).is_some_and(|module| is_planned_std_module(&module.text))
-            }
-            _ => true,
-        });
+        module.stmts.retain(|stmt| !matches!(stmt.kind, StmtKind::Use { .. }));
         stmts.append(&mut module.stmts);
         exports.push(own);
     }

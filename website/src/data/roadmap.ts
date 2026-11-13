@@ -154,7 +154,7 @@ export const milestones: Milestone[] = [
     exit: 'An example reads a line from the terminal, runs a program, sends an HTTPS request with a header, and reads a JSON tree, on Windows and Linux.',
     steps: [
       { text: '`std.console`: `read_line` and `write`', done: true },
-      { text: '`std.process`: `run` and `start`, under the `process` permission', done: false },
+      { text: '`std.process`: `run` and `start`, under the `process` permission', done: true },
       { text: 'Headers and a read timeout on the `std.http` client', done: false },
       { text: '`json.Value`, with `json.tree` and `json.write_tree`', done: false },
       { text: 'Golden tests on Windows and in WSL, for both compilers', done: false },

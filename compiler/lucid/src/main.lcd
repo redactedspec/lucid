@@ -118,7 +118,7 @@ task main() -> none or Stop
             diags.push(resolve.with_note("E0906", "`std.dom` works only in a browser", web_only, note))
         let host_only = found.host_only
         if web and diags is empty and host_only is resolve.TargetUse
-            let note = "a page cannot open sockets, so build this program without `--target web`"
+            let note = "a page cannot reach the system, so build this program without `--target web`"
             let message = "`{host_only.module}` cannot run on the web"
             diags.push(resolve.with_note("E0907", message, host_only.span, note))
         if run and diags is empty

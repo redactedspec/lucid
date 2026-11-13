@@ -1,0 +1,20 @@
+0
+["args", "a b", "say \"hi\"", "", "\\"]
+
+got one
+got two
+end
+
+1
+true
+program not found: lucid-no-such-program
+timed out
+got hello
+got there
+end
+none
+0
+write after the end fails
+none
+true
+killed twice

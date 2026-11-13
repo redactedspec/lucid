@@ -535,7 +535,7 @@ fn costs_are_reported() {
     }
     // A program that cannot compile has no costs to report, which is not zero.
     let scratch = Path::new(env!("CARGO_TARGET_TMPDIR"));
-    fs::write(scratch.join("unbuilt.lcd"), "use std.process\nprint 1\n")
+    fs::write(scratch.join("unbuilt.lcd"), "let d = 1 + 1\ntask g() -> int\n    return d\n")
         .expect("cannot write test file");
     let output = lucid(scratch, &["check", "--costs", "unbuilt.lcd"]);
     assert_eq!(output.status.code(), Some(1));
@@ -561,10 +561,10 @@ fn unsafe_sites_are_reported() {
     assert_eq!((output.status.code(), text(&output.stdout).as_str()), (Some(0), ""));
     // An unbuilt feature does not hide a site, as it does not fail `check`.
     let scratch = Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let source = "use std.process\n# It runs nothing.\nunsafe\n    print 1\n";
+    let source = "let d = 1 + 1\ntask g() -> int\n    return d\nunsafe\n    print 1\n";
     fs::write(scratch.join("unbuilt_unsafe.lcd"), source).expect("cannot write test file");
     let output = lucid(scratch, &["check", "--unsafe", "unbuilt_unsafe.lcd"]);
-    assert_eq!(text(&output.stdout), "unbuilt_unsafe.lcd:3:1: unsafe: block\n");
+    assert_eq!(text(&output.stdout), "unbuilt_unsafe.lcd:4:1: unsafe: block\n");
     // A missing foreign task needs no compiled code to find.
     let dir = repo().join("tests").join("fail");
     let output = lucid(&dir, &["check", "extern_missing.lcd"]);
@@ -698,6 +698,34 @@ fn console_reads_lines() {
         io::Write::write_all(&mut child.stdin.take().expect("piped"), input).expect("write");
         let output = child.wait_with_output().expect("cannot wait");
         assert_eq!(text(&output.stdout), "[one][][tw\u{fffd}o][last]\n", "{by}");
+    }
+}
+
+/// `tests/process/parent.lcd` drives a built `child.lcd` through
+/// `std.process`, by decision 235, under each compiler and as a built
+/// program, and must print `parent.out`.
+#[test]
+fn processes_run() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("process");
+    let _ = fs::remove_dir_all(&dir);
+    copy_dir(&repo().join("tests/process"), &dir);
+    for name in ["child.lcd", "parent.lcd"] {
+        let built = lucid(&dir, &["build", name]);
+        assert!(built.status.success(), "{name}: {}", text(&built.stderr));
+    }
+    let child = dir.join(format!("child{EXE_SUFFIX}"));
+    let child = child.to_str().expect("a UTF-8 path");
+    let expected = text(&fs::read(dir.join("parent.out")).expect("no parent.out"));
+    let built = Command::new(dir.join(format!("parent{EXE_SUFFIX}"))).arg(child).output();
+    let runs = [
+        ("built", built.expect("cannot start parent")),
+        ("lucid", lucid(&dir, &["run", "parent.lcd", child])),
+        ("naive", naive(&dir, &["run", "parent.lcd", child])),
+        ("in Lucid", ported(&dir, &["run", "parent.lcd", child])),
+    ];
+    for (by, output) in runs {
+        assert_eq!(text(&output.stdout), expected, "{by}: {}", text(&output.stderr));
+        assert_eq!(output.status.code(), Some(0), "{by}");
     }
 }
 
@@ -1392,8 +1420,9 @@ fn web_rejects_foreign_code() {
     assert!(text(&output.stderr).contains("error E0905"), "{}", text(&output.stderr));
 }
 
-/// `spawn`, `std.net`, `std.http`, `std.crypto`, and `std.sql` are E0907
-/// under `--target web`, by decisions 176, 193, and 194.
+/// `spawn`, `std.net`, `std.http`, `std.crypto`, `std.sql`, and
+/// `std.process` are E0907 under `--target web`, by decisions 176, 193, 194,
+/// and 235.
 #[test]
 fn web_rejects_spawn() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("web_spawn");
@@ -1404,9 +1433,11 @@ fn web_rejects_spawn() {
         ("std_http", "`std.http`"),
         ("std_crypto", "`std.crypto`"),
         ("std_sql", "`std.sql`"),
+        ("../process/parent", "`std.process`"),
     ] {
-        let file = format!("{name}.lcd");
-        fs::copy(repo().join("tests/run").join(&file), dir.join(&file)).expect("cannot copy");
+        let file = format!("{}.lcd", name.rsplit('/').next().expect("a name"));
+        let from = repo().join("tests/run").join(format!("{name}.lcd"));
+        fs::copy(from, dir.join(&file)).expect("cannot copy");
         let output = lucid(&dir, &["build", "--target", "web", &file]);
         assert_eq!(output.status.code(), Some(1));
         let error = text(&output.stderr);

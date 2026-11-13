@@ -687,8 +687,8 @@ print "page"
 
 Fix: build it with `lucid build --target web`, and open the page that loads the `.js` file.
 
-## E0907: `spawn`, `std.net`, `std.http`, `std.crypto`, or `std.sql` cannot run on the web
+## E0907: `spawn`, `std.net`, `std.http`, `std.crypto`, `std.sql`, or `std.process` cannot run on the web
 
-A program built with `lucid build --target web` uses `spawn`, `use std.net`, `use std.http`, `use std.crypto`, or `use std.sql`. Threads in WebAssembly need shared memory, which browsers allow only on pages with cross-origin isolation headers, and a page cannot open a socket. `std.crypto` wraps `ring`, which builds C for each target, so the web waits until a program needs it. `std.sql` wraps SQLite, which is C too. Only a build for the web finds this, so `lucid check` and `lucid run` do not report it. The test is `web_rejects_spawn`.
+A program built with `lucid build --target web` uses `spawn`, `use std.net`, `use std.http`, `use std.crypto`, `use std.sql`, or `use std.process`. Threads in WebAssembly need shared memory, which browsers allow only on pages with cross-origin isolation headers, and a page cannot open a socket. `std.crypto` wraps `ring`, which builds C for each target, so the web waits until a program needs it. `std.sql` wraps SQLite, which is C too. A page cannot start a program. Only a build for the web finds this, so `lucid check` and `lucid run` do not report it. The test is `web_rejects_spawn`.
 
 Fix: build the program without `--target web`, or do the work in one thread. A page talks to a server with the browser's own requests.

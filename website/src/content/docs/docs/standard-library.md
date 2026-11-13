@@ -19,6 +19,7 @@ The standard library is written in Lucid and ships inside the compiler, so a pro
 | `std.html` | HTML building that escapes on render | Built |
 | `std.crypto` | SHA-256, SHA-512, HMAC, constant-time compare, random bytes, Argon2id | Built |
 | `std.sql` | SQLite, with values only through `?` marks | Built |
+| `std.process` | Other programs, run directly with no shell | Built |
 
 ## Arguments and environment
 
@@ -39,6 +40,23 @@ use std.console
 console.write("Name? ")
 let name = console.read_line() else "world"
 print "Hello, {name}!"
+```
+
+## Other programs
+
+`std.process` runs a program directly, never through a shell, so no argument is read as shell syntax. `process.run` waits for the program to end, and `process.start` gives a `Child` to talk to in lines. In a package it needs the `process` permission.
+
+```lucid
+use std.process
+
+match process.run("git", ["status", "--short"], input: "", seconds: 10)
+    ran: process.Output -> print "exit {ran.code}: {ran.out}"
+    e: process.ProcessError -> print e.error_message()
+
+let child = try process.start("cat", [])
+try child.write("hello\n")
+print child.read_line() else "no line"
+print try child.wait()
 ```
 
 ## Files

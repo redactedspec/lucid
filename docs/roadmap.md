@@ -186,7 +186,7 @@ JSON of unknown shape. The first such program is the owner's coding agent,
 which lives in its own repository. Build in this order:
 
 - [x] `std.console`: `read_line` and `write`, by decision 236
-- [ ] `std.process`: `run` and `start`, under the `process` permission, by decision 235
+- [x] `std.process`: `run` and `start`, under the `process` permission, by decision 235
 - [ ] Headers and a read timeout on the `std.http` client, by decision 237
 - [ ] `json.Value` public, with `json.tree` and `json.write_tree`, by decision 238
 - [ ] Golden tests for each, passing on Windows and in WSL, with the Lucid front end matching

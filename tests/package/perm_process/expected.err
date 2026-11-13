@@ -1,0 +1,2 @@
+perm_process/src/main.lcd:1:1: error E0340: `std.process` needs the `process` permission
+  note: add it under `[permissions]` in `perm_process/lucid.toml`

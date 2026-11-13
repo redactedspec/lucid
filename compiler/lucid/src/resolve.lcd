@@ -58,11 +58,7 @@ task prelude() -> text
 
 # The modules of the standard library.
 task std_modules() -> list[text]
-    return ["args", "console", "crypto", "dom", "env", "fs", "html", "http", "json", "net", "sql", "time"]
-
-# A `std` module in the spec but not built yet, whose `use` reports E0901.
-task is_planned_std_module(name: text) -> bool
-    return name == "process"
+    return ["args", "console", "crypto", "dom", "env", "fs", "html", "http", "json", "net", "process", "sql", "time"]
 
 # The permission that a `std` module needs, or an empty text.
 task std_permission(module: text) -> text
@@ -1016,9 +1012,8 @@ task import_std(change self: Loader, from: text, written: list[ast.Name], alias:
             self.diags.push(with_note("E0340", message, span, note))
             return none
     if module.text not in std_modules()
-        if not is_planned_std_module(module.text)
-            let message = "the standard library has no module `{module.text}`"
-            self.diags.push(diag.new("E0334", message, span))
+        let message = "the standard library has no module `{module.text}`"
+        self.diags.push(diag.new("E0334", message, span))
         return none
     var item: ast.Name? = none
     var last = module
@@ -1031,7 +1026,7 @@ task import_std(change self: Loader, from: text, written: list[ast.Name], alias:
         return none
     if module.text == "dom" and self.web_only is none
         self.web_only = span
-    let host = ["crypto", "net", "http", "sql"]
+    let host = ["crypto", "net", "http", "process", "sql"]
     if module.text in host and self.host_only is none
         self.host_only = TargetUse(span: span, module: "std.{module.text}")
     let file = "@std/{module.text}.lcd"
@@ -1109,11 +1104,10 @@ task is_test(item: ast.Stmt) -> bool
         TestStmt(name, body) -> true
         _ -> false
 
-# True for a `use` that leaves the tree: all but one of a planned `std`
-# module, which stays and reports E0901.
+# True for a `use`, which leaves the tree once its names are bound.
 task leaves(item: ast.Stmt) -> bool
     return match item.kind
-        UseStmt(relative, path, alias) -> relative or path[0].text != "std" or path.len() < 2 or not is_planned_std_module(path[1].text)
+        UseStmt(relative, path, alias) -> true
         _ -> false
 
 # Renames every module, then puts their statements in one file. An entry

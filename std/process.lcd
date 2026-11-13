@@ -1,0 +1,109 @@
+# Other programs, run directly and never through a shell, so no argument
+# is read as shell syntax. A child closes its pipes when no value holds
+# it, and is not killed then.
+
+## Why a process task failed.
+public choice ProcessError
+    NotFound(program: text)
+    TimedOut
+    Failed(detail: text)
+
+## The failure in words.
+public task error_message(self: ProcessError) -> text
+    return match self
+        NotFound(program) -> "program not found: {program}"
+        TimedOut -> "timed out"
+        Failed(detail) -> detail
+
+## What a program that ran to its end gave: its exit code, and what it
+## printed to standard output and standard error. On Unix, a program ended
+## by a signal has the signal's number, negated, as its code.
+public type Output
+    code: int
+    out: text
+    err: text
+
+## A program that runs beside this one. Its standard error goes to this
+## program's own.
+public type Child
+    socket: socket
+
+unsafe extern task lucid_process_run(program: text, args: list[text], input: text, seconds: int) -> int
+unsafe extern task lucid_process_out() -> text
+unsafe extern task lucid_process_err() -> text
+unsafe extern task lucid_process_start(program: text, args: list[text]) -> socket
+unsafe extern task lucid_process_write(child: socket, content: text)
+unsafe extern task lucid_process_close_input(child: socket)
+unsafe extern task lucid_process_read_line(child: socket) -> text
+unsafe extern task lucid_process_wait(child: socket) -> int
+unsafe extern task lucid_process_kill(child: socket)
+unsafe extern task lucid_process_failure() -> int
+unsafe extern task lucid_process_detail() -> text
+unsafe extern task lucid_console_ended() -> bool
+
+# How the last runtime call failed, if it did.
+task failure(program: text) -> ProcessError?
+    # Each task only reads what the last call left.
+    unsafe
+        return match lucid_process_failure()
+            0 -> none
+            1 -> NotFound(program: program)
+            2 -> TimedOut
+            _ -> Failed(detail: lucid_process_detail())
+
+## Runs `program` with `args`, gives it `input` on standard input, and
+## waits for it to end. With `seconds` above 0, a program that takes longer
+## is killed, and the result is `TimedOut`.
+public task run(program: text, args: list[text], input: text = "", seconds: int = 0) -> Output or ProcessError
+    # The runtime only reads its arguments, and builds new texts.
+    unsafe
+        let code = lucid_process_run(program, args, input, seconds)
+        try failure(program)
+        return Output(code: code, out: lucid_process_out(), err: lucid_process_err())
+
+## Starts `program` with `args`, and gives the child at once.
+public task start(program: text, args: list[text]) -> Child or ProcessError
+    # The runtime only reads its arguments, and gives a new socket.
+    unsafe
+        let socket = lucid_process_start(program, args)
+        try failure(program)
+        return Child(socket: socket)
+
+## Writes `content` to the child's standard input. Add "\n" to end a line.
+public task write(self: Child, content: text) -> none or ProcessError
+    # The runtime only reads the socket and `content`.
+    unsafe
+        lucid_process_write(self.socket, content)
+    try failure("")
+
+## Closes the child's standard input, so it reads the end of its input.
+public task close_input(self: Child)
+    # The runtime only reads the socket.
+    unsafe
+        lucid_process_close_input(self.socket)
+
+## The next line of the child's standard output, without its line ending,
+## or `none` once the child closes it.
+public task read_line(self: Child) -> text?
+    # The runtime builds a new text, then only reads whether output ended.
+    unsafe
+        let line = lucid_process_read_line(self.socket)
+        if lucid_console_ended()
+            return none
+        return line
+
+## Closes the child's standard input, waits for it to end, and gives its
+## exit code.
+public task wait(self: Child) -> int or ProcessError
+    # The runtime only reads the socket.
+    unsafe
+        let code = lucid_process_wait(self.socket)
+        try failure("")
+        return code
+
+## Kills the child. A child that has already ended is not a failure.
+public task kill(self: Child) -> none or ProcessError
+    # The runtime only reads the socket.
+    unsafe
+        lucid_process_kill(self.socket)
+    try failure("")

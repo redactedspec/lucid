@@ -26,12 +26,16 @@ pub use crypto::sha256_hex;
 #[cfg(feature = "exe")]
 mod exe;
 #[cfg(not(target_arch = "wasm32"))]
+mod process;
+#[cfg(not(target_arch = "wasm32"))]
 mod sql;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use crypto::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use process::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use sql::*;
 #[cfg(not(target_arch = "wasm32"))]
@@ -2831,7 +2835,8 @@ pub unsafe extern "C" fn lucid_bytes_text(data: *const List) -> *mut Text {
     text_from(String::from_utf8_lossy(unsafe { list_bytes(data) }).as_bytes())
 }
 
-/// A `Listener` or `Connection` of `std.net`, by decision 177. Copies share
+/// A `Listener` or `Connection` of `std.net`, by decision 177, or a `Child`
+/// of `std.process`, by decision 235. Copies share
 /// `endpoint`, which comes from `Box::into_raw`, and the last count closes it.
 #[repr(C)]
 pub struct Socket {
@@ -2844,6 +2849,9 @@ enum Endpoint {
     Stream(TcpStream),
     #[cfg(not(target_arch = "wasm32"))]
     Tls(Box<Tls>),
+    /// A child of `std.process`, in `process.rs`.
+    #[cfg(not(target_arch = "wasm32"))]
+    Child(Box<process::Child>),
 }
 
 /// A client's TLS session, by decision 179. `socket` is a second handle to
@@ -2923,6 +2931,8 @@ unsafe fn stream<'a>(socket: *const Socket) -> &'a TcpStream {
         #[cfg(not(target_arch = "wasm32"))]
         Endpoint::Tls(tls) => &tls.socket,
         Endpoint::Listener(_) => trap(b"trap: a listener used as a connection"),
+        #[cfg(not(target_arch = "wasm32"))]
+        Endpoint::Child(_) => trap(b"trap: a child used as a connection"),
     }
 }
 

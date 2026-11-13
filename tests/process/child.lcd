@@ -1,0 +1,20 @@
+# What `parent.lcd` runs, built to a program by `processes_run`.
+use std.args
+use std.console
+use std.fs
+use std.time
+
+let mode = args.get(0) else ""
+if mode == "args"
+    print args.all()
+else if mode == "fail"
+    try fs.read_text("no/such/file")
+else if mode == "sleep"
+    time.sleep(time.seconds(30))
+else
+    while true
+        let line = console.read_line()
+        if line is none
+            break
+        print "got {line}"
+    print "end"

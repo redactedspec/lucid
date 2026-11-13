@@ -97,6 +97,7 @@ A package gets no powers unless its manifest grants them:
 | `net = true` | `std.net`, `std.http` |
 | `files = true`, or a list of paths | `std.fs`, limited to those paths |
 | `env = true`, or a list of names | `std.env`, limited to those names |
+| `process = true` | `std.process` |
 | `unsafe = true` | `unsafe` blocks and `extern` tasks |
 
 A `use` of a module without its permission is error E0340. A dependency's permissions must be named in its `allow` entry, and its parent must hold them too, so no dependency gains a power its user did not approve.

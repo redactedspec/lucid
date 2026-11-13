@@ -1,0 +1,41 @@
+# Drives `child.lcd`, whose built path is the first argument.
+use std.args
+use std.process
+
+let child = args.get(0) else ""
+
+let listed = try process.run(child, ["args", "a b", "say \"hi\"", "", "\\"])
+print listed.code
+print listed.out
+let echoed = try process.run(child, ["echo"], input: "one\r\ntwo")
+print echoed.out
+let failed = try process.run(child, ["fail"])
+print failed.code
+print failed.err.contains("no/such/file")
+
+match process.run("lucid-no-such-program", [])
+    ran: process.Output -> print ran.code
+    e: process.ProcessError -> print e.error_message()
+match process.run(child, ["sleep"], seconds: 1)
+    ran: process.Output -> print ran.code
+    e: process.ProcessError -> print e.error_message()
+
+let talker = try process.start(child, ["echo"])
+try talker.write("hello\n")
+print talker.read_line()
+try talker.write("there\n")
+print talker.read_line()
+talker.close_input()
+print talker.read_line()
+print talker.read_line()
+print try talker.wait()
+match talker.write("late\n")
+    e: process.ProcessError -> print "write after the end fails"
+    _ -> print "wrote after the end"
+
+let sleeper = try process.start(child, ["sleep"])
+try sleeper.kill()
+print sleeper.read_line()
+print (try sleeper.wait()) != 0
+try sleeper.kill()
+print "killed twice"

@@ -162,7 +162,7 @@ fn cli(args: &[String]) -> ExitCode {
             && diags.is_empty()
             && let Some((span, module)) = source.host_only
         {
-            let note = "a page cannot open sockets, so build this program without `--target web`";
+            let note = "a page cannot reach the system, so build this program without `--target web`";
             let message = format!("`{module}` cannot run on the web");
             let error = Diagnostic::new("E0907", message, span);
             diags.push(error.note(note));
