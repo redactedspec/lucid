@@ -190,7 +190,7 @@ which lives in its own repository. Build in this order:
 - [x] Headers and a read timeout on the `std.http` client, by decision 237
 - [x] `json.Value` public, with `json.tree` and `json.write_tree`, by decision 238
 - [ ] Golden tests for each, passing on Windows and in WSL, with the Lucid front end matching
-- [ ] `examples/agent.lcd`, the exit test below
+- [x] `examples/agent.lcd`, the exit test below. Works on Windows; Linux waits for the WSL run
 
 **Exit:** `examples/agent.lcd` reads a line from the terminal, runs a
 program through `std.process`, sends an HTTPS request with a header, and

@@ -21,6 +21,7 @@ const examples = [
   { file: 'examples/todo.lcd', about: 'A command-line to-do list that saves JSON to a file, with `std.args`, `std.fs`, and `std.json`.' },
   { file: 'examples/workers.lcd', about: 'Threads that share work through a channel and a lock.' },
   { file: 'examples/website.lcd', about: 'An HTTP server with a page and a JSON endpoint, from `std.http` and `std.html`.' },
+  { file: 'examples/agent.lcd', about: 'What a command-line agent needs: a prompt with `std.console`, a program run with `std.process`, and an HTTPS request with a header, read as a `json.Value` tree.' },
 ].map((e) => ({ ...e, source: repoFile(e.file), name: e.file.split('/').pop()! }));
 
 const code = (s: string) => s.replace(/`([^`]+)`/g, '<code>$1</code>');

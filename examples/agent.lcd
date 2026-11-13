@@ -1,0 +1,40 @@
+# What a command-line agent needs from `std`, the exit test of M13: it
+# reads a line from the terminal, runs a program, sends an HTTPS request
+# with a header, and reads JSON of unknown shape.
+#
+#     lucid run examples/agent.lcd
+use std.console
+use std.http
+use std.json
+use std.process
+
+# A program and its arguments, from a line such as `git --version`.
+task run_line(line: text) -> text
+    let words = line.split(" ")
+    if words.is_empty() or words[0].is_empty()
+        return "nothing to run"
+    return match process.run(words[0], words[1..words.len()], seconds: 10)
+        ran: process.Output -> "exit {ran.code}: {ran.out.trim()}"
+        e: process.ProcessError -> e.error_message()
+
+# The names of an object's fields, or what the value is instead.
+task names(value: json.Value) -> text
+    match value
+        Fields(fields) ->
+            var out: list[text] = []
+            for name in fields
+                out.push(name)
+            return "{out.len()} fields, first {out.get(0) else "none"}"
+        _ -> return json.write_tree(value)
+
+console.write("Command to run, such as `git --version`: ")
+let line = console.read_line() else ""
+print run_line(line)
+
+let accept = [http.Header(name: "Accept", value: "application/json")]
+let answer = try http.get("https://api.github.com/", headers: accept, seconds: 20)
+print "status {answer.status}"
+let body = answer.body_text() else ""
+match json.tree(body)
+    value: json.Value -> print names(value)
+    e: json.JsonError -> print e.error_message()

@@ -158,7 +158,7 @@ export const milestones: Milestone[] = [
       { text: 'Headers and a read timeout on the `std.http` client', done: true },
       { text: '`json.Value`, with `json.tree` and `json.write_tree`', done: true },
       { text: 'Golden tests on Windows and in WSL, for both compilers', done: false },
-      { text: 'The example agent program', done: false },
+      { text: 'The example agent program', done: true },
     ],
   },
 ];
