@@ -2578,6 +2578,55 @@ pub unsafe extern "C" fn lucid_env_get(name: *const Text) -> *mut Text {
 }
 
 std::thread_local! {
+    /// True when the last line read found the end of its input, by decision 236.
+    static INPUT_ENDED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Reads one line from `input`, without `\n` or `\r\n`. Empty, with
+/// `INPUT_ENDED` set, at the end of input or when the read fails. Bytes that
+/// are not UTF-8 have their bad parts replaced.
+fn read_line(input: &mut impl std::io::BufRead) -> *mut Text {
+    let mut line = Vec::new();
+    let ended = !matches!(input.read_until(b'\n', &mut line), Ok(1..));
+    INPUT_ENDED.set(ended);
+    if line.ends_with(b"\n") {
+        line.pop();
+        if line.ends_with(b"\r") {
+            line.pop();
+        }
+    }
+    text_from(String::from_utf8_lossy(&line).as_bytes())
+}
+
+/// The next line of stdin. On `wasm32` stdin is always at its end.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_console_read_line() -> *mut Text {
+    read_line(&mut std::io::stdin().lock())
+}
+
+/// True if the last line read found the end of its input.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_console_ended() -> bool {
+    INPUT_ENDED.get()
+}
+
+/// Writes a text to stdout with no newline, and flushes. If stdout fails, the
+/// program traps.
+///
+/// # Safety
+///
+/// `content` must point to a live text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_console_write(content: *const Text) {
+    // SAFETY: the caller guarantees a live text.
+    let bytes = unsafe { bytes(content) };
+    let mut stdout = stdout();
+    if stdout.write_all(bytes).and_then(|()| stdout.flush()).is_err() {
+        trap(STDOUT_FAILED);
+    }
+}
+
+std::thread_local! {
     /// How the last file task failed: 0 if it did not, 1 for a missing file,
     /// 2 for no permission, or 3 for anything else, with the system's words.
     static FILE_FAILURE: RefCell<(i64, String)> = const { RefCell::new((0, String::new())) };

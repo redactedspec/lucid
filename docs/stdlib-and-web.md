@@ -13,6 +13,7 @@ libraries.
 | --- | --- |
 | prelude | `text`, `list`, `map`, `set`, math, the core traits, splitting, searching, trimming and case change of text, integer parsing, sorting, `channel`, `lock`, `spawned` |
 | `std.args` | Command-line arguments |
+| `std.console` | Lines typed at the terminal, and text written with no newline |
 | `std.env` | Environment variables |
 | `std.fs` | Files and paths |
 | `std.json` | JSON, typed through the `Json` trait |
@@ -34,13 +35,15 @@ See [security.md](security.md#package-permissions).
 Text from the system that is not valid UTF-8 has its bad parts replaced,
 except that `fs.read_text` gives `NotText`.
 
-## std.args and std.env
+## std.args, std.env, and std.console
 
 | Task | Gives |
 | --- | --- |
 | `args.all()` | `list[text]`: what follows the program on its command line |
 | `args.get(index)` | `text?`: one of them |
 | `env.get(name)` | `text?`: a variable, if it is set |
+| `console.read_line()` | `text?`: the next line of standard input, without its line ending, or `none` at the end of input |
+| `console.write(content)` | Writes `content` with no newline, and flushes it, for a prompt |
 
 In a package, `env.get` of a name the `env` permission does not list
 traps.
@@ -235,7 +238,8 @@ WebAssembly modules, so a page needs only `<script src="NAME.js">`.
 Every feature works there except a user `extern` and `.pointer()`, which
 are E0905. `std.net`, `std.http`, `std.crypto`, and `std.sql` are E0907.
 `std.fs` gives `Failed`, `env.get` gives `none`, `args.all()` gives `[]`,
-and `time.sleep` traps.
+`console.read_line` gives `none`, `console.write` goes where `print`
+goes, and `time.sleep` traps.
 
 WebAssembly cannot touch the page directly, so all access goes through
 `std.dom`. It works only with `--target web`; anywhere else it is E0906.

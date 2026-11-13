@@ -1,0 +1,6 @@
+use std.console
+
+console.write("name? ")
+console.write("")
+print console.read_line()
+print console.read_line() is none

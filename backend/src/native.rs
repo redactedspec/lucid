@@ -275,6 +275,9 @@ fn jit(
     builder.symbol("lucid_args", lucid_rt::lucid_args as *const u8);
     builder.symbol("lucid_env_has", lucid_rt::lucid_env_has as *const u8);
     builder.symbol("lucid_env_get", lucid_rt::lucid_env_get as *const u8);
+    builder.symbol("lucid_console_read_line", lucid_rt::lucid_console_read_line as *const u8);
+    builder.symbol("lucid_console_ended", lucid_rt::lucid_console_ended as *const u8);
+    builder.symbol("lucid_console_write", lucid_rt::lucid_console_write as *const u8);
     builder.symbol("lucid_text_is_int", lucid_rt::lucid_text_is_int as *const u8);
     builder.symbol("lucid_text_int", lucid_rt::lucid_text_int as *const u8);
     builder.symbol("lucid_text_float", lucid_rt::lucid_text_float as *const u8);

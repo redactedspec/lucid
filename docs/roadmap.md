@@ -178,14 +178,14 @@ Started after M10. Designed by decision 233. No language change.
 
 A VS Code extension: the TextMate grammar the site already uses, and a client for `lucid lsp`. Not designed yet.
 
-## M13: Agent programs (planned)
+## M13: Agent programs (active)
 
 Designed by decisions 234 to 238. Gives `std` what a command-line agent
 needs: running other programs, reading the terminal, sending headers, and
 JSON of unknown shape. The first such program is the owner's coding agent,
 which lives in its own repository. Build in this order:
 
-- [ ] `std.console`: `read_line` and `write`, by decision 236
+- [x] `std.console`: `read_line` and `write`, by decision 236
 - [ ] `std.process`: `run` and `start`, under the `process` permission, by decision 235
 - [ ] Headers and a read timeout on the `std.http` client, by decision 237
 - [ ] `json.Value` public, with `json.tree` and `json.write_tree`, by decision 238

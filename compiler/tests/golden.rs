@@ -662,6 +662,45 @@ fn run_passes_arguments() {
     assert_eq!(text(&output.stdout), "[\"add\", \"--json\", \"a b\"]\n");
 }
 
+/// `console.read_line` drops `\n` and `\r\n`, keeps an empty line, replaces
+/// bytes that are not UTF-8, and gives `none` at the end, by decision 236.
+#[test]
+fn console_reads_lines() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("console");
+    fs::create_dir_all(&dir).expect("cannot make test dir");
+    let program = "use std.console\n\nwhile true\n    let line = console.read_line()\n    \
+                   if line is none\n        break\n    console.write(\"[{line}]\")\nprint \"\"\n";
+    fs::write(dir.join("echo.lcd"), program).expect("cannot write test file");
+    let built = lucid(&dir, &["build", "echo.lcd"]);
+    assert!(built.status.success(), "{}", text(&built.stderr));
+    let starts: [(&str, Command); 4] = [
+        ("lucid", {
+            let mut c = Command::new(LUCID);
+            c.args(["run", "echo.lcd"]);
+            c
+        }),
+        ("naive", {
+            let mut c = Command::new(LUCID);
+            c.args(["run", "echo.lcd"]).env("LUCID_NAIVE", "1");
+            c
+        }),
+        ("in Lucid", {
+            let mut c = Command::new(ported_exe());
+            c.args(["run", "echo.lcd"]).env("LUCID_STD", repo().join("std"));
+            c
+        }),
+        ("built", Command::new(dir.join(format!("echo{EXE_SUFFIX}")))),
+    ];
+    for (by, mut command) in starts {
+        command.current_dir(&dir).stdin(Stdio::piped()).stdout(Stdio::piped());
+        let mut child = command.spawn().expect("cannot start");
+        let input = b"one\r\n\ntw\xffo\nlast";
+        io::Write::write_all(&mut child.stdin.take().expect("piped"), input).expect("write");
+        let output = child.wait_with_output().expect("cannot wait");
+        assert_eq!(text(&output.stdout), "[one][][tw\u{fffd}o][last]\n", "{by}");
+    }
+}
+
 /// Each run reads what the last one saved. Under `lucid run`, then as a
 /// built program, which is the exit of M5.
 #[test]

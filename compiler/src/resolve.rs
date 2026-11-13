@@ -78,8 +78,9 @@ pub fn std_module(name: &str) -> Option<&'static str> {
     STD_MODULES.iter().find(|(module, _)| *module == name).map(|(_, text)| *text)
 }
 
-const STD_MODULES: [(&str, &str); 11] = [
+const STD_MODULES: [(&str, &str); 12] = [
     ("args", include_str!("../../std/args.lcd")),
+    ("console", include_str!("../../std/console.lcd")),
     ("crypto", include_str!("../../std/crypto.lcd")),
     ("dom", include_str!("../../std/dom.lcd")),
     ("env", include_str!("../../std/env.lcd")),

@@ -1,0 +1,22 @@
+# The terminal: lines typed in, and text shown on the current line.
+
+unsafe extern task lucid_console_read_line() -> text
+unsafe extern task lucid_console_ended() -> bool
+unsafe extern task lucid_console_write(content: text)
+
+## The next line of standard input, without its line ending, or `none` at
+## the end of input.
+public task read_line() -> text?
+    # The runtime builds a new text, then only reads whether input ended.
+    unsafe
+        let line = lucid_console_read_line()
+        if lucid_console_ended()
+            return none
+        return line
+
+## Writes `content` to standard output with no newline, and flushes it, so
+## a prompt shows on the line where the user types.
+public task write(content: text)
+    # The runtime only reads `content`.
+    unsafe
+        lucid_console_write(content)

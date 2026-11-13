@@ -58,7 +58,7 @@ task prelude() -> text
 
 # The modules of the standard library.
 task std_modules() -> list[text]
-    return ["args", "crypto", "dom", "env", "fs", "html", "http", "json", "net", "sql", "time"]
+    return ["args", "console", "crypto", "dom", "env", "fs", "html", "http", "json", "net", "sql", "time"]
 
 # A `std` module in the spec but not built yet, whose `use` reports E0901.
 task is_planned_std_module(name: text) -> bool

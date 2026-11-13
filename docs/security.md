@@ -90,7 +90,7 @@ mailer = { path = "../mailer", allow = ["net"] }
 | `process` | `true` | `std.process`, which is planned |
 | `unsafe` | `true` | `unsafe` blocks and `extern` declarations |
 
-`std.args`, `std.json`, and `std.time` need no permission.
+`std.args`, `std.console`, `std.json`, and `std.time` need no permission.
 
 `false`, an empty list, and a permission left out all grant nothing. A
 listed path or name cannot be empty or hold a control character such as

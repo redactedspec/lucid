@@ -11,6 +11,7 @@ The standard library is written in Lucid and ships inside the compiler, so a pro
 | `std.fs` | Files and directories | Built |
 | `std.json` | Parse and write, typed by the `Json` trait | Built |
 | `std.env`, `std.args` | Environment variables and command-line words | Built |
+| `std.console` | Lines typed at the terminal, and prompts | Built |
 | `std.time` | Clocks, durations, and UTC dates | Built |
 | `std.dom` | Browser pages, see [WebAssembly](/docs/webassembly/) | Built |
 | `std.net` | TCP sockets | Built |
@@ -28,6 +29,16 @@ use std.env
 let name = args.get(0) else "world"    # the first word after the program
 print "Hello, {name}!"
 print env.get("HOME") else "no HOME"
+```
+
+`console.read_line()` gives the next line typed, without its line ending, or `none` at the end of input. `console.write(content)` writes with no newline, so a prompt stays on the line where the user types.
+
+```lucid
+use std.console
+
+console.write("Name? ")
+let name = console.read_line() else "world"
+print "Hello, {name}!"
 ```
 
 ## Files

@@ -664,6 +664,7 @@ print models.greet(User(name: "Ada"))
 
 ```lucid
 use std.args
+use std.console
 use std.env
 use std.fs
 use std.json
@@ -677,6 +678,8 @@ let name = args.get(0) else "world"    # the first word after the program, as `t
 print "Hello, {name}!"
 print args.all().len()
 print env.get("LUCID_NOT_SET") else "unset"
+console.write("Name? ")                        # no newline, and flushed
+let typed = console.read_line() else ""        # without its line ending; `none` at the end of input
 
 task copy(from: text, to: text) -> none or fs.FileError
     let content = try fs.read_text(from)
