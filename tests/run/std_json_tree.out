@@ -1,0 +1,10 @@
+3 fields
+{"method":"turn/start","id":8,"params":{"n":1.5,"ok":true,"tags":[null,"a\nb"]}}
+whole 8
+n: real 1.5
+ok: flag true
+tags: 2 items
+{"tool":"say \"hi\"","args":[-3,null]}
+{"tool":"say \"hi\"","args":[-3,null]}
+true
+bad JSON: nested too deep, at line 1, column 129

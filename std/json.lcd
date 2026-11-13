@@ -13,8 +13,12 @@ public task error_message(self: JsonError) -> text
         return "bad JSON: {self.message}"
     return "bad JSON at {self.path}: {self.message}"
 
+## Any JSON value, for input whose shape is known only once it is read.
+## A number with no `.` or exponent that fits an `int` is `Whole`, and any
+## other number `Real`. An object keeps its names in the order they first
+## appear, with the last value of a repeated name.
 # `json_tags` in mir.rs holds the position of each variant.
-choice Value
+public choice Value
     Null
     Flag(value: bool)
     Whole(value: int)
@@ -37,6 +41,36 @@ public task parse[T: Json](raw: text) -> T or JsonError
 ## The text of a value, with no spaces. A NaN or infinity is `null`.
 public task write[T: Json](value: T) -> text
     return encode(value)
+
+## Reads any JSON value as a tree, with the reader and depth limit that
+## `parse` uses.
+public task tree(raw: text) -> Value or JsonError
+    return read_value(raw)
+
+## The text of a tree, with no spaces, as `write` gives it.
+public task write_tree(value: Value) -> text
+    return match value
+        Null -> "null"
+        Flag(flag) -> "{flag}"
+        Whole(number) -> "{number}"
+        Real(number) -> write_float(number)
+        Str(content) -> write_text(content)
+        Items(items) -> write_items(items)
+        Fields(fields) -> write_fields(fields)
+
+task write_items(items: list[Value]) -> text
+    var out = "["
+    for place in 0..items.len()
+        let comma = if place == 0 then "" else ","
+        out = "{out}{comma}{write_tree(items[place])}"
+    return "{out}]"
+
+task write_fields(fields: map[text, Value]) -> text
+    var out = "{{"
+    for name in fields
+        let comma = if out.len() == 1 then "" else ","
+        out = "{out}{comma}{write_text(name)}:{write_tree(fields[name])}"
+    return "{out}}}"
 
 unsafe extern task lucid_bytes_text(data: list[byte]) -> text
 unsafe extern task lucid_text_is_int(number: text) -> bool

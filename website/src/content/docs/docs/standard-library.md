@@ -91,6 +91,18 @@ print books[0].title
 
 `Json` is derived, with no annotations. A `type` maps to an object, a `choice` to `"Red"` or `{"Circle": {"radius": 1.0}}`, and a field left out takes its default.
 
+JSON of unknown shape reads as a tree. `json.tree(raw)` gives a `json.Value`: `Null`, `Flag`, `Whole`, `Real`, `Str`, `Items`, or `Fields`, each holding its `value`. `json.write_tree(value)` writes one back.
+
+```lucid
+use std.json
+
+let message = try json.tree("[1, 2.5, null]")
+match message
+    Items(items) -> print items.len()
+    _ -> print "not a list"
+print json.write_tree(json.Str(value: "hi"))
+```
+
 ## Time
 
 ```lucid

@@ -146,8 +146,27 @@ needed. How each type maps to JSON is under "Traits" in
 gives `text`, with no spaces. A `JsonError` has `message` and `path`, as
 in `.books[2].title`. Input nested more than 128 levels deep is an
 error, so it cannot overflow the stack. A `u64` reads only up to the
-largest `int`. A tree form for JSON of unknown shape will come when a
-program needs it.
+largest `int`.
+
+For JSON whose shape is known only once it is read, such as the
+`params` of a JSON-RPC message, `json.tree(raw)` gives
+`json.Value or JsonError`, with the same reader and depth limit, and
+`json.write_tree(value)` gives its text. A `Value` is `Null`,
+`Flag(value: bool)`, `Whole(value: int)`, `Real(value: float)`,
+`Str(value: text)`, `Items(value: list[Value])`, or
+`Fields(value: map[text, Value])`. A number with no `.` or exponent that
+fits an `int` is `Whole`. An object keeps its names in the order they
+first appear, with the last value of a repeated name. A `Value` cannot
+yet be a field of a type that `json.parse` reads.
+
+```lucid
+use std.json
+
+let message = try json.tree("{{\"id\": 7, \"params\": [1, \"a\"]}}")
+match message
+    Fields(fields) -> print json.write_tree(fields["params"])
+    _ -> print "not an object"
+```
 
 ## std.crypto
 

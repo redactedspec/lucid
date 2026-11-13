@@ -1,0 +1,38 @@
+# `json.tree` and `json.write_tree`, by decision 238.
+use std.json
+use std.json.Value
+
+task describe(value: Value) -> text
+    return match value
+        Null -> "null"
+        Flag(flag) -> "flag {flag}"
+        Whole(number) -> "whole {number}"
+        Real(number) -> "real {number}"
+        Str(content) -> "text {content}"
+        Items(items) -> "{items.len()} items"
+        Fields(fields) -> "{fields.len()} fields"
+
+let raw = "{{\"method\": \"turn/start\", \"id\": 7, \"params\": {{\"n\": 1.5, \"ok\": true, \"tags\": [null, \"a\\nb\"]}}, \"id\": 8}}"
+let message = try json.tree(raw)
+print describe(message)
+print json.write_tree(message)
+match message
+    Fields(fields) ->
+        print describe(fields["id"])
+        match fields["params"]
+            Fields(params) ->
+                for name in params
+                    print "{name}: {describe(params[name])}"
+            _ -> print "no params"
+    _ -> print "not an object"
+
+let built = json.Fields(value: {"tool": json.Str(value: "say \"hi\""), "args": json.Items(value: [json.Whole(value: -3), json.Real(value: 0.0 / 0.0)])})
+print json.write_tree(built)
+print json.write_tree(try json.tree(json.write_tree(built)))
+print json.tree("[1,") is json.JsonError
+var deep = ""
+for i in 0..200
+    deep = "{deep}["
+match json.tree(deep)
+    v: Value -> print "read"
+    e: json.JsonError -> print e.error_message()

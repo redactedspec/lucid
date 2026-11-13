@@ -698,6 +698,10 @@ print raw                                      # a list of one object
 let books = json.parse[list[Book]](raw) else []
 print books[0].title
 print json.parse[Book]("[]")                   # a JsonError
+let tree = json.tree("[1, null]") else json.Null    # any shape, as a json.Value
+match tree
+    Items(items) -> print json.write_tree(items[0])  # also Null, Flag, Whole, Real, Str, Fields
+    _ -> print "not a list"
 ```
 
 - Pass arguments after the path: `lucid run file.lcd add "buy milk"`.

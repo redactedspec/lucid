@@ -1434,7 +1434,7 @@ Milestone M13 gives `std` four things a command-line agent needs: `std.process`,
 
 ### Decision 238, 2026-11-12
 
-`std.json` makes its `Value` choice public, with the variants it already has: `Null`, `Flag`, `Whole`, `Real`, `Str`, `Items`, and `Fields`. `json.tree(raw)` gives `Value or JsonError`, and `json.write_tree(value)` gives text. Both use the reader and the depth limit that `parse` uses. A `Value` cannot yet be a field of a type that `parse` reads
+`std.json` makes its `Value` choice public, with the variants it already has: `Null`, `Flag`, `Whole`, `Real`, `Str`, `Items`, and `Fields`. `json.tree(raw)` gives `Value or JsonError`, with the reader and the depth limit that `parse` uses, and `json.write_tree(value)` gives text, as `write` does. A `Value` cannot yet be a field of a type that `parse` reads
 
 **Why:** A tool call's arguments and a JSON-RPC message's `params` have a shape that depends on the tool or the method, so a program must look before it picks a type. The tree already exists inside `std.json`, so this names it: no new reader, and no compiler change. Reading a `Value` through `parse` would need the derive changed in both front ends, so it waits until a program needs it
 

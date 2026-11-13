@@ -156,7 +156,7 @@ export const milestones: Milestone[] = [
       { text: '`std.console`: `read_line` and `write`', done: true },
       { text: '`std.process`: `run` and `start`, under the `process` permission', done: true },
       { text: 'Headers and a read timeout on the `std.http` client', done: true },
-      { text: '`json.Value`, with `json.tree` and `json.write_tree`', done: false },
+      { text: '`json.Value`, with `json.tree` and `json.write_tree`', done: true },
       { text: 'Golden tests on Windows and in WSL, for both compilers', done: false },
       { text: 'The example agent program', done: false },
     ],
