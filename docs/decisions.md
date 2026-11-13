@@ -1408,6 +1408,36 @@ Binaries ship as assets of a GitHub release, one archive per platform with `SHA2
 
 **Why:** The downloads page promised these rules before there was a release, so this keeps that promise. A GitHub release costs nothing and is where people look for binaries of a GitHub project. The hash in a list on a second host means a swapped asset on GitHub alone is caught, though the site and GitHub share one owner, so this is not a signature. rustup and Deno install with `curl | sh` and a PowerShell one-liner in the same way, from memory, not read for this entry. Windows PowerShell 5.1 still ships with Windows, so the script keeps to what it has. See "Installers (M11)" in `research.md`.
 
+### Decision 234, 2026-11-12
+
+Milestone M13 gives `std` four things a command-line agent needs: `std.process`, `std.console`, headers on the `std.http` client, and a public JSON tree. No language change. Server-sent events, and a client body read as it arrives, wait until a program needs them
+
+**Why:** The owner asked for a coding agent written in Lucid that drives `codex app-server`, `claude -p`, and OpenRouter. The first two speak JSON lines on a child's standard input and output, and OpenRouter takes its key in an `Authorization` header. Without these four, that program cannot be written in Lucid. A streamed body only makes output appear sooner, so it waits. See "Agent programs (M13)" in `research.md`
+
+### Decision 235, 2026-11-12
+
+`std.process` runs a program directly, never through a shell. `process.run(program, args, input: "", seconds: 0)` waits for it and gives `Output or ProcessError`. An `Output` has `code`, `out`, and `err`, the last two as text. `process.start(program, args)` gives a `Child`, with `write(content)`, `close_input()`, `read_line()` giving `text?` from its standard output, `wait()` giving the exit code, and `kill()`. A started child's standard error goes to the program's own. `seconds` above 0 kills a `run` that takes longer, which then gives `TimedOut`. `ProcessError` is `NotFound(program)`, `TimedOut`, or `Failed(detail)`. The runtime wraps Rust's `std::process::Command`, so the search for a program and Windows quoting are Rust's, and an argument to a `.bat` or `.cmd` file that cannot be quoted safely gives `Failed`. A `Child` closes its pipes when no value holds it, and is not killed then. In a package, the `process` permission must be granted, and it stays full trust, by decision 18. On the web, a `use` is E0907
+
+**Why:** A shell reads its own syntax inside arguments, the injection behind Python's `shell=True` warning and BatBadBut. One task that waits covers most uses, as `output()` does in Rust and Deno, and one that starts covers a child spoken to in lines, which `codex app-server` and `claude -p --input-format stream-json` need. Both speak lines, so `read_line` is the only read. Standard error passed through keeps a child's failure visible with no thread to drain it. Rust fixed BatBadBut in 1.77.2, so wrapping it inherits the fix. See "Agent programs (M13)" in `research.md`
+
+### Decision 236, 2026-11-12
+
+`std.console` has `console.read_line()`, which gives `text?` from standard input without its line ending, and `none` at the end of input, and `console.write(content)`, which writes with no newline and flushes. It needs no permission, like `print`. On the web, `read_line` gives `none` and `write` goes where `print` goes
+
+**Why:** An interactive program reads the terminal, and shows a prompt on the line where the user types. `print` always ends the line, so a prompt needs `write`. Standard input comes from the user, as arguments do, and `std.args` needs no permission either. A module of its own leaves the prelude unchanged. The line ending is dropped, as Python's `input()` drops it, so the text is ready for `split` or `==`
+
+### Decision 237, 2026-11-12
+
+`http.get` and `http.post` take `headers: list[Header] = []` and `seconds: int = 30`. Each header is checked by the rules the server uses, and a bad one gives `Failed`. `Host`, `Content-Length`, `Content-Type`, `Connection`, and `Transfer-Encoding` cannot be given, since the client writes them. `seconds` is the longest wait for any one read, and must be above 0
+
+**Why:** Most web APIs, OpenRouter included, take a key in `Authorization`. A model can take more than 30 seconds before its first byte, so that call needs a longer wait. The client writes the framing headers itself, so a second copy from the caller could make a request that a proxy and a server read differently, the smuggling that decision 178 guards the server against
+
+### Decision 238, 2026-11-12
+
+`std.json` makes its `Value` choice public, with the variants it already has: `Null`, `Flag`, `Whole`, `Real`, `Str`, `Items`, and `Fields`. `json.tree(raw)` gives `Value or JsonError`, and `json.write_tree(value)` gives text. Both use the reader and the depth limit that `parse` uses. A `Value` cannot yet be a field of a type that `parse` reads
+
+**Why:** A tool call's arguments and a JSON-RPC message's `params` have a shape that depends on the tool or the method, so a program must look before it picks a type. The tree already exists inside `std.json`, so this names it: no new reader, and no compiler change. Reading a `Value` through `parse` would need the derive changed in both front ends, so it waits until a program needs it
+
 ## Open questions
 
 None open now. A question that cannot be settled at once goes here, with

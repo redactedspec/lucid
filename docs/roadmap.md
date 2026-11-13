@@ -178,6 +178,24 @@ Started after M10. Designed by decision 233. No language change.
 
 A VS Code extension: the TextMate grammar the site already uses, and a client for `lucid lsp`. Not designed yet.
 
+## M13: Agent programs (planned)
+
+Designed by decisions 234 to 238. Gives `std` what a command-line agent
+needs: running other programs, reading the terminal, sending headers, and
+JSON of unknown shape. The first such program is the owner's coding agent,
+which lives in its own repository. Build in this order:
+
+- [ ] `std.console`: `read_line` and `write`, by decision 236
+- [ ] `std.process`: `run` and `start`, under the `process` permission, by decision 235
+- [ ] Headers and a read timeout on the `std.http` client, by decision 237
+- [ ] `json.Value` public, with `json.tree` and `json.write_tree`, by decision 238
+- [ ] Golden tests for each, passing on Windows and in WSL, with the Lucid front end matching
+- [ ] `examples/agent.lcd`, the exit test below
+
+**Exit:** `examples/agent.lcd` reads a line from the terminal, runs a
+program through `std.process`, sends an HTTPS request with a header, and
+reads a JSON tree, on Windows and Linux.
+
 ## Later, not planned
 
 macOS, by decision 205. Text from a `list[byte]` in `std`, so the Lucid compiler takes the `std` files held inside the backend in place of `LUCID_STD`, by decision 226. The Lucid compiler for every command, then the `stage0.txt` pin, then deleting the Rust front end, by decisions 214, 219, and 229. Safari, by decision 230. `shared` and `weak`, by decision 213. Native backend in Lucid, LLVM release backend, plain types stored inline, literal types, compile-time evaluation.

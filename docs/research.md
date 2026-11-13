@@ -789,6 +789,16 @@ Decision 233. Written 2026-11-12.
 - **Checked.** 2026-11-12, against the real release assets: `install.sh` in WSL, and `install.ps1` in Windows PowerShell 5.1 and PowerShell 7.6, each installed `lucid 1.0.0`, did nothing on a second run, and installed nothing when the list's hash was wrong. `install.sh` also refused an `http://` URL, and the installed binary ran a program. PowerShell 7 does not read `file://` with `Invoke-WebRequest`, so its test served the list over local HTTP. Not checked: a machine without Rust or Visual Studio, an older glibc, and ARM64 Windows, which the script refuses.
 - **Weak ground.** The release list and the assets have one owner, so the hash guards against a broken or swapped upload, not against that owner. Signing would cover that, and is not done.
 
+## Agent programs (M13)
+
+Decisions 234 to 238. Written 2026-11-12.
+
+- **Backends.** `codex app-server` speaks JSON-RPC over standard input and output, opens with `initialize` and an `initialized` notification, and uses the ChatGPT login of the Codex CLI ([Codex App Server](https://developers.openai.com/codex/app-server)). As reported in February 2026, Anthropic's documentation allows the OAuth token of a Claude subscription only in Claude Code and Claude.ai, so another program must run `claude -p` and not use the token itself ([The Register](https://www.theregister.com/2026/02/20/anthropic_clarifies_ban_third_party_claude_access)). Reports that `claude -p` draws on a separate credit pool from 2026-06-15 come from secondary sources, and were not checked against Anthropic's pages. OpenRouter takes its key in an `Authorization` header, from memory.
+- **No shell.** Before 1.77.2, Rust quoted arguments to `.bat` and `.cmd` files wrongly on Windows, which runs those through `cmd.exe`, so an argument could run a command (CVE-2024-24576, [Rust advisory](https://blog.rust-lang.org/2024/04/09/cve-2024-24576.html)). Since then `Command` gives `InvalidInput` for an argument it cannot quote safely. Python's documentation warns against `shell=True` with untrusted input, from memory.
+- **Search.** Go 1.19 stopped finding a program in the current directory through `PATH`, as a security fix ([os/exec](https://pkg.go.dev/os/exec)). Rust 1.58 took the current directory out of its Windows search, from memory, not read for this entry.
+- **Shape.** Deno's `Deno.Command` has `output()`, which waits and gives everything, and `spawn()`, with a pipe chosen per stream. Its children are not sandboxed, so `--allow-run` is full trust ([Deno.Command](https://docs.deno.com/api/deno/~/Deno.Command)). Rust's `Command` has the same pair, from memory.
+- **Weak ground.** No Lucid program has used a child process yet, so the line-based `Child` is fitted to two programs, `codex app-server` and `claude -p`. Revisit when a third needs bytes, or standard error on its own.
+
 ## Open research
 
 | Topic | Needed by |
