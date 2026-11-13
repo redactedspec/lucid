@@ -104,14 +104,18 @@ task find_header(headers: list[Header], name: text) -> text?
 
 ## Sends a `GET` for `url`, which starts with `http://` or `https://`, and
 ## gives the response, with header names in lowercase. It follows no
-## redirect, so a 3xx response comes back as it is.
-public task get(url: text) -> Response or NetError
-    return fetch("GET", url, "", [])
+## redirect, so a 3xx response comes back as it is. `headers` go with the
+## request, such as `Authorization`, and a `User-Agent` there replaces
+## "lucid". `Host`, `Content-Length`, `Content-Type`, `Connection`, and
+## `Transfer-Encoding` cannot be given, since the client writes them.
+## `seconds`, above 0, is the longest wait for any one read.
+public task get(url: text, headers: list[Header] = [], seconds: int = 30) -> Response or NetError
+    return fetch("GET", url, "", [], headers, seconds)
 
 ## Sends `body` to `url` in a `POST`, as the media type `kind`, such as
-## "application/json".
-public task post(url: text, kind: text, body: list[byte]) -> Response or NetError
-    return fetch("POST", url, kind, body)
+## "application/json". `headers` and `seconds` are as for `get`.
+public task post(url: text, kind: text, body: list[byte], headers: list[Header] = [], seconds: int = 30) -> Response or NetError
+    return fetch("POST", url, kind, body, headers, seconds)
 
 # Where a request goes.
 type Target
@@ -121,10 +125,22 @@ type Target
     # The path and query, which start with `/`.
     path: text
 
-task fetch(method: text, url: text, kind: text, body: list[byte]) -> Response or NetError
+task fetch(method: text, url: text, kind: text, body: list[byte], headers: list[Header], seconds: int) -> Response or NetError
+    if seconds <= 0
+        return Failed(detail: "std.http needs `seconds` above 0")
+    var extra = ""
+    var agent = "lucid"
+    for h in headers
+        let refused = bad_request_header(h)
+        if refused != ""
+            return Failed(detail: "{refused}: {h.name}")
+        if h.name.lower() == "user-agent"
+            agent = h.value
+        else
+            extra = "{extra}{h.name}: {h.value}\r\n"
     let target = try parse_url(url)
     let plain = try net.connect(target.host, target.port)
-    try plain.set_timeout(time.seconds(30))
+    try plain.set_timeout(time.seconds(seconds))
     var connection = plain
     if target.secure
         connection = try plain.secure(target.host)
@@ -133,7 +149,7 @@ task fetch(method: text, url: text, kind: text, body: list[byte]) -> Response or
         host = "{host}:{target.port}"
     # One request for each connection, so the end of a body with no length
     # is where the server closes.
-    var head = "{method} {target.path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: lucid\r\nConnection: close\r\n"
+    var head = "{method} {target.path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: {agent}\r\nConnection: close\r\n{extra}"
     if method == "POST"
         let refused = bad_header(Header(name: "Content-Type", value: kind))
         expect refused == ""
@@ -402,6 +418,18 @@ task bad_header(h: Header) -> text
     for c in h.value
         if c == "\r" or c == "\n"
             return "std.http cannot send a line break in a header"
+    return ""
+
+# Why a caller's request header is refused, or "", by decision 237. The
+# client writes the framing headers, so a second copy could make a request
+# that a proxy and a server read differently.
+task bad_request_header(h: Header) -> text
+    let refused = bad_header(h)
+    if refused != ""
+        return refused
+    let name = h.name.lower()
+    if name == "host" or name == "content-type"
+        return "std.http sets this header itself"
     return ""
 
 # The words for a status, which also serve as the body of a refusal.

@@ -247,6 +247,14 @@ TLS, and the certificate must be for the host and chain to a root
 Mozilla trusts; the check cannot be turned off. Each request uses its own
 connection, and redirects are not followed.
 
+Both take `headers: list[Header] = []`, such as `Authorization`, and
+`seconds: int = 30`, the longest wait for any one read, which must be
+above 0. A `User-Agent` in `headers` replaces `lucid`. Each header is
+checked as the server checks its own, and `Host`, `Content-Length`,
+`Content-Type`, `Connection`, and `Transfer-Encoding` cannot be given,
+since the client writes them. A refused header, or `seconds` of 0 or
+less, gives `Failed` before any connection.
+
 ### std.html
 
 `html.Element(tag, attrs, children)`, `html.Text(content)`,

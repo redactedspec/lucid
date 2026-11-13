@@ -20,3 +20,14 @@ error: the host of a URL is a name or an IPv4 address, with no user name or pass
 error: the port of a URL is from 1 to 65535
 error: the port of a URL is from 1 to 65535
 error: a URL needs a host
+true 200 none [ok]
+true 200 none [ok]
+error: std.http sets this header itself: Host
+error: std.http sets this header itself: content-length
+error: std.http sets this header itself: Content-Type
+error: std.http sets this header itself: Connection
+error: std.http sets this header itself: Transfer-Encoding
+error: std.http cannot send a header with this name: Bad Name
+error: std.http cannot send a line break in a header: X
+error: std.http needs `seconds` above 0
+error: timed out

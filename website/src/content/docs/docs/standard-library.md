@@ -129,7 +129,14 @@ use std.http
 
 let got = try http.get("https://example.com/")
 print got.status
+
+let key = "Bearer token"
+let auth = [http.Header(name: "Authorization", value: key)]
+let answer = try http.get("https://example.com/api", headers: auth, seconds: 120)
+print answer.body_text() else ""
 ```
+
+`headers` cannot hold `Host`, `Content-Length`, `Content-Type`, `Connection`, or `Transfer-Encoding`, which the client writes itself. `seconds`, 30 unless given, is the longest wait for any one read.
 
 ## HTML
 

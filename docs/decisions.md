@@ -1428,7 +1428,7 @@ Milestone M13 gives `std` four things a command-line agent needs: `std.process`,
 
 ### Decision 237, 2026-11-12
 
-`http.get` and `http.post` take `headers: list[Header] = []` and `seconds: int = 30`. Each header is checked by the rules the server uses, and a bad one gives `Failed`. `Host`, `Content-Length`, `Content-Type`, `Connection`, and `Transfer-Encoding` cannot be given, since the client writes them. `seconds` is the longest wait for any one read, and must be above 0
+`http.get` and `http.post` take `headers: list[Header] = []` and `seconds: int = 30`. Each header is checked by the rules the server uses, and a bad one gives `Failed`. `Host`, `Content-Length`, `Content-Type`, `Connection`, and `Transfer-Encoding` cannot be given, since the client writes them. `seconds` is the longest wait for any one read, and must be above 0. A `User-Agent` given replaces the client's `lucid`, so a request never has two
 
 **Why:** Most web APIs, OpenRouter included, take a key in `Authorization`. A model can take more than 30 seconds before its first byte, so that call needs a longer wait. The client writes the framing headers itself, so a second copy from the caller could make a request that a proxy and a server read differently, the smuggling that decision 178 guards the server against
 

@@ -6,6 +6,7 @@ use std.http.Response
 use std.net
 use std.net.Listener
 use std.net.NetError
+use std.time
 
 # Accepts one connection, reads as many bytes as `want` has, answers `reply`,
 # and tells if the request was `want`. The connection closes when this task
@@ -77,3 +78,34 @@ print show(http.get("http://[::1]/"))
 print show(http.get("http://a:0/"))
 print show(http.get("http://a:70000/"))
 print show(http.get("http://:80/"))
+
+# Headers from the caller, by decision 237. A `User-Agent` replaces the
+# default, and the rest follow the client's own.
+let base = "http://127.0.0.1:{listener.port}"
+let mine = [http.Header(name: "Authorization", value: "Bearer k"), http.Header(name: "user-agent", value: "agent/1"), http.Header(name: "X-Two", value: "2")]
+let start = "Host: 127.0.0.1:{listener.port}\r\nUser-Agent: agent/1\r\nConnection: close\r\nAuthorization: Bearer k\r\nX-Two: 2\r\n"
+let answer = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+let checked_get = spawn fake(listener, "GET /h HTTP/1.1\r\n{start}\r\n", answer)
+let got_get = http.get("{base}/h", headers: mine, seconds: 5)
+print "{checked_get.wait()} {show(got_get)}"
+let checked_post = spawn fake(listener, "POST /p HTTP/1.1\r\n{start}Content-Type: text/plain\r\nContent-Length: 2\r\n\r\nhi", answer)
+let got_post = http.post("{base}/p", "text/plain", "hi".bytes(), headers: mine)
+print "{checked_post.wait()} {show(got_post)}"
+
+# Headers and waits that are refused before any connection.
+for name in ["Host", "content-length", "Content-Type", "Connection", "Transfer-Encoding", "Bad Name"]
+    print show(http.get("http://a/", headers: [http.Header(name: name, value: "1")]))
+print show(http.get("http://a/", headers: [http.Header(name: "X", value: "a\r\nY: 1")]))
+print show(http.get("http://a/", seconds: 0))
+
+# A server that never answers runs out the wait for a read.
+task silent(listener: Listener) -> bool
+    let connection = listener.accept()
+    if connection is NetError
+        return false
+    time.sleep(time.seconds(2))
+    return true
+
+let quiet = spawn silent(listener)
+print show(http.get("{base}/", seconds: 1))
+let waited = quiet.wait()
