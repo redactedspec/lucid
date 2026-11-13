@@ -178,7 +178,7 @@ Started after M10. Designed by decision 233. No language change.
 
 A VS Code extension: the TextMate grammar the site already uses, and a client for `lucid lsp`. Not designed yet.
 
-## M13: Agent programs (active)
+## M13: Agent programs (done)
 
 Designed by decisions 234 to 238. Gives `std` what a command-line agent
 needs: running other programs, reading the terminal, sending headers, and
@@ -189,8 +189,8 @@ which lives in its own repository. Build in this order:
 - [x] `std.process`: `run` and `start`, under the `process` permission, by decision 235
 - [x] Headers and a read timeout on the `std.http` client, by decision 237
 - [x] `json.Value` public, with `json.tree` and `json.write_tree`, by decision 238
-- [ ] Golden tests for each, passing on Windows and in WSL, with the Lucid front end matching
-- [x] `examples/agent.lcd`, the exit test below. Works on Windows; Linux waits for the WSL run
+- [x] Golden tests for each, passing on Windows and in WSL, with the Lucid front end matching
+- [x] `examples/agent.lcd`, the exit test below, checked on Windows and in WSL
 
 **Exit:** `examples/agent.lcd` reads a line from the terminal, runs a
 program through `std.process`, sends an HTTPS request with a header, and
